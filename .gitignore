@@ -1,0 +1,4 @@
+build
+src/.deps
+libwolfpsa.a
+test-psa-api/psa-arch-tests

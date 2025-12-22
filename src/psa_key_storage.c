@@ -1,0 +1,1526 @@
+/* psa_key_storage.c
+ *
+ * Copyright (C) 2025 wolfSSL Inc.
+ *
+ * This file is part of wolfSSL.
+ *
+ * wolfSSL is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * wolfSSL is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
+ */
+
+#ifdef HAVE_CONFIG_H
+    #include <config.h>
+#endif
+
+#include <wolfssl/wolfcrypt/settings.h>
+
+#if defined(WOLFSSL_PSA_ENGINE)
+
+#include <psa/crypto.h>
+#include <psa_key_storage.h>
+#include <psa_store.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/wolfcrypt/types.h>
+#include <wolfssl/wolfcrypt/wc_port.h>
+#include <wolfssl/wolfcrypt/logging.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/wolfcrypt/mem_track.h>
+
+#ifdef WOLFPSA_DEBUG_IMPORT
+#include <stdio.h>
+#endif
+#include <wolfssl/wolfcrypt/rsa.h>
+#include <wolfssl/wolfcrypt/ecc.h>
+
+/* Key storage state */
+static int g_key_storage_initialized = 0;
+static psa_key_id_t g_next_key_id = 1;
+
+typedef struct wolfpsa_volatile_key_node {
+    psa_key_id_t id;
+    psa_key_attributes_t attributes;
+    uint8_t* data;
+    size_t data_length;
+    struct wolfpsa_volatile_key_node* next;
+} wolfpsa_volatile_key_node;
+
+static wolfpsa_volatile_key_node* g_volatile_keys = NULL;
+
+/* Internal init state from psa_crypto_init() */
+extern int wolfPSA_CryptoIsInitialized(void);
+extern int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits);
+psa_status_t psa_asymmetric_generate_key_rsa(psa_key_type_t key_type,
+                                            size_t key_bits,
+                                            uint8_t *private_key,
+                                            size_t private_key_size,
+                                            size_t *private_key_length,
+                                            uint8_t *public_key,
+                                            size_t public_key_size,
+                                            size_t *public_key_length);
+psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
+                                            size_t key_bits,
+                                            uint8_t *private_key,
+                                            size_t private_key_size,
+                                            size_t *private_key_length,
+                                            uint8_t *public_key,
+                                            size_t public_key_size,
+                                            size_t *public_key_length);
+
+static psa_status_t psa_wc_error_to_psa_status(int ret)
+{
+    psa_status_t status;
+
+    if (ret == 0) {
+        return PSA_SUCCESS;
+    }
+
+    switch (ret) {
+        case BAD_FUNC_ARG:
+            status = PSA_ERROR_INVALID_ARGUMENT;
+            break;
+        case BUFFER_E:
+        case RSA_BUFFER_E:
+            status = PSA_ERROR_BUFFER_TOO_SMALL;
+            break;
+        case MEMORY_E:
+            status = PSA_ERROR_INSUFFICIENT_MEMORY;
+            break;
+        case NOT_COMPILED_IN:
+            status = PSA_ERROR_NOT_SUPPORTED;
+            break;
+        case BAD_STATE_E:
+            status = PSA_ERROR_BAD_STATE;
+            break;
+        default:
+            status = PSA_ERROR_GENERIC_ERROR;
+            break;
+    }
+
+    return status;
+}
+
+static int wolfpsa_usage_flags_valid(psa_key_usage_t usage)
+{
+    psa_key_usage_t mask = PSA_KEY_USAGE_EXPORT |
+                           PSA_KEY_USAGE_COPY |
+                           PSA_KEY_USAGE_ENCRYPT |
+                           PSA_KEY_USAGE_DECRYPT |
+                           PSA_KEY_USAGE_SIGN_MESSAGE |
+                           PSA_KEY_USAGE_VERIFY_MESSAGE |
+                           PSA_KEY_USAGE_SIGN_HASH |
+                           PSA_KEY_USAGE_VERIFY_HASH |
+                           PSA_KEY_USAGE_DERIVE |
+                           PSA_KEY_USAGE_VERIFY_DERIVATION;
+
+    return (usage & ~mask) == 0;
+}
+
+static wolfpsa_volatile_key_node* wolfpsa_volatile_find(psa_key_id_t key_id)
+{
+    wolfpsa_volatile_key_node* cur = g_volatile_keys;
+
+    while (cur != NULL) {
+        if (cur->id == key_id) {
+            return cur;
+        }
+        cur = cur->next;
+    }
+
+    return NULL;
+}
+
+static psa_status_t wolfpsa_volatile_store(psa_key_id_t key_id,
+                                           const psa_key_attributes_t* attributes,
+                                           const uint8_t* data,
+                                           size_t data_length)
+{
+    wolfpsa_volatile_key_node* node;
+
+    if (attributes == NULL || data == NULL || data_length == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (wolfpsa_volatile_find(key_id) != NULL) {
+        return PSA_ERROR_ALREADY_EXISTS;
+    }
+
+    node = (wolfpsa_volatile_key_node*)XMALLOC(sizeof(*node), NULL,
+                                               DYNAMIC_TYPE_TMP_BUFFER);
+    if (node == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+    XMEMSET(node, 0, sizeof(*node));
+
+    node->data = (uint8_t*)XMALLOC(data_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (node->data == NULL) {
+        XFREE(node, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    XMEMCPY(node->data, data, data_length);
+    node->data_length = data_length;
+    node->attributes = *attributes;
+    node->id = key_id;
+
+    node->next = g_volatile_keys;
+    g_volatile_keys = node;
+
+    return PSA_SUCCESS;
+}
+
+static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
+{
+    wolfpsa_volatile_key_node* cur = g_volatile_keys;
+    wolfpsa_volatile_key_node* prev = NULL;
+
+    while (cur != NULL) {
+        if (cur->id == key_id) {
+            if (prev != NULL) {
+                prev->next = cur->next;
+            }
+            else {
+                g_volatile_keys = cur->next;
+            }
+            if (cur->data != NULL) {
+                XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            }
+            XMEMSET(cur, 0, sizeof(*cur));
+            XFREE(cur, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return PSA_SUCCESS;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    return PSA_ERROR_INVALID_HANDLE;
+}
+
+static psa_status_t wolfpsa_volatile_get(psa_key_id_t key_id,
+                                        psa_key_attributes_t* attributes,
+                                        uint8_t** key_data,
+                                        size_t* key_data_length)
+{
+    wolfpsa_volatile_key_node* node;
+
+    if (key_data == NULL || key_data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    *key_data = NULL;
+    *key_data_length = 0;
+
+    node = wolfpsa_volatile_find(key_id);
+    if (node == NULL) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+
+    if (attributes != NULL) {
+        *attributes = node->attributes;
+    }
+
+    if (node->data_length == 0 || node->data == NULL) {
+        return PSA_ERROR_DATA_INVALID;
+    }
+
+    *key_data = (uint8_t*)XMALLOC(node->data_length, NULL,
+                                  DYNAMIC_TYPE_TMP_BUFFER);
+    if (*key_data == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    XMEMCPY(*key_data, node->data, node->data_length);
+    *key_data_length = node->data_length;
+
+    return PSA_SUCCESS;
+}
+
+static psa_status_t wolfpsa_volatile_get_attributes(psa_key_id_t key_id,
+                                                    psa_key_attributes_t* attributes)
+{
+    wolfpsa_volatile_key_node* node;
+
+    if (attributes == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    node = wolfpsa_volatile_find(key_id);
+    if (node == NULL) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+
+    *attributes = node->attributes;
+    return PSA_SUCCESS;
+}
+
+static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
+                                           const uint8_t* data,
+                                           size_t data_length)
+{
+    if (attr == NULL || data == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (attr->bits != 0) {
+        return PSA_SUCCESS;
+    }
+
+    if (attr->type == PSA_KEY_TYPE_AES ||
+        attr->type == PSA_KEY_TYPE_DES ||
+        attr->type == PSA_KEY_TYPE_HMAC ||
+        attr->type == PSA_KEY_TYPE_RAW_DATA ||
+        attr->type == PSA_KEY_TYPE_CHACHA20 ||
+        attr->type == PSA_KEY_TYPE_DERIVE ||
+        attr->type == PSA_KEY_TYPE_PASSWORD ||
+        attr->type == PSA_KEY_TYPE_PASSWORD_HASH ||
+        attr->type == PSA_KEY_TYPE_PEPPER) {
+        attr->bits = (psa_key_bits_t)(data_length * 8U);
+        return PSA_SUCCESS;
+    }
+
+    if (PSA_KEY_TYPE_IS_ECC(attr->type)) {
+        if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr->type)) {
+            if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            attr->bits = (psa_key_bits_t)(((data_length - 1u) / 2u) * 8u);
+        }
+        else {
+            attr->bits = (psa_key_bits_t)(data_length * 8U);
+        }
+        return PSA_SUCCESS;
+    }
+
+#ifndef NO_RSA
+    if (PSA_KEY_TYPE_IS_RSA(attr->type)) {
+        RsaKey rsa;
+        word32 idx = 0;
+        int ret;
+        int size;
+
+        ret = wc_InitRsaKey(&rsa, NULL);
+        if (ret != 0) {
+            return psa_wc_error_to_psa_status(ret);
+        }
+
+        if (attr->type == PSA_KEY_TYPE_RSA_PUBLIC_KEY) {
+            ret = wc_RsaPublicKeyDecode(data, &idx, &rsa, (word32)data_length);
+        }
+        else {
+            ret = wc_RsaPrivateKeyDecode(data, &idx, &rsa, (word32)data_length);
+        }
+
+        if (ret == 0) {
+            size = wc_RsaEncryptSize(&rsa);
+            if (size <= 0) {
+                ret = BAD_FUNC_ARG;
+            }
+            else {
+                attr->bits = (psa_key_bits_t)((size_t)size * 8U);
+            }
+        }
+
+        wc_FreeRsaKey(&rsa);
+        return ret == 0 ? PSA_SUCCESS : psa_wc_error_to_psa_status(ret);
+    }
+#endif
+
+    if (PSA_KEY_TYPE_IS_DH(attr->type)) {
+        attr->bits = (psa_key_bits_t)(data_length * 8U);
+        return PSA_SUCCESS;
+    }
+
+    return PSA_ERROR_INVALID_ARGUMENT;
+}
+
+#ifndef NO_RSA
+static size_t psa_der_len_size(size_t len)
+{
+    size_t size = 1;
+
+    if (len < 128) {
+        return size;
+    }
+
+    while (len > 0) {
+        size++;
+        len >>= 8;
+    }
+
+    return size;
+}
+
+static size_t psa_der_write_len(uint8_t* out, size_t len)
+{
+    if (len < 128) {
+        out[0] = (uint8_t)len;
+        return 1;
+    }
+    else {
+        size_t i = 0;
+        size_t tmp = len;
+
+        while (tmp > 0) {
+            i++;
+            tmp >>= 8;
+        }
+
+        out[0] = (uint8_t)(0x80 | i);
+        while (i > 0) {
+            out[i] = (uint8_t)(len & 0xFF);
+            len >>= 8;
+            i--;
+        }
+
+        return (size_t)out[0] - 0x80 + 1;
+    }
+}
+
+static size_t psa_der_int_size(const uint8_t* val, size_t len)
+{
+    size_t offset = 0;
+    size_t value_len;
+    int add_zero = 0;
+
+    while (offset < len && val[offset] == 0x00) {
+        offset++;
+    }
+
+    if (offset == len) {
+        return 3;
+    }
+
+    value_len = len - offset;
+    if (val[offset] & 0x80) {
+        add_zero = 1;
+    }
+
+    return 1 + psa_der_len_size(value_len + (size_t)add_zero) +
+           value_len + (size_t)add_zero;
+}
+
+static size_t psa_der_write_int(uint8_t* out, const uint8_t* val, size_t len)
+{
+    size_t offset = 0;
+    size_t value_len;
+    size_t len_bytes;
+    int add_zero = 0;
+
+    while (offset < len && val[offset] == 0x00) {
+        offset++;
+    }
+
+    out[0] = 0x02;
+    if (offset == len) {
+        out[1] = 0x01;
+        out[2] = 0x00;
+        return 3;
+    }
+
+    value_len = len - offset;
+    if (val[offset] & 0x80) {
+        add_zero = 1;
+    }
+
+    len_bytes = psa_der_write_len(out + 1, value_len + (size_t)add_zero);
+    if (add_zero) {
+        out[1 + len_bytes] = 0x00;
+        XMEMCPY(out + 1 + len_bytes + 1, val + offset, value_len);
+        return 1 + len_bytes + 1 + value_len;
+    }
+
+    XMEMCPY(out + 1 + len_bytes, val + offset, value_len);
+    return 1 + len_bytes + value_len;
+}
+#endif /* !NO_RSA */
+
+/* Initialize the PSA key storage subsystem */
+psa_status_t psa_key_storage_init(const wc_KeyVault_Callbacks* callbacks)
+{
+    (void)callbacks;
+    g_key_storage_initialized = 1;
+    return PSA_SUCCESS;
+}
+
+/* Cleanup the PSA key storage subsystem */
+void psa_key_storage_cleanup(void)
+{
+    wolfpsa_volatile_key_node* cur = g_volatile_keys;
+    while (cur != NULL) {
+        wolfpsa_volatile_key_node* next = cur->next;
+        if (cur->data != NULL) {
+            XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        }
+        XMEMSET(cur, 0, sizeof(*cur));
+        XFREE(cur, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        cur = next;
+    }
+    g_volatile_keys = NULL;
+    g_key_storage_initialized = 0;
+}
+
+/* Check if the key storage is initialized */
+static psa_status_t psa_key_storage_check_init(void)
+{
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+
+    if (!g_key_storage_initialized) {
+        (void)psa_key_storage_init(NULL);
+    }
+    
+    return PSA_SUCCESS;
+}
+
+#ifdef WOLFPSA_DEBUG_IMPORT
+static void wolfpsa_debug_import_reason(const char* reason,
+                                        const psa_key_attributes_t* attr,
+                                        size_t data_length)
+{
+    if (attr == NULL) {
+        fprintf(stderr, "wolfpsa_import_key: %s (null attributes)\n", reason);
+        return;
+    }
+    fprintf(stderr,
+            "wolfpsa_import_key: %s type=0x%08x bits=%u alg=0x%08x usage=0x%08x data_len=%zu\n",
+            reason,
+            (unsigned)attr->type,
+            (unsigned)attr->bits,
+            (unsigned)attr->policy.alg,
+            (unsigned)attr->policy.usage,
+            data_length);
+}
+#else
+#define wolfpsa_debug_import_reason(reason, attr, data_length) ((void)0)
+#endif
+
+/* Serialize key attributes to a buffer */
+static psa_status_t psa_key_attributes_serialize(
+    const psa_key_attributes_t* attributes,
+    uint8_t* buffer,
+    size_t buffer_size,
+    size_t* buffer_length)
+{
+    size_t required_size;
+    
+    /* Check parameters */
+    if (attributes == NULL || buffer == NULL || buffer_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Calculate required size */
+    required_size = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                    sizeof(psa_key_lifetime_t);
+    
+    /* Check buffer size */
+    if (buffer_size < required_size) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    
+    /* Serialize key attributes */
+    XMEMCPY(buffer, &attributes->type, sizeof(psa_key_type_t));
+    buffer += sizeof(psa_key_type_t);
+    
+    XMEMCPY(buffer, &attributes->bits, sizeof(psa_key_bits_t));
+    buffer += sizeof(psa_key_bits_t);
+    
+    XMEMCPY(buffer, &attributes->policy.usage,
+            sizeof(psa_key_usage_t));
+    buffer += sizeof(psa_key_usage_t);
+    
+    XMEMCPY(buffer, &attributes->policy.alg,
+            sizeof(psa_algorithm_t));
+    buffer += sizeof(psa_algorithm_t);
+    
+    XMEMCPY(buffer, &attributes->lifetime, sizeof(psa_key_lifetime_t));
+    
+    *buffer_length = required_size;
+    
+    return PSA_SUCCESS;
+}
+
+/* Deserialize key attributes from a buffer */
+static psa_status_t psa_key_attributes_deserialize(
+    const uint8_t* buffer,
+    size_t buffer_length,
+    psa_key_attributes_t* attributes)
+{
+    size_t required_size;
+    
+    /* Check parameters */
+    if (buffer == NULL || attributes == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Calculate required size */
+    required_size = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                    sizeof(psa_key_lifetime_t);
+    
+    /* Check buffer length */
+    if (buffer_length < required_size) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Deserialize key attributes */
+    XMEMCPY(&attributes->type, buffer, sizeof(psa_key_type_t));
+    buffer += sizeof(psa_key_type_t);
+    
+    XMEMCPY(&attributes->bits, buffer, sizeof(psa_key_bits_t));
+    buffer += sizeof(psa_key_bits_t);
+    
+    XMEMCPY(&attributes->policy.usage, buffer,
+            sizeof(psa_key_usage_t));
+    buffer += sizeof(psa_key_usage_t);
+    
+    XMEMCPY(&attributes->policy.alg, buffer,
+            sizeof(psa_algorithm_t));
+    buffer += sizeof(psa_algorithm_t);
+    
+    XMEMCPY(&attributes->lifetime, buffer, sizeof(psa_key_lifetime_t));
+    
+    return PSA_SUCCESS;
+}
+
+psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
+                                 psa_key_attributes_t* attributes,
+                                 uint8_t** key_data,
+                                 size_t* key_data_length)
+{
+    psa_status_t status;
+    uint8_t header[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                   sizeof(psa_key_lifetime_t) + sizeof(size_t)];
+    size_t attr_length;
+    int ret;
+    void* store = NULL;
+
+    if (key_data == NULL || key_data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    *key_data = NULL;
+    *key_data_length = 0;
+
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    status = wolfpsa_volatile_get(key_id, attributes, key_data, key_data_length);
+    if (status == PSA_SUCCESS) {
+        return PSA_SUCCESS;
+    }
+
+    attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                  sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                  sizeof(psa_key_lifetime_t);
+
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1, &store);
+    if (ret == -4) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+    if (ret != 0) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    if (ret != (int)(attr_length + sizeof(size_t))) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    if (attributes != NULL) {
+        status = psa_key_attributes_deserialize(header, attr_length, attributes);
+        if (status != PSA_SUCCESS) {
+            wolfPSA_Store_Close(store);
+            return status;
+        }
+    }
+
+    XMEMCPY(key_data_length, header + attr_length, sizeof(size_t));
+    if (*key_data_length == 0) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_DATA_INVALID;
+    }
+
+    *key_data = (uint8_t*)XMALLOC(*key_data_length, NULL,
+                                  DYNAMIC_TYPE_TMP_BUFFER);
+    if (*key_data == NULL) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    ret = wolfPSA_Store_Read(store, *key_data, (int)*key_data_length);
+    wolfPSA_Store_Close(store);
+    store = NULL;
+    if (ret != (int)*key_data_length) {
+        XFREE(*key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    return PSA_SUCCESS;
+}
+
+void wolfpsa_free_key_data(uint8_t* key_data)
+{
+    if (key_data != NULL) {
+        XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+}
+
+/* Import a key into the PSA key storage */
+psa_status_t psa_import_key(
+    const psa_key_attributes_t* attributes,
+    const uint8_t* data,
+    size_t data_length,
+    psa_key_id_t* key_id)
+{
+    psa_status_t status;
+    uint8_t* buffer = NULL;
+    size_t buffer_size;
+    size_t attr_length;
+    int ret;
+    void* store = NULL;
+    psa_key_attributes_t attr;
+    
+    /* Check parameters */
+    if (attributes == NULL || data == NULL || key_id == NULL) {
+        wolfpsa_debug_import_reason("invalid parameters", attributes, data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Always treat key_id as output-only. */
+    *key_id = PSA_KEY_ID_NULL;
+
+    attr = *attributes;
+
+    if (attr.type == PSA_KEY_TYPE_NONE) {
+        wolfpsa_debug_import_reason("unsupported key type", &attr, data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if (attr.bits == 0) {
+        status = wolfpsa_infer_key_bits(&attr, data, data_length);
+        if (status != PSA_SUCCESS) {
+            wolfpsa_debug_import_reason("missing key bits", &attr, data_length);
+            return status;
+        }
+    }
+
+    if (attr.type == PSA_KEY_TYPE_AES) {
+        if (attr.bits != 128 && attr.bits != 192 &&
+            attr.bits != 256) {
+            wolfpsa_debug_import_reason("invalid AES key bits", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (data_length != 16 && data_length != 24 && data_length != 32) {
+            wolfpsa_debug_import_reason("invalid AES key length", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("AES bits/length mismatch", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    else if (attr.type == PSA_KEY_TYPE_DES) {
+        if (data_length != 16 && data_length != 24) {
+            wolfpsa_debug_import_reason("invalid DES key length", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("DES bits/length mismatch", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    
+    /* Check if the key storage is initialized */
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    
+    {
+        psa_key_id_t attr_id = (psa_key_id_t)psa_get_key_id(&attr);
+        if (attr_id != PSA_KEY_ID_NULL) {
+            *key_id = attr_id;
+        }
+        else {
+            *key_id = g_next_key_id++;
+        }
+    }
+
+    /* Allocate buffer for key data and attributes */
+    buffer_size = data_length + sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                 sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                 sizeof(psa_key_lifetime_t) + sizeof(size_t);
+    
+    buffer = (uint8_t*)XMALLOC(buffer_size, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (buffer == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+    
+    /* Serialize key attributes */
+    status = psa_key_attributes_serialize(&attr, buffer, buffer_size, &attr_length);
+    if (status != PSA_SUCCESS) {
+        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return status;
+    }
+    
+    /* Store key data length */
+    XMEMCPY(buffer + attr_length, &data_length, sizeof(size_t));
+    
+    /* Store key data */
+    XMEMCPY(buffer + attr_length + sizeof(size_t), data, data_length);
+    
+    if (PSA_KEY_LIFETIME_IS_VOLATILE(attr.lifetime)) {
+        status = wolfpsa_volatile_store(*key_id, &attr, data, data_length);
+        ret = status == PSA_SUCCESS
+            ? (int)(attr_length + sizeof(size_t) + data_length)
+            : -1;
+    }
+    else {
+        /* Open and write key to persistent storage */
+        ret = wolfPSA_Store_OpenSz(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
+                                  0, (int)data_length, &store);
+        if (ret == 0) {
+            ret = wolfPSA_Store_Write(store, buffer,
+                                      (int)(attr_length + sizeof(size_t) + data_length));
+            wolfPSA_Store_Close(store);
+            store = NULL;
+        }
+    }
+    
+    XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    
+    if (ret < 0 || (size_t)ret != (attr_length + sizeof(size_t) + data_length)) {
+        *key_id = PSA_KEY_ID_NULL;
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+    
+    return PSA_SUCCESS;
+}
+
+/* Generate a key and store it in the PSA key storage */
+psa_status_t psa_generate_key(
+    const psa_key_attributes_t* attributes,
+    psa_key_id_t* key_id)
+{
+    psa_status_t status;
+    psa_key_type_t key_type;
+    psa_key_bits_t key_bits;
+    uint8_t *key_data = NULL;
+    size_t key_data_length = 0;
+
+    if (attributes == NULL || key_id == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    key_type = attributes->type;
+    key_bits = attributes->bits;
+
+    if (key_bits == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (PSA_KEY_TYPE_IS_PUBLIC_KEY(key_type)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!wolfpsa_usage_flags_valid(psa_get_key_usage_flags(attributes))) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (PSA_KEY_TYPE_IS_UNSTRUCTURED(key_type) ||
+        key_type == PSA_KEY_TYPE_HMAC ||
+        key_type == PSA_KEY_TYPE_AES ||
+        key_type == PSA_KEY_TYPE_DES ||
+        key_type == PSA_KEY_TYPE_CHACHA20) {
+        key_data_length = PSA_BITS_TO_BYTES(key_bits);
+        if (key_data_length == 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        key_data = (uint8_t *)XMALLOC(key_data_length, NULL,
+                                      DYNAMIC_TYPE_TMP_BUFFER);
+        if (key_data == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = psa_generate_random(key_data, key_data_length);
+        if (status != PSA_SUCCESS) {
+            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return status;
+        }
+
+        status = psa_import_key(attributes, key_data, key_data_length, key_id);
+        XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return status;
+    }
+
+    if (key_type == PSA_KEY_TYPE_RSA_KEY_PAIR) {
+#ifndef NO_RSA
+        size_t priv_buf_size = PSA_KEY_EXPORT_RSA_KEY_PAIR_MAX_SIZE(key_bits);
+        size_t priv_len = 0;
+
+        key_data = (uint8_t *)XMALLOC(priv_buf_size, NULL,
+                                      DYNAMIC_TYPE_TMP_BUFFER);
+        if (key_data == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = psa_asymmetric_generate_key_rsa(key_type, key_bits,
+                                                 key_data, priv_buf_size,
+                                                 &priv_len,
+                                                 NULL, 0, NULL);
+        if (status != PSA_SUCCESS) {
+            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return status;
+        }
+
+        status = psa_import_key(attributes, key_data, priv_len, key_id);
+        XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return status;
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
+    }
+
+    if (PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
+#ifdef HAVE_ECC
+        size_t priv_buf_size = PSA_KEY_EXPORT_ECC_KEY_PAIR_MAX_SIZE(key_bits);
+        size_t pub_buf_size = PSA_KEY_EXPORT_ECC_PUBLIC_KEY_MAX_SIZE(key_bits);
+        size_t priv_len = 0;
+        size_t pub_len = 0;
+        uint8_t *pub_buf = NULL;
+
+        key_data = (uint8_t *)XMALLOC(priv_buf_size, NULL,
+                                      DYNAMIC_TYPE_TMP_BUFFER);
+        if (key_data == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        pub_buf = (uint8_t *)XMALLOC(pub_buf_size, NULL,
+                                     DYNAMIC_TYPE_TMP_BUFFER);
+        if (pub_buf == NULL) {
+            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = psa_asymmetric_generate_key_ecc(key_type, key_bits,
+                                                 key_data, priv_buf_size,
+                                                 &priv_len,
+                                                 pub_buf, pub_buf_size,
+                                                 &pub_len);
+        XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        if (status != PSA_SUCCESS) {
+            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return status;
+        }
+
+        status = psa_import_key(attributes, key_data, priv_len, key_id);
+        XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return status;
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
+    }
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+/* Destroy a key from the PSA key storage */
+psa_status_t psa_destroy_key(psa_key_id_t key_id)
+{
+    psa_status_t status;
+    int ret;
+
+    if (key_id == PSA_KEY_ID_NULL) {
+        return PSA_SUCCESS;
+    }
+    
+    /* Check if the key storage is initialized */
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    status = wolfpsa_volatile_remove(key_id);
+    if (status == PSA_SUCCESS) {
+        return PSA_SUCCESS;
+    }
+
+    /* Remove key from persistent storage */
+    ret = wolfPSA_Store_Remove(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0);
+    if (ret == -4) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+    if (ret != 0) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+    
+    return PSA_SUCCESS;
+}
+
+/* Export a key from the PSA key storage */
+psa_status_t psa_export_key(
+    psa_key_id_t key_id,
+    uint8_t* data,
+    size_t data_size,
+    size_t* data_length)
+{
+    psa_status_t status;
+    uint8_t header[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                   sizeof(psa_key_lifetime_t) + sizeof(size_t)];
+    size_t key_data_length;
+    size_t attr_length;
+    int ret;
+    void* store = NULL;
+    
+    /* Check parameters */
+    if (data == NULL || data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Check if the key storage is initialized */
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    {
+        psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+        uint8_t* vol_data = NULL;
+        size_t vol_len = 0;
+
+        status = wolfpsa_volatile_get(key_id, &vol_attr, &vol_data, &vol_len);
+        if (status == PSA_SUCCESS) {
+            if ((psa_get_key_usage_flags(&vol_attr) &
+                 PSA_KEY_USAGE_EXPORT) == 0) {
+                wolfpsa_free_key_data(vol_data);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+            if (data_size < vol_len) {
+                wolfpsa_free_key_data(vol_data);
+                return PSA_ERROR_BUFFER_TOO_SMALL;
+            }
+            XMEMCPY(data, vol_data, vol_len);
+            *data_length = vol_len;
+            wolfpsa_free_key_data(vol_data);
+            return PSA_SUCCESS;
+        }
+    }
+    
+    /* Get key info */
+    psa_key_attributes_t attributes;
+    status = psa_get_key_attributes(key_id, &attributes);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    
+    /* Check if the key can be exported */
+    if ((psa_get_key_usage_flags(&attributes) &
+         PSA_KEY_USAGE_EXPORT) == 0) {
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+    
+    /* Calculate attribute length */
+    attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                 sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                 sizeof(psa_key_lifetime_t);
+    
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1, &store);
+    if (ret == -4) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+    if (ret != 0) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    if (ret != (int)(attr_length + sizeof(size_t))) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    /* Get key data length */
+    XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    
+    /* Check if the output buffer is large enough */
+    if (data_size < key_data_length) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    
+    /* Read key data */
+    ret = wolfPSA_Store_Read(store, data, (int)key_data_length);
+    wolfPSA_Store_Close(store);
+    store = NULL;
+    if (ret != (int)key_data_length) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+    *data_length = key_data_length;
+    
+    return PSA_SUCCESS;
+}
+
+/* Export a public key from the PSA key storage */
+psa_status_t psa_export_public_key(
+    psa_key_id_t key_id,
+    uint8_t* data,
+    size_t data_size,
+    size_t* data_length)
+{
+    psa_status_t status;
+    uint8_t header[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                   sizeof(psa_key_lifetime_t) + sizeof(size_t)];
+    psa_key_attributes_t attributes;
+    size_t key_data_length;
+    size_t attr_length;
+    uint8_t* key_data = NULL;
+    int ret;
+    void* store = NULL;
+    int use_volatile = 0;
+
+    if (data == NULL || data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    {
+        psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+        size_t vol_len = 0;
+
+        status = wolfpsa_volatile_get(key_id, &vol_attr, &key_data, &vol_len);
+        if (status == PSA_SUCCESS) {
+            attributes = vol_attr;
+            key_data_length = vol_len;
+            use_volatile = 1;
+        }
+        else {
+            status = psa_get_key_attributes(key_id, &attributes);
+            if (status != PSA_SUCCESS) {
+                return status;
+            }
+        }
+    }
+
+    if (!PSA_KEY_TYPE_IS_RSA(attributes.type) &&
+        !PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!use_volatile) {
+        attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                      sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                      sizeof(psa_key_lifetime_t);
+
+        ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1,
+                                 &store);
+        if (ret == -4) {
+            return PSA_ERROR_INVALID_HANDLE;
+        }
+        if (ret != 0) {
+            return PSA_ERROR_STORAGE_FAILURE;
+        }
+
+        ret = wolfPSA_Store_Read(store, header,
+                                 (int)(attr_length + sizeof(size_t)));
+        if (ret != (int)(attr_length + sizeof(size_t))) {
+            wolfPSA_Store_Close(store);
+            return PSA_ERROR_STORAGE_FAILURE;
+        }
+
+        XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+        key_data = (uint8_t*)XMALLOC(key_data_length, NULL,
+                                     DYNAMIC_TYPE_TMP_BUFFER);
+        if (key_data == NULL) {
+            wolfPSA_Store_Close(store);
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        ret = wolfPSA_Store_Read(store, key_data, (int)key_data_length);
+        wolfPSA_Store_Close(store);
+        store = NULL;
+        if (ret != (int)key_data_length) {
+            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return PSA_ERROR_STORAGE_FAILURE;
+        }
+    }
+
+    if (PSA_KEY_TYPE_IS_RSA(attributes.type)) {
+    #ifndef NO_RSA
+        if (attributes.type == PSA_KEY_TYPE_RSA_PUBLIC_KEY) {
+            if (data_size < key_data_length) {
+                status = PSA_ERROR_BUFFER_TOO_SMALL;
+            }
+            else {
+                XMEMCPY(data, key_data, key_data_length);
+                *data_length = key_data_length;
+                status = PSA_SUCCESS;
+            }
+        }
+        else {
+            RsaKey* rsa = NULL;
+            word32 idx = 0;
+            word32 n_sz = 0;
+            word32 e_sz = 0;
+            byte* n = NULL;
+            byte* e = NULL;
+            size_t n_int_size;
+            size_t e_int_size;
+            size_t seq_len;
+            size_t total_len;
+            uint8_t* out = data;
+
+            rsa = wc_NewRsaKey(NULL, INVALID_DEVID, &ret);
+            if (rsa == NULL) {
+                if (ret == 0) {
+                    ret = MEMORY_E;
+                }
+                status = psa_wc_error_to_psa_status(ret);
+            }
+            else {
+                ret = wc_RsaPrivateKeyDecode(key_data, &idx, rsa,
+                                             (word32)key_data_length);
+                if (ret != 0) {
+                    wc_DeleteRsaKey(rsa, &rsa);
+                    status = psa_wc_error_to_psa_status(ret);
+                }
+                else {
+                    n_sz = (word32)wc_RsaEncryptSize(rsa);
+                    e_sz = n_sz;
+                    n = (byte*)XMALLOC(n_sz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                    e = (byte*)XMALLOC(e_sz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                    if (n == NULL || e == NULL) {
+                        if (n != NULL) {
+                            XFREE(n, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                        }
+                        if (e != NULL) {
+                            XFREE(e, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                        }
+                        wc_DeleteRsaKey(rsa, &rsa);
+                        status = PSA_ERROR_INSUFFICIENT_MEMORY;
+                    }
+                    else {
+                        ret = wc_RsaFlattenPublicKey(rsa, e, &e_sz, n, &n_sz);
+                        wc_DeleteRsaKey(rsa, &rsa);
+                        if (ret != 0) {
+                            XFREE(n, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                            XFREE(e, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                            status = psa_wc_error_to_psa_status(ret);
+                        }
+                        else {
+                            n_int_size = psa_der_int_size(n, (size_t)n_sz);
+                            e_int_size = psa_der_int_size(e, (size_t)e_sz);
+                            seq_len = n_int_size + e_int_size;
+                            total_len = 1 + psa_der_len_size(seq_len) + seq_len;
+                            if (data_size < total_len) {
+                                status = PSA_ERROR_BUFFER_TOO_SMALL;
+                            }
+                            else {
+                                *out++ = 0x30;
+                                out += psa_der_write_len(out, seq_len);
+                                out += psa_der_write_int(out, n, (size_t)n_sz);
+                                out += psa_der_write_int(out, e, (size_t)e_sz);
+                                *data_length = total_len;
+                                status = PSA_SUCCESS;
+                            }
+
+                            XFREE(n, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                            XFREE(e, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                        }
+                    }
+                }
+            }
+        }
+    #else
+        status = PSA_ERROR_NOT_SUPPORTED;
+    #endif
+    }
+    else {
+    #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && defined(HAVE_ECC_KEY_IMPORT)
+        if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attributes.type)) {
+            if (data_size < key_data_length) {
+                status = PSA_ERROR_BUFFER_TOO_SMALL;
+            }
+            else {
+                XMEMCPY(data, key_data, key_data_length);
+                *data_length = key_data_length;
+                status = PSA_SUCCESS;
+            }
+        }
+        else {
+            ecc_key ecc;
+            word32 out_len = (word32)data_size;
+            int curve_id = wc_psa_get_ecc_curve_id(attributes.type,
+                                                   attributes.bits);
+
+            if (curve_id == ECC_CURVE_INVALID) {
+                status = PSA_ERROR_NOT_SUPPORTED;
+            }
+            else if (wc_ecc_init(&ecc) != 0) {
+                status = PSA_ERROR_INSUFFICIENT_MEMORY;
+            }
+            else {
+                ret = wc_ecc_import_private_key_ex(key_data,
+                                                   (word32)key_data_length,
+                                                   NULL, 0, &ecc, curve_id);
+                if (ret != 0) {
+                    wc_ecc_free(&ecc);
+                    status = psa_wc_error_to_psa_status(ret);
+                }
+                else {
+                    ret = wc_ecc_make_pub_ex(&ecc, NULL, NULL);
+                    if (ret != 0) {
+                        wc_ecc_free(&ecc);
+                        status = psa_wc_error_to_psa_status(ret);
+                    }
+                    else {
+                        ret = wc_ecc_export_x963(&ecc, data, &out_len);
+                        wc_ecc_free(&ecc);
+                        if (ret != 0) {
+                            status = psa_wc_error_to_psa_status(ret);
+                        }
+                        else {
+                            *data_length = (size_t)out_len;
+                            status = PSA_SUCCESS;
+                        }
+                    }
+                }
+            }
+        }
+    #else
+        status = PSA_ERROR_NOT_SUPPORTED;
+    #endif
+    }
+
+    XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    return status;
+}
+
+/* Get key attributes from the PSA key storage */
+psa_status_t psa_get_key_attributes(
+    psa_key_id_t key_id,
+    psa_key_attributes_t* attributes)
+{
+    psa_status_t status;
+    uint8_t buffer[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                   sizeof(psa_key_lifetime_t) + sizeof(size_t)];
+    size_t attr_length;
+    int ret;
+    void* store = NULL;
+    
+    /* Check parameters */
+    if (attributes == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Check if the key storage is initialized */
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    status = wolfpsa_volatile_get_attributes(key_id, attributes);
+    if (status == PSA_SUCCESS) {
+        return PSA_SUCCESS;
+    }
+    
+    attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                  sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                  sizeof(psa_key_lifetime_t);
+
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1, &store);
+    if (ret == -4) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+    if (ret != 0) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    ret = wolfPSA_Store_Read(store, buffer, (int)(attr_length + sizeof(size_t)));
+    wolfPSA_Store_Close(store);
+    store = NULL;
+    if (ret != (int)(attr_length + sizeof(size_t))) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    /* Deserialize key attributes */
+    status = psa_key_attributes_deserialize(buffer, attr_length, attributes);
+    return status;
+}
+
+/* Copy a key in the PSA key storage */
+psa_status_t psa_copy_key(
+    psa_key_id_t source_key,
+    const psa_key_attributes_t* attributes,
+    psa_key_id_t* target_key)
+{
+    psa_status_t status;
+    uint8_t header[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                   sizeof(psa_key_lifetime_t) + sizeof(size_t)];
+    uint8_t* buffer = NULL;
+    size_t key_data_length;
+    size_t attr_length;
+    int ret;
+    void* store = NULL;
+    psa_key_attributes_t src_attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t dst_attr;
+    
+    /* Check parameters */
+    if (attributes == NULL || target_key == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    
+    /* Check if the key storage is initialized */
+    status = psa_key_storage_check_init();
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    {
+        psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+        uint8_t* key_data = NULL;
+        size_t key_data_length = 0;
+
+        status = wolfpsa_volatile_get(source_key, &vol_attr,
+                                      &key_data, &key_data_length);
+        if (status == PSA_SUCCESS) {
+            psa_key_attributes_t dst_attr = *attributes;
+
+            if ((psa_get_key_usage_flags(&vol_attr) &
+                 PSA_KEY_USAGE_COPY) == 0) {
+                wolfpsa_free_key_data(key_data);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+
+            if (attributes->type != vol_attr.type) {
+                wolfpsa_free_key_data(key_data);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+
+            if (attributes->bits != 0 && attributes->bits != vol_attr.bits) {
+                wolfpsa_free_key_data(key_data);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+
+            if (attributes->policy.alg != psa_get_key_algorithm(&vol_attr)) {
+                wolfpsa_free_key_data(key_data);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+
+            if (attributes->lifetime != vol_attr.lifetime) {
+                wolfpsa_free_key_data(key_data);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+
+            dst_attr.bits = (dst_attr.bits == 0) ? vol_attr.bits : dst_attr.bits;
+            dst_attr.policy.usage = psa_get_key_usage_flags(&vol_attr) &
+                                    psa_get_key_usage_flags(&dst_attr);
+
+            status = psa_import_key(&dst_attr, key_data,
+                                    key_data_length, target_key);
+            wolfpsa_free_key_data(key_data);
+            return status;
+        }
+    }
+    
+    /* Calculate attribute length */
+    attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                 sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                 sizeof(psa_key_lifetime_t);
+    
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)source_key, 0, 1, &store);
+    if (ret == -4) {
+        return PSA_ERROR_INVALID_HANDLE;
+    }
+    if (ret != 0) {
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    if (ret != (int)(attr_length + sizeof(size_t))) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+
+    status = psa_key_attributes_deserialize(header, attr_length, &src_attr);
+    if (status != PSA_SUCCESS) {
+        wolfPSA_Store_Close(store);
+        return status;
+    }
+
+    if ((psa_get_key_usage_flags(&src_attr) & PSA_KEY_USAGE_COPY) == 0) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    if (attributes->type != src_attr.type) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (attributes->bits != 0 && attributes->bits != src_attr.bits) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (attributes->policy.alg != psa_get_key_algorithm(&src_attr)) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (attributes->lifetime != src_attr.lifetime) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    dst_attr = *attributes;
+    dst_attr.bits = (dst_attr.bits == 0) ? src_attr.bits : dst_attr.bits;
+    dst_attr.policy.usage = psa_get_key_usage_flags(&src_attr) &
+                            psa_get_key_usage_flags(&dst_attr);
+
+    XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    buffer = (uint8_t*)XMALLOC(key_data_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (buffer == NULL) {
+        wolfPSA_Store_Close(store);
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    ret = wolfPSA_Store_Read(store, buffer, (int)key_data_length);
+    wolfPSA_Store_Close(store);
+    store = NULL;
+    if (ret != (int)key_data_length) {
+        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_STORAGE_FAILURE;
+    }
+    
+    /* Import the key with new attributes */
+    status = psa_import_key(&dst_attr, buffer, key_data_length, target_key);
+    
+    XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    
+    return status;
+}
+
+#endif /* WOLFSSL_PSA_ENGINE */
