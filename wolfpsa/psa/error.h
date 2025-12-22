@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
-// SPDX-FileCopyrightText: Copyright 2017-2022 Arm Limited and/or its affiliates <open-source-office@arm.com>
-// SPDX-License-Identifier: Apache-2.0
-
 
 #ifndef PSA_ERROR_H
 #define PSA_ERROR_H
