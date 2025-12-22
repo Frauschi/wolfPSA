@@ -15,7 +15,6 @@ wolfPSA is a PSA Crypto **engine** that implements the PSA Crypto API on
 
 - `src/` : wolfPSA implementation sources.
 - `wolfpsa/` : public headers and `user_settings.h`.
-- `docs/` : project documentation (including PSA compliance notes).
 - `Makefile` : build for `libwolfpsa.a`.
 
 ## Build
