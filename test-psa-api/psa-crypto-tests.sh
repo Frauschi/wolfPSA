@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 PSA_ARCH_TESTS_DIR="${SCRIPT_DIR}/psa-arch-tests"
-PATCH_FILE="${SCRIPT_DIR}/psa-arch-tests_tc_overflow.patch"
+PATCH_FILE="${SCRIPT_DIR}/psa-arch-tests_ec_overflow.patch"
 TARGET_NAME="tgt_dev_apis_wolfpsa"
 TARGET_SRC_DIR="${SCRIPT_DIR}/${TARGET_NAME}"
 TARGET_DST_DIR="${PSA_ARCH_TESTS_DIR}/api-tests/platform/targets/${TARGET_NAME}"
