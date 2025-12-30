@@ -30,6 +30,7 @@
 #include <psa/crypto.h>
 #include <psa_key_storage.h>
 #include <psa_store.h>
+#include "psa_trace.h"
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
@@ -690,6 +691,10 @@ psa_status_t psa_import_key(
     size_t data_length,
     psa_key_id_t* key_id)
 {
+    wolfpsa_trace("psa_import_key(type=0x%08x bits=%u data_len=%zu)",
+                  attributes ? (unsigned)attributes->type : 0U,
+                  attributes ? (unsigned)attributes->bits : 0U,
+                  data_length);
     psa_status_t status;
     uint8_t* buffer = NULL;
     size_t buffer_size;
@@ -819,6 +824,9 @@ psa_status_t psa_generate_key(
     const psa_key_attributes_t* attributes,
     psa_key_id_t* key_id)
 {
+    wolfpsa_trace("psa_generate_key(type=0x%08x bits=%u)",
+                  attributes ? (unsigned)attributes->type : 0U,
+                  attributes ? (unsigned)attributes->bits : 0U);
     psa_status_t status;
     psa_key_type_t key_type;
     psa_key_bits_t key_bits;
@@ -1084,6 +1092,7 @@ psa_status_t psa_export_public_key(
     size_t data_size,
     size_t* data_length)
 {
+    wolfpsa_trace("psa_export_public_key(key=%u)", (unsigned)key_id);
     psa_status_t status;
     uint8_t header[sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +

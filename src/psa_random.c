@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_random.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
@@ -47,6 +48,8 @@ psa_status_t psa_generate_random(uint8_t *output, size_t output_size)
     if (output == NULL && output_size > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+    wolfpsa_trace("psa_generate_random(%zu)", output_size);
     
     /* Initialize the RNG */
     ret = wc_InitRng(&rng);

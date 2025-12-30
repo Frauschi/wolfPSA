@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
@@ -285,6 +286,8 @@ psa_status_t psa_sign_hash(psa_key_id_t key,
                            size_t signature_size,
                            size_t *signature_length)
 {
+    wolfpsa_trace("psa_sign_hash(key=%u alg=0x%08x hash_len=%zu)",
+                  (unsigned)key, (unsigned)alg, hash_length);
     psa_key_attributes_t attributes;
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
@@ -356,6 +359,8 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
                              const uint8_t *signature,
                              size_t signature_length)
 {
+    wolfpsa_trace("psa_verify_hash(key=%u alg=0x%08x hash_len=%zu sig_len=%zu)",
+                  (unsigned)key, (unsigned)alg, hash_length, signature_length);
     psa_key_attributes_t attributes;
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
@@ -617,6 +622,8 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
                                    size_t output_size,
                                    size_t *output_length)
 {
+    wolfpsa_trace("psa_raw_key_agreement(alg=0x%08x key=%u peer_len=%zu)",
+                  (unsigned)alg, (unsigned)private_key, peer_key_length);
     psa_key_attributes_t attributes;
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;

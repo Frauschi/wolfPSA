@@ -6,7 +6,9 @@ PSA_INCLUDE ?=
 
 BUILD_DIR ?= build
 OBJDIR := $(BUILD_DIR)/obj
+OBJDIR_PIC := $(BUILD_DIR)/obj.pic
 LIBNAME := libwolfpsa.a
+SHLIBNAME := libwolfpsa.so
 
 CC ?= cc
 AR ?= ar
@@ -14,6 +16,7 @@ RANLIB ?= ranlib
 
 SRC := $(wildcard src/*.c)
 OBJ := $(patsubst src/%.c,$(OBJDIR)/%.o,$(SRC))
+OBJ_PIC := $(patsubst src/%.c,$(OBJDIR_PIC)/%.o,$(SRC))
 
 WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/aes.c \
@@ -71,6 +74,7 @@ WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wolfmath.c
 
 WOLFCRYPT_OBJ := $(patsubst $(WOLFSSL_PATH)/wolfcrypt/src/%.c,$(OBJDIR)/wolfcrypt_%.o,$(WOLFCRYPT_SRC))
+WOLFCRYPT_OBJ_PIC := $(patsubst $(WOLFSSL_PATH)/wolfcrypt/src/%.c,$(OBJDIR_PIC)/wolfcrypt_%.o,$(WOLFCRYPT_SRC))
 
 WOLFSSL_CPPFLAGS ?= -DWOLFSSL_USER_SETTINGS
 
@@ -92,11 +96,14 @@ LDFLAGS += $(SANITIZE_FLAGS)
 
 .PHONY: all clean
 
-all: $(LIBNAME)
+all: $(LIBNAME) $(SHLIBNAME)
 
 $(LIBNAME): $(OBJ) $(WOLFCRYPT_OBJ)
 	$(AR) rcs $@ $^
 	$(RANLIB) $@
+
+$(SHLIBNAME): $(OBJ_PIC) $(WOLFCRYPT_OBJ_PIC)
+	$(CC) -shared -o $@ $^ $(LDFLAGS)
 
 $(OBJDIR)/%.o: src/%.c
 	@mkdir -p $(OBJDIR)
@@ -106,5 +113,13 @@ $(OBJDIR)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 	@mkdir -p $(OBJDIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
+$(OBJDIR_PIC)/%.o: src/%.c
+	@mkdir -p $(OBJDIR_PIC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+
+$(OBJDIR_PIC)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
+	@mkdir -p $(OBJDIR_PIC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+
 clean:
-	rm -rf $(BUILD_DIR) $(LIBNAME)
+	rm -rf $(BUILD_DIR) $(LIBNAME) $(SHLIBNAME)

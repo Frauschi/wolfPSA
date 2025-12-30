@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_trace.h"
 
 static int g_psa_crypto_initialized = 0;
 
@@ -38,6 +39,7 @@ int wolfPSA_CryptoIsInitialized(void)
 
 psa_status_t psa_crypto_init(void)
 {
+    wolfpsa_trace("psa_crypto_init()");
     g_psa_crypto_initialized = 1;
     return PSA_SUCCESS;
 }

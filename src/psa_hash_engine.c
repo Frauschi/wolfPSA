@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -304,6 +305,8 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
     if (operation == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+    wolfpsa_trace("psa_hash_setup(alg=0x%08x)", (unsigned)alg);
 
     if (!PSA_ALG_IS_HASH(alg)) {
         return PSA_ERROR_INVALID_ARGUMENT;

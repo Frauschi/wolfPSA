@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/aes.h>
@@ -235,6 +236,9 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     if (operation == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+    wolfpsa_trace("psa_cipher_encrypt_setup(key=%u alg=0x%08x)",
+                  (unsigned)key, (unsigned)alg);
     if (operation->opaque != (uintptr_t)NULL) {
         return PSA_ERROR_BAD_STATE;
     }
@@ -346,6 +350,9 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     if (operation == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+    wolfpsa_trace("psa_cipher_decrypt_setup(key=%u alg=0x%08x)",
+                  (unsigned)key, (unsigned)alg);
     if (operation->opaque != (uintptr_t)NULL) {
         return PSA_ERROR_BAD_STATE;
     }
