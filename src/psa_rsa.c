@@ -625,4 +625,116 @@ psa_status_t psa_asymmetric_export_public_key_rsa(psa_key_type_t key_type,
     return PSA_SUCCESS;
 }
 
+#else /* WOLFSSL_PSA_ENGINE && NO_RSA */
+
+#include <psa/crypto.h>
+
+psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
+                                    size_t key_bits,
+                                    const uint8_t *key_buffer,
+                                    size_t key_buffer_size,
+                                    psa_algorithm_t alg,
+                                    const uint8_t *hash,
+                                    size_t hash_length,
+                                    uint8_t *signature,
+                                    size_t signature_size,
+                                    size_t *signature_length)
+{
+    (void)key_type;
+    (void)key_bits;
+    (void)key_buffer;
+    (void)key_buffer_size;
+    (void)alg;
+    (void)hash;
+    (void)hash_length;
+    (void)signature;
+    (void)signature_size;
+    if (signature_length != NULL) {
+        *signature_length = 0;
+    }
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
+                                      size_t key_bits,
+                                      const uint8_t *key_buffer,
+                                      size_t key_buffer_size,
+                                      psa_algorithm_t alg,
+                                      const uint8_t *hash,
+                                      size_t hash_length,
+                                      const uint8_t *signature,
+                                      size_t signature_length)
+{
+    (void)key_type;
+    (void)key_bits;
+    (void)key_buffer;
+    (void)key_buffer_size;
+    (void)alg;
+    (void)hash;
+    (void)hash_length;
+    (void)signature;
+    (void)signature_length;
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_asymmetric_encrypt_rsa(psa_key_type_t key_type,
+                                       size_t key_bits,
+                                       const uint8_t *key_buffer,
+                                       size_t key_buffer_size,
+                                       psa_algorithm_t alg,
+                                       const uint8_t *input,
+                                       size_t input_length,
+                                       const uint8_t *salt,
+                                       size_t salt_length,
+                                       uint8_t *output,
+                                       size_t output_size,
+                                       size_t *output_length)
+{
+    (void)key_type;
+    (void)key_bits;
+    (void)key_buffer;
+    (void)key_buffer_size;
+    (void)alg;
+    (void)input;
+    (void)input_length;
+    (void)salt;
+    (void)salt_length;
+    (void)output;
+    (void)output_size;
+    if (output_length != NULL) {
+        *output_length = 0;
+    }
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
+                                       size_t key_bits,
+                                       const uint8_t *key_buffer,
+                                       size_t key_buffer_size,
+                                       psa_algorithm_t alg,
+                                       const uint8_t *input,
+                                       size_t input_length,
+                                       const uint8_t *salt,
+                                       size_t salt_length,
+                                       uint8_t *output,
+                                       size_t output_size,
+                                       size_t *output_length)
+{
+    (void)key_type;
+    (void)key_bits;
+    (void)key_buffer;
+    (void)key_buffer_size;
+    (void)alg;
+    (void)input;
+    (void)input_length;
+    (void)salt;
+    (void)salt_length;
+    (void)output;
+    (void)output_size;
+    if (output_length != NULL) {
+        *output_length = 0;
+    }
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
 #endif /* WOLFSSL_PSA_ENGINE && !NO_RSA */

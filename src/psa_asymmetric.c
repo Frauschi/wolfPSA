@@ -35,6 +35,7 @@
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/rsa.h>
 
 psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type);
 psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits);
@@ -623,6 +624,10 @@ int wc_psa_get_hash_type(psa_algorithm_t alg)
 /* Get wolfCrypt RSA padding type from PSA algorithm */
 int wc_psa_get_rsa_padding(psa_algorithm_t alg)
 {
+#ifdef NO_RSA
+    (void)alg;
+    return 0;
+#else
     if (PSA_ALG_IS_RSA_PKCS1V15_SIGN(alg)) {
         return WC_RSA_PKCSV15_PAD;
     }
@@ -637,6 +642,7 @@ int wc_psa_get_rsa_padding(psa_algorithm_t alg)
     }
     
     return 0;
+#endif
 }
 
 /* Get wolfCrypt ECC curve ID from PSA key type and size */
