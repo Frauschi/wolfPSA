@@ -11,10 +11,6 @@
 #include <wolfssl/wolfcrypt/port/psa/psa.h>
 #include <wolfcrypt/benchmark/benchmark.h>
 
-#ifndef WOLFPSA_DEVID
-#define WOLFPSA_DEVID 0x505341 /* 'PSA' */
-#endif
-
 static void* load_wolfpsa(void)
 {
     const char* lib = getenv("WOLFPSA_LIB");
