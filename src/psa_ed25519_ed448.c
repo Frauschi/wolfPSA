@@ -92,7 +92,8 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
                                 (word32*)signature_length, &ed_key);
     }
     else {
-        ret = BAD_FUNC_ARG;
+        wc_ed25519_free(&ed_key);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
     
     wc_ed25519_free(&ed_key);
@@ -152,7 +153,8 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
                                   &verify_res, &ed_key);
     }
     else {
-        ret = BAD_FUNC_ARG;
+        wc_ed25519_free(&ed_key);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
     
     wc_ed25519_free(&ed_key);
@@ -331,7 +333,8 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
                               (word32*)signature_length, &ed_key, NULL, 0);
     }
     else {
-        ret = BAD_FUNC_ARG;
+        wc_ed448_free(&ed_key);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
     
     wc_ed448_free(&ed_key);
@@ -391,7 +394,8 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
                                 &verify_res, &ed_key, NULL, 0);
     }
     else {
-        ret = BAD_FUNC_ARG;
+        wc_ed448_free(&ed_key);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
     
     wc_ed448_free(&ed_key);
