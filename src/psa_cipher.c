@@ -317,7 +317,9 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_ENCRYPTION);
 #else
-        ret = PSA_ERROR_NOT_SUPPORTED;
+        wolfpsa_free_key_data(key_data);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_NOT_SUPPORTED;
 #endif
     }
     else {
@@ -449,7 +451,9 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_DECRYPTION);
 #else
-        ret = PSA_ERROR_NOT_SUPPORTED;
+        wolfpsa_free_key_data(key_data);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_NOT_SUPPORTED;
 #endif
     }
     else {
@@ -693,7 +697,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    ret = PSA_ERROR_NOT_SUPPORTED;
+                    return PSA_ERROR_NOT_SUPPORTED;
 #endif
                 }
                 else {
@@ -734,7 +738,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     (word32)full_blocks);
                         }
 #else
-                        ret = PSA_ERROR_NOT_SUPPORTED;
+                        return PSA_ERROR_NOT_SUPPORTED;
 #endif
                     }
                     else {
@@ -806,7 +810,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        ret = PSA_ERROR_NOT_SUPPORTED;
+                        return PSA_ERROR_NOT_SUPPORTED;
 #endif
                     }
                     else {
@@ -833,7 +837,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     input + input_offset,
                                                     (word32)full_blocks_len);
 #else
-                            ret = PSA_ERROR_NOT_SUPPORTED;
+                            return PSA_ERROR_NOT_SUPPORTED;
 #endif
                         }
                         else {
@@ -900,7 +904,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        ret = PSA_ERROR_NOT_SUPPORTED;
+                        return PSA_ERROR_NOT_SUPPORTED;
 #endif
                     }
                     else {
@@ -925,7 +929,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 input + input_offset,
                                                 (word32)full_blocks_len);
 #else
-                        ret = PSA_ERROR_NOT_SUPPORTED;
+                        return PSA_ERROR_NOT_SUPPORTED;
 #endif
                     }
                     else {
@@ -1018,7 +1022,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    ret = PSA_ERROR_NOT_SUPPORTED;
+                    return PSA_ERROR_NOT_SUPPORTED;
 #endif
                 }
                 else {
@@ -1059,7 +1063,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     (word32)full_blocks);
                         }
 #else
-                        ret = PSA_ERROR_NOT_SUPPORTED;
+                        return PSA_ERROR_NOT_SUPPORTED;
 #endif
                     }
                     else {
@@ -1205,7 +1209,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                         (word32)block_size);
 #else
-                ret = PSA_ERROR_NOT_SUPPORTED;
+                return PSA_ERROR_NOT_SUPPORTED;
 #endif
             }
             else {
@@ -1233,7 +1237,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 ret = wc_Des3_CbcDecrypt(&ctx->des3, block, ctx->partial,
                                         (word32)block_size);
 #else
-                ret = PSA_ERROR_NOT_SUPPORTED;
+                return PSA_ERROR_NOT_SUPPORTED;
 #endif
             }
             else {
