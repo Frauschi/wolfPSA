@@ -32,7 +32,9 @@
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/aes.h>
+#ifndef NO_DES3
 #include <wolfssl/wolfcrypt/des3.h>
+#endif
 #include <wolfssl/wolfcrypt/chacha.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 
@@ -52,7 +54,9 @@ typedef struct wolfpsa_cipher_ctx {
     uint8_t partial[AES_BLOCK_SIZE];
     size_t partial_len;
     Aes aes;
+#ifndef NO_DES3
     Des3 des3;
+#endif
     ChaCha chacha;
 } wolfpsa_cipher_ctx_t;
 
@@ -88,7 +92,12 @@ static psa_status_t wolfpsa_cipher_check_alg(psa_algorithm_t alg)
 
 static size_t wolfpsa_cipher_block_size(psa_key_type_t key_type)
 {
+#ifndef NO_DES3
     return (key_type == PSA_KEY_TYPE_DES) ? DES_BLOCK_SIZE : AES_BLOCK_SIZE;
+#else
+    (void)key_type;
+    return AES_BLOCK_SIZE;
+#endif
 }
 
 static size_t wolfpsa_cipher_iv_length(psa_algorithm_t alg,
@@ -269,7 +278,16 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     ctx->iv_set = 0;
     ctx->iv_attempted = 0;
     ctx->is_chacha = (alg == PSA_ALG_STREAM_CIPHER);
+#ifndef NO_DES3
     ctx->is_des3 = (attributes.type == PSA_KEY_TYPE_DES);
+#else
+    ctx->is_des3 = 0;
+    if (attributes.type == PSA_KEY_TYPE_DES) {
+        wolfpsa_free_key_data(key_data);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
     ctx->block_size = wolfpsa_cipher_block_size(attributes.type);
     ctx->partial_len = 0;
     XMEMCPY(ctx->iv, zero_iv, sizeof(ctx->iv));
@@ -279,6 +297,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
                                (word32)key_data_length);
     }
     else if (ctx->is_des3) {
+#ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
         if (key_data_length == 16) {
@@ -297,6 +316,9 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_ENCRYPTION);
+#else
+        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else {
         ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
@@ -321,9 +343,14 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     }
     wolfpsa_free_key_data(key_data);
     if (ret != 0) {
+#ifndef NO_DES3
         if (ctx->is_des3) {
             wc_Des3Free(&ctx->des3);
         }
+#else
+        if (0) {
+        }
+#endif
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
@@ -383,7 +410,16 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     ctx->iv_set = 0;
     ctx->iv_attempted = 0;
     ctx->is_chacha = (alg == PSA_ALG_STREAM_CIPHER);
+#ifndef NO_DES3
     ctx->is_des3 = (attributes.type == PSA_KEY_TYPE_DES);
+#else
+    ctx->is_des3 = 0;
+    if (attributes.type == PSA_KEY_TYPE_DES) {
+        wolfpsa_free_key_data(key_data);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
     ctx->block_size = wolfpsa_cipher_block_size(attributes.type);
     ctx->partial_len = 0;
     XMEMCPY(ctx->iv, zero_iv, sizeof(ctx->iv));
@@ -393,6 +429,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
                                (word32)key_data_length);
     }
     else if (ctx->is_des3) {
+#ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
         if (key_data_length == 16) {
@@ -411,6 +448,9 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_DECRYPTION);
+#else
+        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else {
         ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
@@ -435,9 +475,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     }
     wolfpsa_free_key_data(key_data);
     if (ret != 0) {
+#ifndef NO_DES3
         if (ctx->is_des3) {
             wc_Des3Free(&ctx->des3);
         }
+#else
+        if (0) {
+        }
+#endif
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
@@ -513,10 +558,12 @@ psa_status_t psa_cipher_set_iv(psa_cipher_operation_t *operation,
 
         XMEMCPY(ctx->iv, iv, expected_len);
         if (ctx->is_des3) {
+#ifndef NO_DES3
             ret = wc_Des3_SetIV(&ctx->des3, ctx->iv);
             if (ret != 0) {
                 return wc_error_to_psa_status(ret);
             }
+#endif
         }
         else {
             ret = wc_AesSetIV(&ctx->aes, ctx->iv);
@@ -636,6 +683,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 XMEMCPY(block + ctx->partial_len, input, needed);
 
                 if (ctx->is_des3) {
+#ifndef NO_DES3
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
@@ -644,6 +692,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
                     }
+#else
+                    ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                 }
                 else {
                     if (ctx->direction == AES_ENCRYPTION) {
@@ -669,6 +720,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
                 if (full_blocks > 0) {
                     if (ctx->is_des3) {
+#ifndef NO_DES3
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_Des3_CbcEncrypt(&ctx->des3,
                                                     output + output_offset,
@@ -681,6 +733,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     input + input_offset,
                                                     (word32)full_blocks);
                         }
+#else
+                        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                     }
                     else {
                         if (ctx->direction == AES_ENCRYPTION) {
@@ -747,8 +802,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     XMEMCPY(block + ctx->partial_len, input, needed);
 
                     if (ctx->is_des3) {
+#ifndef NO_DES3
                         ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
+#else
+                        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                     }
                     else {
                         ret = wc_AesCbcEncrypt(&ctx->aes, output, block,
@@ -768,10 +827,14 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
                     if (full_blocks_len > 0) {
                         if (ctx->is_des3) {
+#ifndef NO_DES3
                             ret = wc_Des3_CbcEncrypt(&ctx->des3,
                                                     output + output_offset,
                                                     input + input_offset,
                                                     (word32)full_blocks_len);
+#else
+                            ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                         }
                         else {
                             ret = wc_AesCbcEncrypt(&ctx->aes,
@@ -833,8 +896,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     XMEMCPY(block + ctx->partial_len, input, needed);
 
                     if (ctx->is_des3) {
+#ifndef NO_DES3
                         ret = wc_Des3_CbcDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
+#else
+                        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                     }
                     else {
                         ret = wc_AesCbcDecrypt(&ctx->aes, output, block,
@@ -852,10 +919,14 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 full_blocks_len = bytes_to_process;
                 if (full_blocks_len > 0) {
                     if (ctx->is_des3) {
+#ifndef NO_DES3
                         ret = wc_Des3_CbcDecrypt(&ctx->des3,
                                                 output + output_offset,
                                                 input + input_offset,
                                                 (word32)full_blocks_len);
+#else
+                        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                     }
                     else {
                         ret = wc_AesCbcDecrypt(&ctx->aes,
@@ -937,6 +1008,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 XMEMCPY(block + ctx->partial_len, input, needed);
 
                 if (ctx->is_des3) {
+#ifndef NO_DES3
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_Des3_EcbEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
@@ -945,6 +1017,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_EcbDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
                     }
+#else
+                    ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                 }
                 else {
                     if (ctx->direction == AES_ENCRYPTION) {
@@ -970,6 +1045,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
                 if (full_blocks > 0) {
                     if (ctx->is_des3) {
+#ifndef NO_DES3
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_Des3_EcbEncrypt(&ctx->des3,
                                                     output + output_offset,
@@ -982,6 +1058,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     input + input_offset,
                                                     (word32)full_blocks);
                         }
+#else
+                        ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
                     }
                     else {
                         if (ctx->direction == AES_ENCRYPTION) {
@@ -1122,8 +1201,12 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             XMEMSET(block + ctx->partial_len, (byte)pad_len, pad_len);
 
             if (ctx->is_des3) {
+#ifndef NO_DES3
                 ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                         (word32)block_size);
+#else
+                ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
             }
             else {
                 ret = wc_AesCbcEncrypt(&ctx->aes, output, block,
@@ -1146,8 +1229,12 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             }
 
             if (ctx->is_des3) {
+#ifndef NO_DES3
                 ret = wc_Des3_CbcDecrypt(&ctx->des3, block, ctx->partial,
                                         (word32)block_size);
+#else
+                ret = PSA_ERROR_NOT_SUPPORTED;
+#endif
             }
             else {
                 ret = wc_AesCbcDecrypt(&ctx->aes, block, ctx->partial,
@@ -1200,7 +1287,9 @@ psa_status_t psa_cipher_abort(psa_cipher_operation_t *operation)
 
     if (ctx != NULL) {
         if (ctx->is_des3) {
+#ifndef NO_DES3
             wc_Des3Free(&ctx->des3);
+#endif
         }
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
