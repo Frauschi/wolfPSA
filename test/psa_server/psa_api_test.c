@@ -388,6 +388,20 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_kdf_null_capacity(void)
+{
+    size_t capacity = 0;
+    psa_status_t st;
+
+    st = psa_key_derivation_get_capacity(NULL, &capacity);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_get_capacity(NULL)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     fprintf(stderr, "RUN %s\n", name);
@@ -419,6 +433,9 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
+        if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) != TEST_OK) return TEST_FAIL;
     }
 
     printf("PSA API test: OK\n");

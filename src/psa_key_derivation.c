@@ -440,12 +440,13 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *ope
 psa_status_t psa_key_derivation_get_capacity(const psa_key_derivation_operation_t *operation,
                                              size_t *capacity)
 {
-    const wolfpsa_kdf_ctx_t *ctx = (const wolfpsa_kdf_ctx_t *)(uintptr_t)operation->opaque;
+    const wolfpsa_kdf_ctx_t *ctx;
 
     if (operation == NULL || capacity == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    ctx = (const wolfpsa_kdf_ctx_t *)(uintptr_t)operation->opaque;
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
     }
