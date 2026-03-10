@@ -246,7 +246,8 @@ static int test_aead_gcm(void)
         0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
         0x00,0x00,0x00,0x00
     };
-    static const uint8_t aad[] = { };
+    static const uint8_t aad[1] = { 0 };
+    static const size_t aad_len = 0;
     static const uint8_t plaintext[16] = {
         0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
         0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
@@ -275,7 +276,7 @@ static int test_aead_gcm(void)
 
     st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
                           nonce, sizeof(nonce),
-                          aad, sizeof(aad),
+                          aad, aad_len,
                           plaintext, sizeof(plaintext),
                           out, sizeof(out), &out_len);
     if (check_status(st, "psa_aead_encrypt") != TEST_OK) return TEST_FAIL;
@@ -284,7 +285,7 @@ static int test_aead_gcm(void)
 
     st = psa_aead_decrypt(key_id, PSA_ALG_GCM,
                           nonce, sizeof(nonce),
-                          aad, sizeof(aad),
+                          aad, aad_len,
                           out, out_len,
                           dec, sizeof(dec), &dec_len);
     if (check_status(st, "psa_aead_decrypt") != TEST_OK) return TEST_FAIL;

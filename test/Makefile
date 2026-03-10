@@ -1,7 +1,6 @@
 WOLFPSA_PATH ?= ..
 WOLFSSL_PATH ?= $(WOLFPSA_PATH)/../wolfssl
 WOLFPSA_ABS := $(abspath $(WOLFPSA_PATH))
-WOLFSSL_ABS := $(abspath $(WOLFSSL_PATH))
 
 WOLFSSL_CANDIDATE_DIRS := \
 	$(WOLFSSL_PATH)/build \
