@@ -27,8 +27,6 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/port/psa/psa.h>
-#include <wolfssl/certs_test.h>
-
 #include <wolfpsa/psa/crypto.h>
 
 #ifndef INVALID_DEVID
@@ -36,13 +34,60 @@
 #endif
 
 #define DEFAULT_PORT 11111
+#define WOLFSSL_CERTS_DIR "../../wolfssl/certs"
+#define SERVER_CERT_PATH WOLFSSL_CERTS_DIR "/server-ecc.der"
+#define SERVER_KEY_PATH WOLFSSL_CERTS_DIR "/ecc-key.der"
+#define CLIENT_CERT_PATH WOLFSSL_CERTS_DIR "/client-ecc-cert.der"
 
 #define PSA_SERVER_KEY_ID   ((psa_key_id_t)0x1A01u)
 #define PSA_SERVER_CERT_ID  ((psa_key_id_t)0x1A02u)
 #define PSA_CLIENT_CERT_ID  ((psa_key_id_t)0x1A03u)
 
-static uint8_t g_client_cert_buf[sizeof(cliecc_cert_der_256)];
+static uint8_t* g_client_cert_buf = NULL;
 static size_t g_client_cert_len = 0;
+
+static int load_file(const char* path, uint8_t** data, size_t* len)
+{
+    FILE* f;
+    long size;
+    uint8_t* buf;
+
+    if (data == NULL || len == NULL)
+        return -1;
+
+    f = fopen(path, "rb");
+    if (f == NULL)
+        return -1;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+
+    size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return -1;
+    }
+    rewind(f);
+
+    buf = (uint8_t*)malloc((size_t)size);
+    if (buf == NULL) {
+        fclose(f);
+        return -1;
+    }
+
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+
+    fclose(f);
+    *data = buf;
+    *len = (size_t)size;
+    return 0;
+}
 
 static void log_status(const char* what, psa_status_t st)
 {
@@ -278,8 +323,14 @@ int main(int argc, char** argv)
     psa_key_id_t key_id = PSA_SERVER_KEY_ID;
     psa_key_id_t cert_id = PSA_SERVER_CERT_ID;
     psa_key_id_t client_cert_id = PSA_CLIENT_CERT_ID;
-    uint8_t cert_buf[sizeof(serv_ecc_der_256)];
+    uint8_t* cert_buf = NULL;
     size_t cert_len = 0;
+    uint8_t* server_cert_der = NULL;
+    size_t server_cert_der_len = 0;
+    uint8_t* server_key_der = NULL;
+    size_t server_key_der_len = 0;
+    uint8_t* client_cert_der = NULL;
+    size_t client_cert_der_len = 0;
     int ret;
 
     if (argc > 2 && strcmp(argv[1], "-p") == 0)
@@ -296,24 +347,36 @@ int main(int argc, char** argv)
 
     XMEMSET(&psa_ctx, 0, sizeof(psa_ctx));
 
+    if (load_file(SERVER_CERT_PATH, &server_cert_der, &server_cert_der_len) != 0 ||
+        load_file(SERVER_KEY_PATH, &server_key_der, &server_key_der_len) != 0 ||
+        load_file(CLIENT_CERT_PATH, &client_cert_der, &client_cert_der_len) != 0) {
+        fprintf(stderr, "FAIL: could not load cert/key files from %s\n",
+                WOLFSSL_CERTS_DIR);
+        return 1;
+    }
+
     /* Provision certificate into PSA store (persistent RAW_DATA object). */
-    if (ensure_psa_raw_data(cert_id, serv_ecc_der_256,
-                            sizeof_serv_ecc_der_256) != PSA_SUCCESS)
+    if (ensure_psa_raw_data(cert_id, server_cert_der,
+                            server_cert_der_len) != PSA_SUCCESS)
         return 1;
     /* Provision private key into PSA store (persistent ECC key pair). */
-    if (ensure_psa_ecc_key(key_id, ecc_key_der_256,
-                           sizeof_ecc_key_der_256) != PSA_SUCCESS)
+    if (ensure_psa_ecc_key(key_id, server_key_der,
+                           server_key_der_len) != PSA_SUCCESS)
         return 1;
     /* Provision client certificate into PSA store for mutual auth pinning. */
-    if (ensure_psa_raw_data(client_cert_id, cliecc_cert_der_256,
-                            sizeof_cliecc_cert_der_256) != PSA_SUCCESS)
+    if (ensure_psa_raw_data(client_cert_id, client_cert_der,
+                            client_cert_der_len) != PSA_SUCCESS)
         return 1;
 
     /* Read the certificate back from PSA store into memory for wolfSSL.
      * wolfSSL_CTX_use_certificate_buffer() still requires a DER buffer.
      */
     {
-        psa_status_t st = psa_export_key(cert_id, cert_buf, sizeof(cert_buf), &cert_len);
+        psa_status_t st;
+        cert_buf = (uint8_t*)malloc(server_cert_der_len);
+        if (cert_buf == NULL)
+            return 1;
+        st = psa_export_key(cert_id, cert_buf, server_cert_der_len, &cert_len);
         log_status("export cert", st);
         if (st != PSA_SUCCESS)
             return 1;
@@ -321,8 +384,12 @@ int main(int argc, char** argv)
         fflush(stderr);
     }
     {
-        psa_status_t st = psa_export_key(client_cert_id, g_client_cert_buf,
-                                         sizeof(g_client_cert_buf),
+        psa_status_t st;
+        g_client_cert_buf = (uint8_t*)malloc(client_cert_der_len);
+        if (g_client_cert_buf == NULL)
+            return 1;
+        st = psa_export_key(client_cert_id, g_client_cert_buf,
+                                         client_cert_der_len,
                                          &g_client_cert_len);
         log_status("export client cert", st);
         if (st != PSA_SUCCESS)
@@ -445,15 +512,23 @@ int main(int argc, char** argv)
         printf("FAIL: wolfSSL_new\n");
         return 1;
     }
+    fprintf(stderr, "Server: ssl created\n");
+    fflush(stderr);
 
     ret = wolfSSL_set_psa_ctx(ssl, &psa_ctx);
     if (ret != WOLFSSL_SUCCESS) {
         printf("FAIL: wolfSSL_set_psa_ctx (%d)\n", ret);
         return 1;
     }
+    fprintf(stderr, "Server: psa ctx attached\n");
+    fflush(stderr);
 
     wolfSSL_set_fd(ssl, clientfd);
+    fprintf(stderr, "Server: socket fd attached\n");
+    fflush(stderr);
 
+    fprintf(stderr, "Server: starting handshake\n");
+    fflush(stderr);
     ret = wolfSSL_accept(ssl);
     if (ret != WOLFSSL_SUCCESS) {
         int err = wolfSSL_get_error(ssl, ret);
@@ -506,6 +581,11 @@ int main(int argc, char** argv)
         close(clientfd);
     if (sockfd >= 0)
         close(sockfd);
+    free(cert_buf);
+    free(server_cert_der);
+    free(server_key_der);
+    free(client_cert_der);
+    free(g_client_cert_buf);
 
     return 0;
 }

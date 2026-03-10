@@ -2,7 +2,13 @@
  * Standalone PSA API coverage test for wolfPSA.
  */
 
-#include <wolfssl/options.h>
+#include "psa_api_test_user_settings.h"
+
+#ifndef WOLFSSL_USER_SETTINGS
+#define WOLFSSL_USER_SETTINGS
+#endif
+
+#include <wolfssl/wolfcrypt/settings.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -12,7 +18,6 @@
 
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <wolfssl/wolfcrypt/hmac.h>
-#include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
 
@@ -22,6 +27,8 @@
 
 #define TEST_OK 0
 #define TEST_FAIL 1
+
+typedef int (*test_fn_t)(void);
 
 static int check_status(psa_status_t st, const char* what)
 {
@@ -53,24 +60,18 @@ static int check_buf_eq(const char* what, const uint8_t* a, const uint8_t* b, si
 static int test_hash(void)
 {
     static const uint8_t msg[] = "abc";
-    uint8_t expected[WC_SHA256_DIGEST_SIZE];
+    static const uint8_t expected[WC_SHA256_DIGEST_SIZE] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
+    };
     uint8_t out1[WC_SHA256_DIGEST_SIZE];
     uint8_t out2[WC_SHA256_DIGEST_SIZE];
     size_t out1_len = 0;
     size_t out2_len = 0;
     psa_hash_operation_t op = psa_hash_operation_init();
-    wc_Sha256 sha;
-    int ret;
     psa_status_t st;
-
-    ret = wc_InitSha256(&sha);
-    if (ret != 0) {
-        printf("FAIL: wc_InitSha256 (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    wc_Sha256Update(&sha, msg, (word32)sizeof(msg) - 1);
-    wc_Sha256Final(&sha, expected);
-    wc_Sha256Free(&sha);
 
     st = psa_hash_compute(PSA_ALG_SHA_256, msg, sizeof(msg) - 1,
                           out1, sizeof(out1), &out1_len);
@@ -177,7 +178,12 @@ static int test_cipher_cbc(void)
         0xae,0x2d,0x8a,0x57,0x1e,0x03,0xac,0x9c,
         0x9e,0xb7,0x6f,0xac,0x45,0xaf,0x8e,0x51
     };
-    uint8_t expected[sizeof(plaintext)];
+    static const uint8_t expected[sizeof(plaintext)] = {
+        0x76,0x49,0xab,0xac,0x81,0x19,0xb2,0x46,
+        0xce,0xe9,0x8e,0x9b,0x12,0xe9,0x19,0x7d,
+        0x50,0x86,0xcb,0x9b,0x50,0x72,0x19,0xee,
+        0x95,0xdb,0x11,0x3a,0x91,0x76,0x78,0xb2
+    };
     uint8_t out[sizeof(plaintext) + 16];
     uint8_t dec[sizeof(plaintext) + 16];
     size_t out_len = 0;
@@ -188,25 +194,6 @@ static int test_cipher_cbc(void)
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_cipher_operation_t op = psa_cipher_operation_init();
     psa_status_t st;
-    Aes aes;
-    int ret;
-    uint8_t iv_local[16];
-
-    memcpy(iv_local, iv, sizeof(iv));
-    ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
-    if (ret != 0) {
-        printf("FAIL: wc_AesInit (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    ret = wc_AesSetKey(&aes, key, sizeof(key), iv_local, AES_ENCRYPTION);
-    if (ret != 0) {
-        wc_AesFree(&aes);
-        printf("FAIL: wc_AesSetKey (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    memcpy(expected, plaintext, sizeof(plaintext));
-    wc_AesCbcEncrypt(&aes, expected, expected, sizeof(expected));
-    wc_AesFree(&aes);
 
     psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&attrs, 128);
@@ -252,48 +239,32 @@ static int test_cipher_cbc(void)
 static int test_aead_gcm(void)
 {
     static const uint8_t key[16] = {
-        0xfe,0xff,0xe9,0x92,0x86,0x65,0x73,0x1c,
-        0x6d,0x6a,0x8f,0x94,0x67,0x30,0x83,0x08
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
     };
     static const uint8_t nonce[12] = {
-        0xca,0xfe,0xba,0xbe,0xfa,0xce,0xdb,0xad,
-        0xde,0xca,0xf8,0x88
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
     };
-    static const uint8_t aad[] = {0xfe,0xed,0xfa,0xce,0xde,0xad,0xbe,0xef,
-                                  0xfe,0xed,0xfa,0xce,0xde,0xad,0xbe,0xef,
-                                  0xab,0xad,0xda,0xd2};
-    static const uint8_t plaintext[] = "PSA AEAD GCM test";
-    uint8_t expected[sizeof(plaintext) - 1 + 16];
-    uint8_t out[sizeof(plaintext) - 1 + 16];
-    uint8_t dec[sizeof(plaintext) - 1];
+    static const uint8_t aad[1] = { 0 };
+    static const size_t aad_len = 0;
+    static const uint8_t plaintext[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t expected[sizeof(plaintext) + 16] = {
+        0x03,0x88,0xda,0xce,0x60,0xb6,0xa3,0x92,
+        0xf3,0x28,0xc2,0xb9,0x71,0xb2,0xfe,0x78,
+        0xab,0x6e,0x47,0xd4,0x2c,0xec,0x13,0xbd,
+        0xf5,0x3a,0x67,0xb2,0x12,0x57,0xbd,0xdf
+    };
+    uint8_t out[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext)];
     size_t out_len = 0;
     size_t dec_len = 0;
     psa_key_id_t key_id = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_status_t st;
-    Aes aes;
-    int ret;
-    uint8_t tag[16];
-
-    ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
-    if (ret != 0) {
-        printf("FAIL: wc_AesInit(GCM) (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    ret = wc_AesGcmSetKey(&aes, key, sizeof(key));
-    if (ret != 0) {
-        wc_AesFree(&aes);
-        printf("FAIL: wc_AesGcmSetKey (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    ret = wc_AesGcmEncrypt(&aes, expected, plaintext, sizeof(plaintext) - 1,
-                           nonce, sizeof(nonce), tag, sizeof(tag), aad, sizeof(aad));
-    wc_AesFree(&aes);
-    if (ret != 0) {
-        printf("FAIL: wc_AesGcmEncrypt (%d)\n", ret);
-        return TEST_FAIL;
-    }
-    memcpy(expected + (sizeof(plaintext) - 1), tag, sizeof(tag));
 
     psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&attrs, 128);
@@ -305,8 +276,8 @@ static int test_aead_gcm(void)
 
     st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
                           nonce, sizeof(nonce),
-                          aad, sizeof(aad),
-                          plaintext, sizeof(plaintext) - 1,
+                          aad, aad_len,
+                          plaintext, sizeof(plaintext),
                           out, sizeof(out), &out_len);
     if (check_status(st, "psa_aead_encrypt") != TEST_OK) return TEST_FAIL;
     if (check_true(out_len == sizeof(expected), "psa_aead_encrypt length") != TEST_OK) return TEST_FAIL;
@@ -314,12 +285,12 @@ static int test_aead_gcm(void)
 
     st = psa_aead_decrypt(key_id, PSA_ALG_GCM,
                           nonce, sizeof(nonce),
-                          aad, sizeof(aad),
+                          aad, aad_len,
                           out, out_len,
                           dec, sizeof(dec), &dec_len);
     if (check_status(st, "psa_aead_decrypt") != TEST_OK) return TEST_FAIL;
-    if (check_true(dec_len == sizeof(plaintext) - 1, "psa_aead_decrypt length") != TEST_OK) return TEST_FAIL;
-    if (check_buf_eq("psa_aead_decrypt", dec, plaintext, sizeof(plaintext) - 1) != TEST_OK) return TEST_FAIL;
+    if (check_true(dec_len == sizeof(plaintext), "psa_aead_decrypt length") != TEST_OK) return TEST_FAIL;
+    if (check_buf_eq("psa_aead_decrypt", dec, plaintext, sizeof(plaintext)) != TEST_OK) return TEST_FAIL;
 
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(GCM)") != TEST_OK) return TEST_FAIL;
@@ -417,19 +388,38 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
-int main(void)
+static int run_named_test(const char* name, test_fn_t fn)
+{
+    fprintf(stderr, "RUN %s\n", name);
+    return fn();
+}
+
+int main(int argc, char** argv)
 {
     psa_status_t st;
+    const char* only = argc > 1 ? argv[1] : NULL;
 
     st = psa_crypto_init();
     if (check_status(st, "psa_crypto_init") != TEST_OK) return TEST_FAIL;
 
-    if (test_random() != TEST_OK) return TEST_FAIL;
-    if (test_hash() != TEST_OK) return TEST_FAIL;
-    if (test_hmac() != TEST_OK) return TEST_FAIL;
-    if (test_cipher_cbc() != TEST_OK) return TEST_FAIL;
-    if (test_aead_gcm() != TEST_OK) return TEST_FAIL;
-    if (test_asym_ecc() != TEST_OK) return TEST_FAIL;
+    if (only == NULL || strcmp(only, "random") == 0) {
+        if (run_named_test("random", test_random) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "hash") == 0) {
+        if (run_named_test("hash", test_hash) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "hmac") == 0) {
+        if (run_named_test("hmac", test_hmac) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
+        if (run_named_test("cipher_cbc", test_cipher_cbc) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_gcm") == 0) {
+        if (run_named_test("aead_gcm", test_aead_gcm) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "asym_ecc") == 0) {
+        if (run_named_test("asym_ecc", test_asym_ecc) != TEST_OK) return TEST_FAIL;
+    }
 
     printf("PSA API test: OK\n");
     return TEST_OK;

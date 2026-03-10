@@ -9,6 +9,7 @@ OBJDIR := $(BUILD_DIR)/obj
 OBJDIR_PIC := $(BUILD_DIR)/obj.pic
 LIBNAME := libwolfpsa.a
 SHLIBNAME := libwolfpsa.so
+EXPORT_MAP := $(CURDIR)/wolfpsa.map
 
 CC ?= cc
 AR ?= ar
@@ -87,11 +88,15 @@ endif
 CFLAGS ?= -O2
 WARNFLAGS ?= -Wall -Wextra -Werror
 CFLAGS += $(WARNFLAGS)
+DEBUG_FLAGS :=
+ifeq ($(DEBUG),1)
+DEBUG_FLAGS = -ggdb
+endif
 SANITIZE_FLAGS :=
 ifeq ($(ASAN),1)
 SANITIZE_FLAGS = -fsanitize=address
 endif
-CFLAGS += $(SANITIZE_FLAGS)
+CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
 .PHONY: all clean
@@ -102,8 +107,8 @@ $(LIBNAME): $(OBJ) $(WOLFCRYPT_OBJ)
 	$(AR) rcs $@ $^
 	$(RANLIB) $@
 
-$(SHLIBNAME): $(OBJ_PIC) $(WOLFCRYPT_OBJ_PIC)
-	$(CC) -shared -o $@ $^ $(LDFLAGS)
+$(SHLIBNAME): $(OBJ_PIC) $(WOLFCRYPT_OBJ_PIC) $(EXPORT_MAP)
+	$(CC) -shared -Wl,--version-script,$(EXPORT_MAP) -Wl,-Bsymbolic-functions -o $@ $(filter-out $(EXPORT_MAP),$^) $(LDFLAGS)
 
 $(OBJDIR)/%.o: src/%.c
 	@mkdir -p $(OBJDIR)

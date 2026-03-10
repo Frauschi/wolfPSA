@@ -1,5 +1,5 @@
-#ifndef WOLFSSL_USER_SETTINGS_H
-#define WOLFSSL_USER_SETTINGS_H
+#ifndef PSA_API_TEST_USER_SETTINGS_H
+#define PSA_API_TEST_USER_SETTINGS_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -7,23 +7,16 @@ extern "C" {
 
 #define NO_WOLFSSL_SERVER
 #define NO_OLD_TLS
+#define NO_FILESYSTEM
 
-
-#define HAVE_TLS_EXTENSIONS
-#define HAVE_SUPPORTED_CURVES
-#define HAVE_EXTENDED_MASTER
-#define HAVE_ENCRYPT_THEN_MAC
-
-#define HAVE_HASHDRBG
 #define HAVE_GETRANDOM
+#define HAVE_HASHDRBG
 
 #define HAVE_ECC
 #define HAVE_ECC_KEY_EXPORT
 #define HAVE_ECC_KEY_IMPORT
 #define ECC_USER_CURVES
 #define ECC_TIMING_RESISTANT
-#define WC_RSA_BLINDING
-
 #define WOLFSSL_ECDSA_DETERMINISTIC_K
 
 #define HAVE_AESGCM
@@ -43,11 +36,8 @@ extern "C" {
 #define WOLFSSL_SHA384
 #define WOLFSSL_SHA512
 
-#define HAVE_HKDF
-#define WOLFSSL_HAVE_PRF
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* WOLFSSL_USER_SETTINGS_H */
+#endif /* PSA_API_TEST_USER_SETTINGS_H */

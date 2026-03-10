@@ -299,7 +299,6 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
     /* Get curve ID */
     curve_id = wc_psa_get_ecc_curve_id(key_type, key_bits);
     if (curve_id == ECC_CURVE_INVALID) {
@@ -334,9 +333,14 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    priv_len = (word32)private_key_size;
-    ret = wc_ecc_export_private_only(&ecc, private_key, &priv_len);
-    if (ret != 0) {
+    priv_len = (word32)PSA_BITS_TO_BYTES(key_bits);
+    if (private_key_size < priv_len) {
+        wc_FreeRng(&rng);
+        wc_ecc_free(&ecc);
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    ret = mp_to_unsigned_bin_len(ecc.k, private_key, priv_len);
+    if (ret != MP_OKAY) {
         wc_FreeRng(&rng);
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
