@@ -65,6 +65,8 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
     dilithium_key key;
     int type;
     WC_RNG rng;
+    word32 priv_len;
+    word32 pub_len;
     
     /* Convert parameter to wolfCrypt key type */
     type = psa_ml_dsa_parameter_to_type(parameter);
@@ -93,20 +95,23 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Check buffer sizes */
-    if (private_key_size < key.priv_key_len || public_key_size < key.pub_key_len) {
+    priv_len = (word32)private_key_size;
+    ret = wc_dilithium_export_private(&key, private_key, &priv_len);
+    if (ret != 0) {
         wc_FreeRng(&rng);
         wc_dilithium_free(&key);
-        return PSA_ERROR_BUFFER_TOO_SMALL;
+        return wc_error_to_psa_status(ret);
     }
-    
-    /* Export private key */
-    XMEMCPY(private_key, key.k, key.priv_key_len);
-    *private_key_length = key.priv_key_len;
-    
-    /* Export public key */
-    XMEMCPY(public_key, key.p, key.pub_key_len);
-    *public_key_length = key.pub_key_len;
+    *private_key_length = priv_len;
+
+    pub_len = (word32)public_key_size;
+    ret = wc_dilithium_export_public(&key, public_key, &pub_len);
+    if (ret != 0) {
+        wc_FreeRng(&rng);
+        wc_dilithium_free(&key);
+        return wc_error_to_psa_status(ret);
+    }
+    *public_key_length = pub_len;
     
     wc_FreeRng(&rng);
     wc_dilithium_free(&key);
