@@ -36,6 +36,11 @@
 #include <wolfssl/wolfcrypt/pwdbased.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/cmac.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 typedef struct wolfpsa_kdf_ctx {
     psa_algorithm_t alg;
@@ -1103,7 +1108,7 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
         return status;
     }
 
-    if (XMEMCMP(buffer, expected, expected_length) != 0) {
+    if (ConstantCompare(buffer, expected, (int)expected_length) != 0) {
         status = PSA_ERROR_INVALID_SIGNATURE;
     }
     else {
