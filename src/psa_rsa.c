@@ -63,6 +63,31 @@ static int wc_psa_get_mgf(int hash_type)
     }
 }
 
+#ifdef WC_RSA_PSS
+static int wc_psa_rsa_pss_check_padding(const byte* hash, word32 hash_length,
+                                        const byte* encoded, word32 encoded_length,
+                                        int hash_type, int salt_len,
+                                        RsaKey* rsa_key)
+{
+#if (defined(HAVE_SELFTEST) && \
+     (!defined(HAVE_SELFTEST_VERSION) || (HAVE_SELFTEST_VERSION < 2))) || \
+    (defined(HAVE_FIPS) && defined(HAVE_FIPS_VERSION) && \
+     (HAVE_FIPS_VERSION < 2))
+    return wc_RsaPSS_CheckPadding_ex(hash, hash_length, encoded,
+                                     encoded_length, hash_type, salt_len);
+#elif (defined(HAVE_SELFTEST) && (HAVE_SELFTEST_VERSION == 2)) || \
+      (defined(HAVE_FIPS) && defined(HAVE_FIPS_VERSION) && \
+       (HAVE_FIPS_VERSION == 2))
+    return wc_RsaPSS_CheckPadding_ex(hash, hash_length, encoded,
+                                     encoded_length, hash_type, salt_len, 0);
+#else
+    return wc_RsaPSS_CheckPadding_ex2(hash, hash_length, encoded,
+                                      encoded_length, hash_type, salt_len,
+                                      mp_count_bits(&rsa_key->n), NULL);
+#endif
+}
+#endif
+
 /* Sign a hash or short message with an RSA private key */
 psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                                     size_t key_bits,
@@ -150,7 +175,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
         #ifdef WC_RSA_PSS
             ret = wc_RsaPSS_Sign(hash, (word32)hash_length, signature, 
                                (word32)signature_size, hash_type, 
-                               WC_MGF1NONE, &rsa_key, &rng);
+                               wc_psa_get_mgf(hash_type), &rsa_key, &rng);
         #else
             ret = NOT_COMPILED_IN;
         #endif
@@ -251,7 +276,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     }
     else if (padding == WC_RSA_PSS_PAD) {
     #ifdef WC_RSA_PSS
-        byte decoded[PSA_HASH_MAX_SIZE];
+        byte decoded[RSA_MAX_SIZE/8];
         int salt_len = RSA_PSS_SALT_LEN_DEFAULT;
 
     #ifdef WOLFSSL_PSS_SALT_LEN_DISCOVER
@@ -268,11 +293,14 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
 
         ret = wc_RsaPSS_Verify_ex(signature, (word32)signature_length,
                                   decoded, (word32)sizeof(decoded),
-                                  hash_type, WC_MGF1NONE, salt_len, &rsa_key);
+                                  hash_type, wc_psa_get_mgf(hash_type),
+                                  salt_len, &rsa_key);
         if (ret > 0) {
-            if ((size_t)ret != hash_length ||
-                XMEMCMP(decoded, hash, hash_length) != 0) {
-                ret = SIG_VERIFY_E;
+            ret = wc_psa_rsa_pss_check_padding(hash, (word32)hash_length,
+                                               decoded, (word32)ret,
+                                               hash_type, salt_len, &rsa_key);
+            if (ret == 0) {
+                ret = (int)hash_length;
             }
         }
     #else

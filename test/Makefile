@@ -55,13 +55,14 @@ WOLFSSL_LOCAL_SYMBOLS := $(if $(WOLFSSL_LOCAL_LIB),$(shell \
 	$(NM) $(WOLFSSL_LOCAL_LIB) 2>/dev/null))
 WOLFSSL_HAS_PSA_TLS := $(findstring wolfSSL_CTX_psa_enable,$(WOLFSSL_LOCAL_SYMBOLS))
 
-BINARIES = psa_api_test psa_tls_client wolfcrypt-psa-benchmark
+BINARIES = psa_api_test psa_rsa_pss_interop_test psa_tls_client wolfcrypt-psa-benchmark
 
 ifdef WOLFSSL_HAS_PSA_TLS
 BINARIES += psa_tls_server
 endif
 
 PSA_API_TEST_OBJS = psa_server/psa_api_test.o
+PSA_RSA_PSS_TEST_OBJS = psa_server/psa_rsa_pss_interop_test.o
 
 .PHONY: all clean rebuild-wolfssl-psa require-wolfssl-lib
 
@@ -76,6 +77,9 @@ endif
 
 psa_api_test: require-wolfssl-lib $(PSA_API_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_API_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+psa_rsa_pss_interop_test: require-wolfssl-lib $(PSA_RSA_PSS_TEST_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(PSA_RSA_PSS_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 ifdef WOLFSSL_HAS_PSA_TLS
 psa_tls_server: psa_server/psa_tls_server.o
