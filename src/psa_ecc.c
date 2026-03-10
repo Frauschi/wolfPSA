@@ -333,7 +333,7 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    priv_len = (word32)(key_bits / 8);
+    priv_len = (word32)PSA_BITS_TO_BYTES(key_bits);
     if (private_key_size < priv_len) {
         wc_FreeRng(&rng);
         wc_ecc_free(&ecc);

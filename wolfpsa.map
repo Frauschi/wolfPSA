@@ -1,4 +1,4 @@
-{
+WOLFPSA_1.0 {
     global:
         psa_aead_abort;
         psa_aead_decrypt;
