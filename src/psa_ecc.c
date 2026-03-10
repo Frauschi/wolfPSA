@@ -299,25 +299,17 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    fprintf(stderr, "wolfPSA: ecc_generate start type=0x%08x bits=%zu priv_cap=%zu pub_cap=%zu\n",
-            (unsigned)key_type, key_bits, private_key_size, public_key_size);
-    fflush(stderr);
-    
     /* Get curve ID */
     curve_id = wc_psa_get_ecc_curve_id(key_type, key_bits);
     if (curve_id == ECC_CURVE_INVALID) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
-    fprintf(stderr, "wolfPSA: ecc_generate curve_id=%d\n", curve_id);
-    fflush(stderr);
     
     /* Initialize ECC key */
     ret = wc_ecc_init(&ecc);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    fprintf(stderr, "wolfPSA: ecc init ok\n");
-    fflush(stderr);
     
     /* Initialize RNG */
     ret = wc_InitRng(&rng);
@@ -325,8 +317,6 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
     }
-    fprintf(stderr, "wolfPSA: rng init ok\n");
-    fflush(stderr);
     
     /* Generate key pair */
     ret = wc_ecc_make_key_ex(&rng, (int)key_bits / 8, &ecc, curve_id);
@@ -335,8 +325,6 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
     }
-    fprintf(stderr, "wolfPSA: ecc make key ok\n");
-    fflush(stderr);
     
     if (private_key == NULL || private_key_length == NULL ||
         public_key == NULL || public_key_length == NULL) {
@@ -357,8 +345,6 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
     }
-    fprintf(stderr, "wolfPSA: ecc export private ok len=%u\n", (unsigned)priv_len);
-    fflush(stderr);
     
     /* Export public key */
     pub_len = (word32)public_key_size;
@@ -368,8 +354,6 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
     }
-    fprintf(stderr, "wolfPSA: ecc export public ok len=%u\n", (unsigned)pub_len);
-    fflush(stderr);
     
     wc_FreeRng(&rng);
     wc_ecc_free(&ecc);

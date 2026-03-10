@@ -827,10 +827,6 @@ psa_status_t psa_generate_key(
     wolfpsa_trace("psa_generate_key(type=0x%08x bits=%u)",
                   attributes ? (unsigned)attributes->type : 0U,
                   attributes ? (unsigned)attributes->bits : 0U);
-    fprintf(stderr, "wolfPSA: psa_generate_key type=0x%08x bits=%u\n",
-            attributes ? (unsigned)attributes->type : 0U,
-            attributes ? (unsigned)attributes->bits : 0U);
-    fflush(stderr);
     psa_status_t status;
     psa_key_type_t key_type;
     psa_key_bits_t key_bits;
