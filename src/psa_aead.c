@@ -858,6 +858,7 @@ psa_status_t psa_aead_abort(psa_aead_operation_t *operation)
             XFREE(ctx->input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         if (ctx->key != NULL) {
+            wc_ForceZero(ctx->key, ctx->key_length);
             XFREE(ctx->key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
