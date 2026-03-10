@@ -52,6 +52,7 @@ psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type)
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && defined(PSA_KEY_TYPE_LMS_KEY_PAIR)
         case PSA_KEY_TYPE_LMS_KEY_PAIR:
+            return PSA_SUCCESS;
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && defined(PSA_KEY_TYPE_LMS_PUBLIC_KEY)
         case PSA_KEY_TYPE_LMS_PUBLIC_KEY:
@@ -59,6 +60,7 @@ psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type)
 #endif
 #if defined(WOLFSSL_HAVE_XMSS) && defined(PSA_KEY_TYPE_XMSS_KEY_PAIR)
         case PSA_KEY_TYPE_XMSS_KEY_PAIR:
+            return PSA_SUCCESS;
 #endif
 #if defined(WOLFSSL_HAVE_XMSS) && defined(PSA_KEY_TYPE_XMSS_PUBLIC_KEY)
         case PSA_KEY_TYPE_XMSS_PUBLIC_KEY:
@@ -96,6 +98,8 @@ psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits)
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && defined(PSA_KEY_TYPE_LMS_KEY_PAIR)
         case PSA_KEY_TYPE_LMS_KEY_PAIR:
+            /* LMS doesn't have specific key sizes in the same way */
+            return PSA_SUCCESS;
 #endif
 #if defined(WOLFSSL_HAVE_LMS) && defined(PSA_KEY_TYPE_LMS_PUBLIC_KEY)
         case PSA_KEY_TYPE_LMS_PUBLIC_KEY:
@@ -104,6 +108,8 @@ psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits)
 #endif
 #if defined(WOLFSSL_HAVE_XMSS) && defined(PSA_KEY_TYPE_XMSS_KEY_PAIR)
         case PSA_KEY_TYPE_XMSS_KEY_PAIR:
+            /* XMSS doesn't have specific key sizes in the same way */
+            return PSA_SUCCESS;
 #endif
 #if defined(WOLFSSL_HAVE_XMSS) && defined(PSA_KEY_TYPE_XMSS_PUBLIC_KEY)
         case PSA_KEY_TYPE_XMSS_PUBLIC_KEY:
