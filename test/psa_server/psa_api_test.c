@@ -436,6 +436,61 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_ed25519_signature_length(void)
+{
+    static const uint8_t hash[64] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
+    };
+    uint8_t sig[128];
+    size_t sig_len = ~(size_t)0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, 255);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ED25519PH);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_OK;
+    }
+    if (check_status(st, "psa_generate_key(ED25519)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_sign_hash(key_id, PSA_ALG_ED25519PH,
+                       hash, sizeof(hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(sig_len == 64u, "psa_sign_hash(ED25519PH) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ED25519PH,
+                         hash, sizeof(hash), sig, sig_len);
+    if (check_status(st, "psa_verify_hash(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ED25519)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_kdf_null_capacity(void)
 {
     size_t capacity = 0;
@@ -487,6 +542,11 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) != TEST_OK) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
+        if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) != TEST_OK) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
         if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) != TEST_OK) return TEST_FAIL;
