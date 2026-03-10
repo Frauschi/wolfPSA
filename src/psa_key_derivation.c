@@ -82,6 +82,7 @@ static wolfpsa_kdf_ctx_t* wolfpsa_kdf_get_ctx(psa_key_derivation_operation_t *op
 static void wolfpsa_kdf_free_buf(uint8_t **buf, size_t *len)
 {
     if (buf != NULL && *buf != NULL) {
+        wc_ForceZero(*buf, len != NULL ? *len : 0);
         XFREE(*buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         *buf = NULL;
     }
