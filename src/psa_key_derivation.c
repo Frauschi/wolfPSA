@@ -103,6 +103,9 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
     if (data_length == 0) {
         return PSA_SUCCESS;
     }
+    if (*len > SIZE_MAX - data_length) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
 
     new_buf = (uint8_t *)XMALLOC(*len + data_length, NULL,
                                  DYNAMIC_TYPE_TMP_BUFFER);
