@@ -35,8 +35,13 @@
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
 #include <wolfssl/wolfcrypt/rsa.h>
 #include <wolfssl/wolfcrypt/asn_public.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 int wc_psa_get_rsa_padding(psa_algorithm_t alg);
 int wc_psa_get_hash_type(psa_algorithm_t alg);
@@ -269,7 +274,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
 
         if (ret > 0) {
             if ((size_t)ret != hash_length ||
-                XMEMCMP(decoded, hash, hash_length) != 0) {
+                ConstantCompare(decoded, hash, (int)hash_length) != 0) {
                 ret = SIG_VERIFY_E;
             }
         }
