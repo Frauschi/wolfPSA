@@ -10,3 +10,5 @@ psa_server/tls_client/psa_tls_client
 psa_tls_client
 wolfcrypt-benchmark/wolfcrypt-psa-benchmark
 wolfcrypt-psa-benchmark
+.store/
+*.log
