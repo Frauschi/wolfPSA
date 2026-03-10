@@ -124,8 +124,7 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         }
     }
     else if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CHACHA20_POLY1305)) {
-        if (attributes->type != PSA_KEY_TYPE_CHACHA20 &&
-            attributes->type != PSA_KEY_TYPE_AES) {
+        if (attributes->type != PSA_KEY_TYPE_CHACHA20) {
             wolfpsa_free_key_data(*key_data);
             *key_data = NULL;
             *key_data_length = 0;
