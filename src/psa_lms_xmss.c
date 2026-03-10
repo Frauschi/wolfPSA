@@ -50,6 +50,8 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     int ret;
     LmsKey key;
     WC_RNG rng;
+    word32 priv_len32;
+    word32 pub_len32;
     
     /* Initialize LMS key */
     ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
@@ -80,7 +82,8 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     }
     
     /* Export private key */
-    ret = wc_LmsKey_ExportPrivate(&key, private_key, (word32*)private_key_length);
+    priv_len32 = (word32)private_key_size;
+    ret = wc_LmsKey_ExportPrivate(&key, private_key, &priv_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_LmsKey_Free(&key);
@@ -88,7 +91,8 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     }
     
     /* Export public key */
-    ret = wc_LmsKey_ExportPublic(&key, public_key, (word32*)public_key_length);
+    pub_len32 = (word32)public_key_size;
+    ret = wc_LmsKey_ExportPublic(&key, public_key, &pub_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_LmsKey_Free(&key);
@@ -97,6 +101,9 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     
     wc_FreeRng(&rng);
     wc_LmsKey_Free(&key);
+
+    *private_key_length = (size_t)priv_len32;
+    *public_key_length = (size_t)pub_len32;
     
     return PSA_SUCCESS;
 }
@@ -112,6 +119,7 @@ psa_status_t psa_lms_sign(const uint8_t *private_key,
 {
     int ret;
     LmsKey key;
+    word32 sig_len32;
     
     /* Initialize LMS key */
     ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
@@ -127,7 +135,8 @@ psa_status_t psa_lms_sign(const uint8_t *private_key,
     }
     
     /* Sign message */
-    ret = wc_LmsKey_Sign(&key, signature, (word32*)signature_length, 
+    sig_len32 = (word32)signature_size;
+    ret = wc_LmsKey_Sign(&key, signature, &sig_len32,
                         message, (word32)message_length);
     if (ret != 0) {
         wc_LmsKey_Free(&key);
@@ -135,6 +144,8 @@ psa_status_t psa_lms_sign(const uint8_t *private_key,
     }
     
     wc_LmsKey_Free(&key);
+
+    *signature_length = (size_t)sig_len32;
     
     return PSA_SUCCESS;
 }
@@ -196,6 +207,8 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     int ret;
     XmssKey key;
     WC_RNG rng;
+    word32 priv_len32;
+    word32 pub_len32;
     
     /* Initialize XMSS key */
     ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
@@ -226,7 +239,8 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     }
     
     /* Export private key */
-    ret = wc_XmssKey_ExportPrivate(&key, private_key, (word32*)private_key_length);
+    priv_len32 = (word32)private_key_size;
+    ret = wc_XmssKey_ExportPrivate(&key, private_key, &priv_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_XmssKey_Free(&key);
@@ -234,7 +248,8 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     }
     
     /* Export public key */
-    ret = wc_XmssKey_ExportPublic(&key, public_key, (word32*)public_key_length);
+    pub_len32 = (word32)public_key_size;
+    ret = wc_XmssKey_ExportPublic(&key, public_key, &pub_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_XmssKey_Free(&key);
@@ -243,6 +258,9 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     
     wc_FreeRng(&rng);
     wc_XmssKey_Free(&key);
+
+    *private_key_length = (size_t)priv_len32;
+    *public_key_length = (size_t)pub_len32;
     
     return PSA_SUCCESS;
 }
@@ -258,6 +276,7 @@ psa_status_t psa_xmss_sign(const uint8_t *private_key,
 {
     int ret;
     XmssKey key;
+    word32 sig_len32;
     
     /* Initialize XMSS key */
     ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
@@ -273,7 +292,8 @@ psa_status_t psa_xmss_sign(const uint8_t *private_key,
     }
     
     /* Sign message */
-    ret = wc_XmssKey_Sign(&key, signature, (word32*)signature_length, 
+    sig_len32 = (word32)signature_size;
+    ret = wc_XmssKey_Sign(&key, signature, &sig_len32,
                          message, (word32)message_length);
     if (ret != 0) {
         wc_XmssKey_Free(&key);
@@ -281,6 +301,8 @@ psa_status_t psa_xmss_sign(const uint8_t *private_key,
     }
     
     wc_XmssKey_Free(&key);
+
+    *signature_length = (size_t)sig_len32;
     
     return PSA_SUCCESS;
 }
