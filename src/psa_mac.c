@@ -33,6 +33,11 @@
 #include <wolfssl/wolfcrypt/hmac.h>
 #include <wolfssl/wolfcrypt/cmac.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 typedef enum {
     WOLFPSA_MAC_NONE = 0,
@@ -451,7 +456,7 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
         return PSA_ERROR_INVALID_SIGNATURE;
     }
 
-    if (XMEMCMP(computed, mac, mac_length) != 0) {
+    if (ConstantCompare(computed, mac, (int)mac_length) != 0) {
         return PSA_ERROR_INVALID_SIGNATURE;
     }
 
