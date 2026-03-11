@@ -102,7 +102,6 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
         wc_dilithium_free(&key);
         return wc_error_to_psa_status(ret);
     }
-    *private_key_length = priv_len;
 
     pub_len = (word32)public_key_size;
     ret = wc_dilithium_export_public(&key, public_key, &pub_len);
@@ -111,6 +110,7 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
         wc_dilithium_free(&key);
         return wc_error_to_psa_status(ret);
     }
+    *private_key_length = priv_len;
     *public_key_length = pub_len;
     
     wc_FreeRng(&rng);
