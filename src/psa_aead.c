@@ -66,6 +66,9 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
 {
     uint8_t *new_buf;
 
+    if (buf == NULL || len == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     if (data == NULL && data_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
