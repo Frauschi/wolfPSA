@@ -59,6 +59,7 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
 {
     int ret;
     ed25519_key ed_key;
+    word32 sig_len32;
     
     if (alg != PSA_ALG_ED25519 && alg != PSA_ALG_ED25519PH) {
         return PSA_ERROR_NOT_SUPPORTED;
@@ -85,15 +86,16 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     }
     
     /* Sign message */
+    sig_len32 = (word32)signature_size;
     if (alg == PSA_ALG_ED25519PH) {
         /* Sign hash */
         ret = wc_ed25519ph_sign_hash(hash, (word32)hash_length, signature,
-                                   (word32*)signature_length, &ed_key, NULL, 0);
+                                   &sig_len32, &ed_key, NULL, 0);
     }
     else if (alg == PSA_ALG_ED25519) {
         /* Sign message */
         ret = wc_ed25519_sign_msg(hash, (word32)hash_length, signature,
-                                (word32*)signature_length, &ed_key);
+                                &sig_len32, &ed_key);
     }
     
     wc_ed25519_free(&ed_key);
@@ -101,6 +103,8 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
+
+    *signature_length = (size_t)sig_len32;
     
     return PSA_SUCCESS;
 }
@@ -184,6 +188,8 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     int ret;
     ed25519_key ed_key;
     WC_RNG rng;
+    word32 priv_len32;
+    word32 pub_len32;
     
     /* Check if key type is ED25519 key pair */
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
@@ -213,7 +219,8 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     }
     
     /* Export private key */
-    ret = wc_ed25519_export_private_only(&ed_key, private_key, (word32*)private_key_length);
+    priv_len32 = (word32)private_key_size;
+    ret = wc_ed25519_export_private_only(&ed_key, private_key, &priv_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ed25519_free(&ed_key);
@@ -221,7 +228,8 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     }
     
     /* Export public key */
-    ret = wc_ed25519_export_public(&ed_key, public_key, (word32*)public_key_length);
+    pub_len32 = (word32)public_key_size;
+    ret = wc_ed25519_export_public(&ed_key, public_key, &pub_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ed25519_free(&ed_key);
@@ -230,6 +238,9 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     
     wc_FreeRng(&rng);
     wc_ed25519_free(&ed_key);
+
+    *private_key_length = (size_t)priv_len32;
+    *public_key_length = (size_t)pub_len32;
     
     return PSA_SUCCESS;
 }
@@ -245,6 +256,7 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
 {
     int ret;
     ed25519_key ed_key;
+    word32 out_len32;
     
     /* Check if key type is ED25519 */
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) && 
@@ -274,13 +286,16 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
     }
     
     /* Export public key */
-    ret = wc_ed25519_export_public(&ed_key, output, (word32*)output_length);
+    out_len32 = (word32)output_size;
+    ret = wc_ed25519_export_public(&ed_key, output, &out_len32);
     
     wc_ed25519_free(&ed_key);
     
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
+
+    *output_length = (size_t)out_len32;
     
     return PSA_SUCCESS;
 }
@@ -301,6 +316,7 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
 {
     int ret;
     ed448_key ed_key;
+    word32 sig_len32;
     
     if (alg != PSA_ALG_ED448 && alg != PSA_ALG_ED448PH) {
         return PSA_ERROR_NOT_SUPPORTED;
@@ -327,15 +343,16 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     }
     
     /* Sign message */
+    sig_len32 = (word32)signature_size;
     if (alg == PSA_ALG_ED448PH) {
         /* Sign hash */
         ret = wc_ed448ph_sign_hash(hash, (word32)hash_length, signature,
-                                 (word32*)signature_length, &ed_key, NULL, 0);
+                                 &sig_len32, &ed_key, NULL, 0);
     }
     else if (alg == PSA_ALG_ED448) {
         /* Sign message */
         ret = wc_ed448_sign_msg(hash, (word32)hash_length, signature,
-                              (word32*)signature_length, &ed_key, NULL, 0);
+                              &sig_len32, &ed_key, NULL, 0);
     }
     
     wc_ed448_free(&ed_key);
@@ -343,6 +360,8 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
+
+    *signature_length = (size_t)sig_len32;
     
     return PSA_SUCCESS;
 }
@@ -426,6 +445,8 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     int ret;
     ed448_key ed_key;
     WC_RNG rng;
+    word32 priv_len32;
+    word32 pub_len32;
     
     /* Check if key type is ED448 key pair */
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
@@ -455,7 +476,8 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     }
     
     /* Export private key */
-    ret = wc_ed448_export_private_only(&ed_key, private_key, (word32*)private_key_length);
+    priv_len32 = (word32)private_key_size;
+    ret = wc_ed448_export_private_only(&ed_key, private_key, &priv_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ed448_free(&ed_key);
@@ -463,7 +485,8 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     }
     
     /* Export public key */
-    ret = wc_ed448_export_public(&ed_key, public_key, (word32*)public_key_length);
+    pub_len32 = (word32)public_key_size;
+    ret = wc_ed448_export_public(&ed_key, public_key, &pub_len32);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ed448_free(&ed_key);
@@ -472,6 +495,9 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     
     wc_FreeRng(&rng);
     wc_ed448_free(&ed_key);
+
+    *private_key_length = (size_t)priv_len32;
+    *public_key_length = (size_t)pub_len32;
     
     return PSA_SUCCESS;
 }
@@ -487,6 +513,7 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
 {
     int ret;
     ed448_key ed_key;
+    word32 out_len32;
     
     /* Check if key type is ED448 */
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) && 
@@ -516,13 +543,16 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
     }
     
     /* Export public key */
-    ret = wc_ed448_export_public(&ed_key, output, (word32*)output_length);
+    out_len32 = (word32)output_size;
+    ret = wc_ed448_export_public(&ed_key, output, &out_len32);
     
     wc_ed448_free(&ed_key);
     
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
+
+    *output_length = (size_t)out_len32;
     
     return PSA_SUCCESS;
 }

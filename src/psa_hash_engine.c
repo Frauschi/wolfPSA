@@ -36,6 +36,11 @@
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 #ifdef WOLFSSL_MD5
 #include <wolfssl/wolfcrypt/md5.h>
@@ -642,7 +647,7 @@ psa_status_t psa_hash_verify(psa_hash_operation_t *operation,
         return PSA_ERROR_INVALID_SIGNATURE;
     }
 
-    if (XMEMCMP(computed_hash, hash, computed_hash_length) != 0) {
+    if (ConstantCompare(computed_hash, hash, (int)computed_hash_length) != 0) {
         return PSA_ERROR_INVALID_SIGNATURE;
     }
 
@@ -865,7 +870,7 @@ psa_status_t psa_hash_compare(psa_algorithm_t alg,
     }
     
     /* Compare the computed hash with the reference hash */
-    if (XMEMCMP(computed_hash, hash, computed_hash_length) != 0) {
+    if (ConstantCompare(computed_hash, hash, (int)computed_hash_length) != 0) {
         return PSA_ERROR_INVALID_SIGNATURE;
     }
     

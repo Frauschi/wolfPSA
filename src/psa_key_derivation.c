@@ -23,6 +23,7 @@
     #include <config.h>
 #endif
 
+#include <limits.h>
 #include <wolfssl/wolfcrypt/settings.h>
 
 #if defined(WOLFSSL_PSA_ENGINE)
@@ -36,6 +37,11 @@
 #include <wolfssl/wolfcrypt/pwdbased.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/cmac.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 typedef struct wolfpsa_kdf_ctx {
     psa_algorithm_t alg;
@@ -82,6 +88,7 @@ static wolfpsa_kdf_ctx_t* wolfpsa_kdf_get_ctx(psa_key_derivation_operation_t *op
 static void wolfpsa_kdf_free_buf(uint8_t **buf, size_t *len)
 {
     if (buf != NULL && *buf != NULL) {
+        wc_ForceZero(*buf, len != NULL ? *len : 0);
         XFREE(*buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         *buf = NULL;
     }
@@ -95,12 +102,18 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
 {
     uint8_t *new_buf;
 
+    if (buf == NULL || len == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     if (data == NULL && data_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (data_length == 0) {
         return PSA_SUCCESS;
+    }
+    if (*len > SIZE_MAX - data_length) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
     new_buf = (uint8_t *)XMALLOC(*len + data_length, NULL,
@@ -111,6 +124,7 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
 
     if (*buf != NULL) {
         XMEMCPY(new_buf, *buf, *len);
+        wc_ForceZero(*buf, *len);
         XFREE(*buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 
@@ -440,12 +454,13 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *ope
 psa_status_t psa_key_derivation_get_capacity(const psa_key_derivation_operation_t *operation,
                                              size_t *capacity)
 {
-    const wolfpsa_kdf_ctx_t *ctx = (const wolfpsa_kdf_ctx_t *)(uintptr_t)operation->opaque;
+    const wolfpsa_kdf_ctx_t *ctx;
 
     if (operation == NULL || capacity == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    ctx = (const wolfpsa_kdf_ctx_t *)(uintptr_t)operation->opaque;
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
     }
@@ -1094,17 +1109,25 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
 
     status = psa_key_derivation_output_bytes(operation, buffer, expected_length);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
-    if (XMEMCMP(buffer, expected, expected_length) != 0) {
+    if (expected_length > INT_MAX) {
+        wc_ForceZero(buffer, expected_length);
+        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (ConstantCompare(buffer, expected, (int)expected_length) != 0) {
         status = PSA_ERROR_INVALID_SIGNATURE;
     }
     else {
         status = PSA_SUCCESS;
     }
 
+    wc_ForceZero(buffer, expected_length);
     XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
 }

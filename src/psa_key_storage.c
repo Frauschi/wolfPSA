@@ -1134,6 +1134,9 @@ psa_status_t psa_export_public_key(
 
     if (!PSA_KEY_TYPE_IS_RSA(attributes.type) &&
         !PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        if (use_volatile) {
+            wolfpsa_free_key_data(key_data);
+        }
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 

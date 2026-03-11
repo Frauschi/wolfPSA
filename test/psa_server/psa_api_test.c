@@ -27,8 +27,12 @@
 
 #define TEST_OK 0
 #define TEST_FAIL 1
+#define TEST_SKIPPED 2
 
 typedef int (*test_fn_t)(void);
+
+static int tests_passed = 0;
+static int tests_skipped = 0;
 
 static int check_status(psa_status_t st, const char* what)
 {
@@ -298,6 +302,57 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+static int test_chacha20_poly1305_rejects_aes_key(void)
+{
+    static const uint8_t key[32] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t plaintext[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    uint8_t out[sizeof(plaintext) + 16];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    /*
+     * Import a valid AES AEAD key first, then prove that the ChaCha20-Poly1305
+     * path rejects it when the operation algorithm does not match the key type.
+     */
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES for GCM)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_CHACHA20_POLY1305,
+                          nonce, sizeof(nonce),
+                          NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          out, sizeof(out), &out_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_encrypt(AES key with ChaCha20) rejected") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES for GCM)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_asym_ecc(void)
 {
     static const uint8_t msg[] = "psa ecc sign";
@@ -388,10 +443,96 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_ed25519_signature_length(void)
+{
+    static const uint8_t hash[64] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
+    };
+    uint8_t sig[128];
+    /*
+     * The original bug cast `size_t*` to `word32*`. On 64-bit builds that can
+     * update only the low 32 bits, leaving the upper 32 bits stale. Seed
+     * `sig_len` with the low half clear and the upper half all ones so a
+     * truncated store becomes a large non-64 value instead of accidentally
+     * looking correct.
+     */
+    size_t sig_len = ~((size_t)UINT32_MAX);
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, 255);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ED25519PH);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(ED25519)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_sign_hash(key_id, PSA_ALG_ED25519PH,
+                       hash, sizeof(hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(sig_len == 64u, "psa_sign_hash(ED25519PH) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ED25519PH,
+                         hash, sizeof(hash), sig, sig_len);
+    if (check_status(st, "psa_verify_hash(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ED25519)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_kdf_null_capacity(void)
+{
+    size_t capacity = 0;
+    psa_status_t st;
+
+    st = psa_key_derivation_get_capacity(NULL, &capacity);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_get_capacity(NULL)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
+    int ret;
+
     fprintf(stderr, "RUN %s\n", name);
-    return fn();
+    ret = fn();
+    if (ret == TEST_OK) {
+        tests_passed++;
+    }
+    else if (ret == TEST_SKIPPED) {
+        tests_skipped++;
+        fprintf(stderr, "SKIP %s\n", name);
+    }
+    return ret;
 }
 
 int main(int argc, char** argv)
@@ -403,24 +544,39 @@ int main(int argc, char** argv)
     if (check_status(st, "psa_crypto_init") != TEST_OK) return TEST_FAIL;
 
     if (only == NULL || strcmp(only, "random") == 0) {
-        if (run_named_test("random", test_random) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("random", test_random) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "hash") == 0) {
-        if (run_named_test("hash", test_hash) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("hash", test_hash) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "hmac") == 0) {
-        if (run_named_test("hmac", test_hmac) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("hmac", test_hmac) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
-        if (run_named_test("cipher_cbc", test_cipher_cbc) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("cipher_cbc", test_cipher_cbc) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
-        if (run_named_test("aead_gcm", test_aead_gcm) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "chacha20_aes_reject") == 0) {
+        if (run_named_test("chacha20_aes_reject",
+                           test_chacha20_poly1305_rejects_aes_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
-        if (run_named_test("asym_ecc", test_asym_ecc) != TEST_OK) return TEST_FAIL;
+        if (run_named_test("asym_ecc", test_asym_ecc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
+        if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
+        if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) == TEST_FAIL) return TEST_FAIL;
     }
 
-    printf("PSA API test: OK\n");
+    printf("PSA API test: OK (passed=%d skipped=%d)\n",
+           tests_passed, tests_skipped);
     return TEST_OK;
 }

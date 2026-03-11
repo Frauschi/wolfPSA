@@ -66,11 +66,17 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
 {
     uint8_t *new_buf;
 
+    if (buf == NULL || len == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     if (data == NULL && data_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     if (data_length == 0) {
         return PSA_SUCCESS;
+    }
+    if (*len > SIZE_MAX - data_length) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
     new_buf = (uint8_t *)XMALLOC(*len + data_length, NULL,
@@ -81,6 +87,7 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
 
     if (*buf != NULL) {
         XMEMCPY(new_buf, *buf, *len);
+        wc_ForceZero(*buf, *len);
         XFREE(*buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 
@@ -124,8 +131,7 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         }
     }
     else if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CHACHA20_POLY1305)) {
-        if (attributes->type != PSA_KEY_TYPE_CHACHA20 &&
-            attributes->type != PSA_KEY_TYPE_AES) {
+        if (attributes->type != PSA_KEY_TYPE_CHACHA20) {
             wolfpsa_free_key_data(*key_data);
             *key_data = NULL;
             *key_data_length = 0;
@@ -859,6 +865,7 @@ psa_status_t psa_aead_abort(psa_aead_operation_t *operation)
             XFREE(ctx->input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         if (ctx->key != NULL) {
+            wc_ForceZero(ctx->key, ctx->key_length);
             XFREE(ctx->key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
