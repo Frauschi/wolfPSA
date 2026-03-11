@@ -23,6 +23,7 @@
     #include <config.h>
 #endif
 
+#include <limits.h>
 #include <wolfssl/wolfcrypt/settings.h>
 
 #if defined(WOLFSSL_PSA_ENGINE)
@@ -1105,8 +1106,15 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
 
     status = psa_key_derivation_output_bytes(operation, buffer, expected_length);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
+    }
+
+    if (expected_length > INT_MAX) {
+        wc_ForceZero(buffer, expected_length);
+        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (ConstantCompare(buffer, expected, (int)expected_length) != 0) {
@@ -1116,6 +1124,7 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
         status = PSA_SUCCESS;
     }
 
+    wc_ForceZero(buffer, expected_length);
     XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
 }
