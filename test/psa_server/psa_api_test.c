@@ -449,7 +449,14 @@ static int test_ed25519_signature_length(void)
         0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
     };
     uint8_t sig[128];
-    size_t sig_len = ~(size_t)0;
+    /*
+     * The original bug cast `size_t*` to `word32*`. On 64-bit builds that can
+     * update only the low 32 bits, leaving the upper 32 bits stale. Seed
+     * `sig_len` with the low half clear and the upper half all ones so a
+     * truncated store becomes a large non-64 value instead of accidentally
+     * looking correct.
+     */
+    size_t sig_len = ~((size_t)UINT32_MAX);
     psa_key_id_t key_id = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_status_t st;
