@@ -306,16 +306,6 @@ static int test_chacha20_poly1305_rejects_aes_key(void)
         0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
         0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
     };
-    static const uint8_t nonce[12] = {
-        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-        0x00,0x00,0x00,0x00
-    };
-    static const uint8_t plaintext[16] = {
-        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    };
-    uint8_t out[sizeof(plaintext) + 16];
-    size_t out_len = 0;
     psa_key_id_t key_id = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_status_t st;
@@ -325,23 +315,19 @@ static int test_chacha20_poly1305_rejects_aes_key(void)
     psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
     psa_set_key_algorithm(&attrs, PSA_ALG_CHACHA20_POLY1305);
 
+    /*
+     * The fixed behavior rejects this invalid key-type/algorithm pairing at
+     * import time. If import ever succeeds, the test is no longer checking
+     * the intended regression.
+     */
     st = psa_import_key(&attrs, key, sizeof(key), &key_id);
-    if (check_status(st, "psa_import_key(AES for ChaCha20)") != TEST_OK) return TEST_FAIL;
-
-    st = psa_aead_encrypt(key_id, PSA_ALG_CHACHA20_POLY1305,
-                          nonce, sizeof(nonce),
-                          NULL, 0,
-                          plaintext, sizeof(plaintext),
-                          out, sizeof(out), &out_len);
-    if (st != PSA_ERROR_INVALID_ARGUMENT) {
-        (void)psa_destroy_key(key_id);
-        printf("FAIL: psa_aead_encrypt accepted AES key for ChaCha20-Poly1305 (status=%d)\n",
-               (int)st);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key(AES for ChaCha20) rejected") != TEST_OK) {
+        if (key_id != 0) {
+            (void)psa_destroy_key(key_id);
+        }
         return TEST_FAIL;
     }
-
-    st = psa_destroy_key(key_id);
-    if (check_status(st, "psa_destroy_key(AES for ChaCha20)") != TEST_OK) return TEST_FAIL;
 
     return TEST_OK;
 }
