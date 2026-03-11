@@ -120,6 +120,7 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
 
     if (*buf != NULL) {
         XMEMCPY(new_buf, *buf, *len);
+        wc_ForceZero(*buf, *len);
         XFREE(*buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 
