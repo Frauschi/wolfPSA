@@ -775,6 +775,7 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
     status = psa_raw_key_agreement(alg, private_key, peer_key, peer_key_length,
                                    secret, secret_len, &output_len);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
@@ -785,22 +786,26 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
 
         if (out_type != PSA_KEY_TYPE_DERIVE &&
             out_type != PSA_KEY_TYPE_RAW_DATA) {
+            wc_ForceZero(secret, secret_len);
             XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         status = psa_import_key(attributes, secret, output_len, key);
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
     status = psa_key_derivation_setup(&kdf_op, kdf_alg);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
     status = psa_key_derivation_input_bytes(&kdf_op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                             secret, output_len);
+    wc_ForceZero(secret, secret_len);
     XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (status != PSA_SUCCESS) {
         psa_key_derivation_abort(&kdf_op);
