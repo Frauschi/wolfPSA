@@ -738,6 +738,7 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
     if (PSA_ALG_IS_HKDF(ctx->alg)) {
         int hash_len = wc_HashGetDigestSize(hash_type);
         uint8_t prk[WC_MAX_DIGEST_SIZE];
+        psa_status_t status;
 
         if (hash_len <= 0 || (size_t)hash_len > sizeof(prk)) {
             return PSA_ERROR_NOT_SUPPORTED;
@@ -747,7 +748,9 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
                               ctx->secret, (word32)ctx->secret_length,
                               prk);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            wc_ForceZero(prk, sizeof(prk));
+            return status;
         }
 
         ret = wc_HKDF_Expand(hash_type,
@@ -755,8 +758,11 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
                              ctx->info, (word32)ctx->info_length,
                              output, (word32)output_length);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            wc_ForceZero(prk, sizeof(prk));
+            return status;
         }
+        wc_ForceZero(prk, sizeof(prk));
         return PSA_SUCCESS;
     }
 
