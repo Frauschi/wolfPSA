@@ -15,9 +15,16 @@
 
 int main(void)
 {
-    size_t huge = (size_t)UINT32_MAX + 1u;
+    size_t huge;
     uint8_t* buf;
     psa_status_t st;
+
+    if (SIZE_MAX <= UINT32_MAX) {
+        printf("SKIP psa_random_size_test requires size_t wider than 32 bits\n");
+        return 0;
+    }
+
+    huge = (size_t)UINT32_MAX + 1u;
 
     st = psa_crypto_init();
     if (st != PSA_SUCCESS) {
@@ -28,8 +35,8 @@ int main(void)
     buf = (uint8_t*)mmap(NULL, huge, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (buf == MAP_FAILED) {
-        perror("mmap");
-        return 2;
+        printf("SKIP mmap failed for size=%zu\n", huge);
+        return 0;
     }
 
     st = psa_generate_random(buf, huge);

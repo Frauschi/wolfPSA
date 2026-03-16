@@ -1,6 +1,7 @@
 WOLFPSA_PATH ?= ..
 WOLFSSL_PATH ?= $(WOLFPSA_PATH)/../wolfssl
 WOLFPSA_ABS := $(abspath $(WOLFPSA_PATH))
+BUILD_DIR ?= build
 
 WOLFSSL_CANDIDATE_DIRS := \
 	$(WOLFSSL_PATH)/build \
@@ -33,6 +34,7 @@ ifneq ($(WOLFSSL_BUILD_DIR),)
 CPPFLAGS += -I$(WOLFSSL_BUILD_DIR)
 endif
 CPPFLAGS += -I$(WOLFPSA_PATH) -I$(WOLFPSA_PATH)/wolfpsa
+CPPFLAGS += -I$(WOLFPSA_PATH)/src
 CPPFLAGS += -I$(WOLFPSA_PATH)/test/psa_server
 
 LDFLAGS += -L$(WOLFPSA_PATH)
@@ -66,8 +68,8 @@ PSA_DES3_STACK_SCRUB_TEST_OBJS = psa_server/psa_des3_stack_scrub_test.o
 PSA_ECC_BIT_INFERENCE_TEST_OBJS = psa_server/psa_ecc_bit_inference_test.o
 PSA_ECC_CURVE_ID_TEST_OBJS = psa_server/psa_ecc_curve_id_test.o
 PSA_RANDOM_SIZE_TEST_OBJS = psa_server/psa_random_size_test.o
-PSA_ECC_CURVE_ID_TEST_DEPS = $(WOLFPSA_PATH)/build/obj/psa_asymmetric.o \
-	$(WOLFPSA_PATH)/build/obj/psa_pq.o
+PSA_ECC_CURVE_ID_TEST_DEPS = $(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_asymmetric.o \
+	$(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_pq.o
 PSA_RSA_PSS_TEST_OBJS = psa_server/psa_rsa_pss_interop_test.o
 
 .PHONY: all clean rebuild-wolfssl-psa require-wolfssl-lib

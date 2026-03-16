@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #include <wolfpsa/psa/crypto.h>
+#include "psa_aead_internal.h"
 
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <wolfssl/wolfcrypt/hmac.h>
@@ -302,25 +303,6 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
-typedef struct test_wolfpsa_aead_ctx {
-    psa_algorithm_t alg;
-    psa_key_type_t key_type;
-    size_t key_bits;
-    int direction;
-    uint8_t *key;
-    size_t key_length;
-    uint8_t nonce[PSA_AEAD_NONCE_MAX_SIZE];
-    size_t nonce_length;
-    uint8_t *aad;
-    size_t aad_length;
-    uint8_t *input;
-    size_t input_length;
-    size_t ad_expected;
-    size_t plaintext_expected;
-    size_t tag_length;
-    int lengths_set;
-} test_wolfpsa_aead_ctx_t;
-
 static int test_aead_multipart_length_overflow_rejected(void)
 {
     static const uint8_t key[16] = {
@@ -337,7 +319,7 @@ static int test_aead_multipart_length_overflow_rejected(void)
     psa_key_id_t key_id = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_aead_operation_t op = psa_aead_operation_init();
-    test_wolfpsa_aead_ctx_t *ctx;
+    wolfpsa_aead_ctx_t *ctx;
     int ret = TEST_OK;
     psa_status_t st;
 
@@ -356,7 +338,7 @@ static int test_aead_multipart_length_overflow_rejected(void)
     st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
     if (check_status(st, "psa_aead_set_nonce") != TEST_OK) goto cleanup;
 
-    ctx = (test_wolfpsa_aead_ctx_t *)(uintptr_t)op.opaque;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
     ctx->aad_length = SIZE_MAX - 1;
     st = psa_aead_update_ad(&op, chunk, sizeof(chunk));
     if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
@@ -372,7 +354,7 @@ static int test_aead_multipart_length_overflow_rejected(void)
     st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
     if (check_status(st, "psa_aead_set_nonce(plaintext)") != TEST_OK) goto cleanup;
 
-    ctx = (test_wolfpsa_aead_ctx_t *)(uintptr_t)op.opaque;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
     ctx->input_length = SIZE_MAX - 1;
     st = psa_aead_update(&op, chunk, sizeof(chunk), out, sizeof(out), &out_len);
     if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,

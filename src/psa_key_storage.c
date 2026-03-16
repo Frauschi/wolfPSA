@@ -1238,7 +1238,7 @@ psa_status_t psa_export_public_key(
         wolfPSA_Store_Close(store);
         store = NULL;
         if (ret != (int)key_data_length) {
-            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_STORAGE_FAILURE;
         }
     }
@@ -1390,7 +1390,7 @@ psa_status_t psa_export_public_key(
     #endif
     }
 
-    XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -1589,14 +1589,14 @@ psa_status_t psa_copy_key(
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)key_data_length) {
-        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        wolfpsa_forcezero_free_key_data(buffer, key_data_length);
         return PSA_ERROR_STORAGE_FAILURE;
     }
     
     /* Import the key with new attributes */
     status = psa_import_key(&dst_attr, buffer, key_data_length, target_key);
     
-    XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfpsa_forcezero_free_key_data(buffer, key_data_length);
     
     return status;
 }

@@ -27,7 +27,7 @@ jobs:
         run: make -C test rebuild-wolfssl-psa
 
       - name: Build PSA API tests
-        run: make -C test psa_api_test psa_ecc_bit_inference_test psa_ecc_curve_id_test
+        run: make -C test psa_api_test psa_des3_stack_scrub_test psa_ecc_bit_inference_test psa_ecc_curve_id_test psa_random_size_test
 
       - name: Run PSA API test
         env:
@@ -43,9 +43,23 @@ jobs:
           rm -rf test/.store
           ./test/psa_ecc_bit_inference_test
 
+      - name: Run DES3 stack scrub test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
+        run: |
+          rm -rf test/.store
+          ./test/psa_des3_stack_scrub_test
+
       - name: Run ECC curve id test
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
         run: |
           rm -rf test/.store
           ./test/psa_ecc_curve_id_test
+
+      - name: Run random size test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
+        run: |
+          rm -rf test/.store
+          ./test/psa_random_size_test
