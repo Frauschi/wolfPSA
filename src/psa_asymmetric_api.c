@@ -160,7 +160,7 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
 
     key_usage = psa_get_key_usage_flags(attributes);
     if ((key_usage & usage) == 0) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_PERMITTED;
@@ -171,14 +171,14 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
         if (PSA_ALG_IS_KEY_AGREEMENT(alg) && PSA_ALG_IS_KEY_AGREEMENT(key_alg)) {
             if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
                 PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {
-                wolfpsa_free_key_data(*key_data);
+                wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
                 *key_data = NULL;
                 *key_data_length = 0;
                 return PSA_ERROR_NOT_PERMITTED;
             }
         }
         else if (key_alg != alg) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
@@ -215,7 +215,7 @@ psa_status_t psa_asymmetric_encrypt(psa_key_id_t key,
 
     if (PSA_KEY_TYPE_IS_RSA(attributes.type)) {
         if (output == NULL) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         status = psa_asymmetric_encrypt_rsa(attributes.type, attributes.bits,
@@ -229,7 +229,7 @@ psa_status_t psa_asymmetric_encrypt(psa_key_id_t key,
             PSA_ERROR_NOT_SUPPORTED : PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -260,7 +260,7 @@ psa_status_t psa_asymmetric_decrypt(psa_key_id_t key,
 
     if (PSA_KEY_TYPE_IS_RSA(attributes.type)) {
         if (output == NULL) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         status = psa_asymmetric_decrypt_rsa(attributes.type, attributes.bits,
@@ -274,7 +274,7 @@ psa_status_t psa_asymmetric_decrypt(psa_key_id_t key,
             PSA_ERROR_NOT_SUPPORTED : PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -348,7 +348,7 @@ psa_status_t psa_sign_hash(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -417,7 +417,7 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -451,7 +451,7 @@ psa_status_t psa_sign_message(psa_key_id_t key,
         hash_alg = 0;
         hash_length = input_length;
         if (hash_length > sizeof(hash)) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         XMEMCPY(hash, input, hash_length);
@@ -459,14 +459,14 @@ psa_status_t psa_sign_message(psa_key_id_t key,
     else {
         hash_alg = PSA_ALG_SIGN_GET_HASH(alg);
         if (hash_alg == 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_SUPPORTED;
         }
 
         status = psa_hash_compute(hash_alg, input, input_length,
                                   hash, sizeof(hash), &hash_length);
         if (status != PSA_SUCCESS) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return status;
         }
     }
@@ -516,7 +516,7 @@ psa_status_t psa_sign_message(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -549,7 +549,7 @@ psa_status_t psa_verify_message(psa_key_id_t key,
         hash_alg = 0;
         hash_length = input_length;
         if (hash_length > sizeof(hash)) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         XMEMCPY(hash, input, hash_length);
@@ -557,14 +557,14 @@ psa_status_t psa_verify_message(psa_key_id_t key,
     else {
         hash_alg = PSA_ALG_SIGN_GET_HASH(alg);
         if (hash_alg == 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_SUPPORTED;
         }
 
         status = psa_hash_compute(hash_alg, input, input_length,
                                   hash, sizeof(hash), &hash_length);
         if (status != PSA_SUCCESS) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return status;
         }
     }
@@ -610,7 +610,7 @@ psa_status_t psa_verify_message(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -652,13 +652,13 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     }
 
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attributes.type)) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     curve_id = wc_psa_get_ecc_curve_id(attributes.type, attributes.bits);
     if (curve_id == ECC_CURVE_INVALID) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
@@ -668,17 +668,17 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
         expected_secret_len = PSA_RAW_KEY_AGREEMENT_OUTPUT_SIZE(attributes.type,
                                                                 attributes.bits);
         if (expected_secret_len == 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_SUPPORTED;
         }
         if (output_size < expected_secret_len) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_BUFFER_TOO_SMALL;
         }
     }
 
     if (peer_key == NULL && peer_key_length > 0) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     {
@@ -687,20 +687,20 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
 
         if (peer_key_length != expected_peer_len ||
             peer_key[0] != 0x04) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
 
     ret = wc_ecc_init(&priv);
     if (ret != 0) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return wc_error_to_psa_status(ret);
     }
     ret = wc_ecc_init(&pub);
     if (ret != 0) {
         wc_ecc_free(&priv);
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return wc_error_to_psa_status(ret);
     }
 
@@ -715,7 +715,7 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     if (ret != 0) {
         wc_ecc_free(&pub);
         wc_ecc_free(&priv);
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return wc_error_to_psa_status(ret);
     }
 
@@ -723,7 +723,7 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     ret = wc_ecc_shared_secret(&priv, &pub, output, &out_len);
     wc_ecc_free(&pub);
     wc_ecc_free(&priv);
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -775,6 +775,7 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
     status = psa_raw_key_agreement(alg, private_key, peer_key, peer_key_length,
                                    secret, secret_len, &output_len);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
@@ -785,22 +786,26 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
 
         if (out_type != PSA_KEY_TYPE_DERIVE &&
             out_type != PSA_KEY_TYPE_RAW_DATA) {
+            wc_ForceZero(secret, secret_len);
             XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         status = psa_import_key(attributes, secret, output_len, key);
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
     status = psa_key_derivation_setup(&kdf_op, kdf_alg);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
     status = psa_key_derivation_input_bytes(&kdf_op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                             secret, output_len);
+    wc_ForceZero(secret, secret_len);
     XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (status != PSA_SUCCESS) {
         psa_key_derivation_abort(&kdf_op);

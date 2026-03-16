@@ -33,32 +33,11 @@
 #include <wolfpsa/psa_chacha20_poly1305.h>
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
-
-typedef struct wolfpsa_aead_ctx {
-    psa_algorithm_t alg;
-    psa_key_type_t key_type;
-    size_t key_bits;
-    int direction;
-    uint8_t *key;
-    size_t key_length;
-    uint8_t nonce[PSA_AEAD_NONCE_MAX_SIZE];
-    size_t nonce_length;
-    uint8_t *aad;
-    size_t aad_length;
-    uint8_t *input;
-    size_t input_length;
-    size_t ad_expected;
-    size_t plaintext_expected;
-    size_t tag_length;
-    int lengths_set;
-} wolfpsa_aead_ctx_t;
+#include "psa_aead_internal.h"
 
 static wolfpsa_aead_ctx_t* wolfpsa_aead_get_ctx(psa_aead_operation_t *operation)
 {
-    if (operation == NULL) {
-        return NULL;
-    }
-    return (wolfpsa_aead_ctx_t *)(uintptr_t)operation->opaque;
+    return wolfpsa_aead_get_ctx_ptr(operation);
 }
 
 static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
@@ -124,7 +103,7 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM) ||
         PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM)) {
         if (attributes->type != PSA_KEY_TYPE_AES) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
@@ -132,14 +111,14 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
     }
     else if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CHACHA20_POLY1305)) {
         if (attributes->type != PSA_KEY_TYPE_CHACHA20) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
     else {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_SUPPORTED;
@@ -147,7 +126,7 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
 
     key_usage = psa_get_key_usage_flags(attributes);
     if ((key_usage & usage) == 0) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_PERMITTED;
@@ -161,14 +140,14 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         req_tag_len = wolfpsa_aead_tag_length(alg);
 
         if (key_tag_len == 0 || req_tag_len == 0) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
         }
 
         if (key_base != req_base) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
@@ -176,14 +155,14 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
 
         if ((key_alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
             if (req_tag_len < key_tag_len) {
-                wolfpsa_free_key_data(*key_data);
+                wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
                 *key_data = NULL;
                 *key_data_length = 0;
                 return PSA_ERROR_NOT_PERMITTED;
             }
         }
         else if (req_tag_len != key_tag_len) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
@@ -224,7 +203,7 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     ctx = (wolfpsa_aead_ctx_t *)XMALLOC(sizeof(*ctx), NULL,
                                         DYNAMIC_TYPE_TMP_BUFFER);
     if (ctx == NULL) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     XMEMSET(ctx, 0, sizeof(*ctx));
@@ -234,14 +213,14 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     ctx->key_bits = attributes.bits;
     ctx->tag_length = wolfpsa_aead_tag_length(alg);
     if (ctx->tag_length == 0) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     ctx->direction = (usage == PSA_KEY_USAGE_ENCRYPT) ? 1 : 0;
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM) &&
         wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -249,14 +228,14 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     ctx->key = (uint8_t *)XMALLOC(key_data_length, NULL,
                                   DYNAMIC_TYPE_TMP_BUFFER);
     if (ctx->key == NULL) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     XMEMCPY(ctx->key, key_data, key_data_length);
     ctx->key_length = key_data_length;
 
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     operation->opaque = (uintptr_t)ctx;
     return PSA_SUCCESS;
 }
@@ -398,7 +377,8 @@ psa_status_t psa_aead_update_ad(psa_aead_operation_t *operation,
         return PSA_ERROR_BAD_STATE;
     }
     if (ctx->lengths_set &&
-        ctx->aad_length + input_length > ctx->ad_expected) {
+        (input_length > SIZE_MAX - ctx->aad_length ||
+         ctx->aad_length + input_length > ctx->ad_expected)) {
         status = PSA_ERROR_INVALID_ARGUMENT;
         psa_aead_abort(operation);
         return status;
@@ -443,7 +423,8 @@ psa_status_t psa_aead_update(psa_aead_operation_t *operation,
         return status;
     }
     if (ctx->lengths_set &&
-        ctx->input_length + input_length > ctx->plaintext_expected) {
+        (input_length > SIZE_MAX - ctx->input_length ||
+         ctx->input_length + input_length > ctx->plaintext_expected)) {
         status = PSA_ERROR_INVALID_ARGUMENT;
         psa_aead_abort(operation);
         return status;

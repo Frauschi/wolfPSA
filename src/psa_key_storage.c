@@ -38,6 +38,7 @@
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
 
 #ifdef WOLFPSA_DEBUG_IMPORT
 #include <stdio.h>
@@ -110,6 +111,50 @@ static psa_status_t psa_wc_error_to_psa_status(int ret)
     }
 
     return status;
+}
+
+static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
+                                                   size_t length_bytes)
+{
+    switch (family) {
+        case PSA_ECC_FAMILY_SECP_R1:
+            switch (length_bytes) {
+                case 24: return 192;
+                case 28: return 224;
+                case 32: return 256;
+                case 48: return 384;
+                case 66: return 521;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_SECP_K1:
+            switch (length_bytes) {
+                case 24: return 192;
+                case 28: return 224;
+                case 32: return 256;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
+            switch (length_bytes) {
+                case 32: return 256;
+                case 48: return 384;
+                case 64: return 512;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_MONTGOMERY:
+        case PSA_ECC_FAMILY_TWISTED_EDWARDS:
+            switch (length_bytes) {
+                case 32: return 255;
+                case 56: return 448;
+                case 57: return 448;
+                default: return 0;
+            }
+
+        default:
+            return 0;
+    }
 }
 
 static int wolfpsa_usage_flags_valid(psa_key_usage_t usage)
@@ -195,6 +240,7 @@ static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
                 g_volatile_keys = cur->next;
             }
             if (cur->data != NULL) {
+                wc_ForceZero(cur->data, cur->data_length);
                 XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             }
             XMEMSET(cur, 0, sizeof(*cur));
@@ -290,15 +336,25 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
     }
 
     if (PSA_KEY_TYPE_IS_ECC(attr->type)) {
+        psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(attr->type);
+        psa_key_bits_t inferred_bits;
+
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr->type)) {
             if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
-            attr->bits = (psa_key_bits_t)(((data_length - 1u) / 2u) * 8u);
+            inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                         (data_length - 1u) / 2u);
         }
         else {
-            attr->bits = (psa_key_bits_t)(data_length * 8U);
+            inferred_bits = wolfpsa_ecc_bits_from_length(family, data_length);
         }
+
+        if (inferred_bits == 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        attr->bits = inferred_bits;
         return PSA_SUCCESS;
     }
 
@@ -460,6 +516,7 @@ void psa_key_storage_cleanup(void)
     while (cur != NULL) {
         wolfpsa_volatile_key_node* next = cur->next;
         if (cur->data != NULL) {
+            wc_ForceZero(cur->data, cur->data_length);
             XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         XMEMSET(cur, 0, sizeof(*cur));
@@ -677,9 +734,10 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     return PSA_SUCCESS;
 }
 
-void wolfpsa_free_key_data(uint8_t* key_data)
+void wolfpsa_forcezero_free_key_data(uint8_t* key_data, size_t key_data_length)
 {
     if (key_data != NULL) {
+        wc_ForceZero(key_data, key_data_length);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 }
@@ -870,11 +928,13 @@ psa_status_t psa_generate_key(
 
         status = psa_generate_random(key_data, key_data_length);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, key_data_length);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, key_data_length, key_id);
+        wc_ForceZero(key_data, key_data_length);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
@@ -895,11 +955,13 @@ psa_status_t psa_generate_key(
                                                  &priv_len,
                                                  NULL, 0, NULL);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, priv_len, key_id);
+        wc_ForceZero(key_data, priv_buf_size);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
 #else
@@ -923,6 +985,7 @@ psa_status_t psa_generate_key(
         pub_buf = (uint8_t *)XMALLOC(pub_buf_size, NULL,
                                      DYNAMIC_TYPE_TMP_BUFFER);
         if (pub_buf == NULL) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
@@ -934,11 +997,13 @@ psa_status_t psa_generate_key(
                                                  &pub_len);
         XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, priv_len, key_id);
+        wc_ForceZero(key_data, priv_buf_size);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
 #else
@@ -1018,16 +1083,16 @@ psa_status_t psa_export_key(
         if (status == PSA_SUCCESS) {
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_EXPORT) == 0) {
-                wolfpsa_free_key_data(vol_data);
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
                 return PSA_ERROR_NOT_PERMITTED;
             }
             if (data_size < vol_len) {
-                wolfpsa_free_key_data(vol_data);
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
                 return PSA_ERROR_BUFFER_TOO_SMALL;
             }
             XMEMCPY(data, vol_data, vol_len);
             *data_length = vol_len;
-            wolfpsa_free_key_data(vol_data);
+            wolfpsa_forcezero_free_key_data(vol_data, vol_len);
             return PSA_SUCCESS;
         }
     }
@@ -1135,7 +1200,7 @@ psa_status_t psa_export_public_key(
     if (!PSA_KEY_TYPE_IS_RSA(attributes.type) &&
         !PSA_KEY_TYPE_IS_ECC(attributes.type)) {
         if (use_volatile) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         }
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -1173,7 +1238,7 @@ psa_status_t psa_export_public_key(
         wolfPSA_Store_Close(store);
         store = NULL;
         if (ret != (int)key_data_length) {
-            XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_STORAGE_FAILURE;
         }
     }
@@ -1325,7 +1390,7 @@ psa_status_t psa_export_public_key(
     #endif
     }
 
-    XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -1414,36 +1479,36 @@ psa_status_t psa_copy_key(
     {
         psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
         uint8_t* key_data = NULL;
-        size_t key_data_length = 0;
+        key_data_length = 0;
 
         status = wolfpsa_volatile_get(source_key, &vol_attr,
                                       &key_data, &key_data_length);
         if (status == PSA_SUCCESS) {
-            psa_key_attributes_t dst_attr = *attributes;
+            dst_attr = *attributes;
 
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_COPY) == 0) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_NOT_PERMITTED;
             }
 
             if (attributes->type != vol_attr.type) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
             if (attributes->bits != 0 && attributes->bits != vol_attr.bits) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
             if (attributes->policy.alg != psa_get_key_algorithm(&vol_attr)) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
             if (attributes->lifetime != vol_attr.lifetime) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
@@ -1453,7 +1518,7 @@ psa_status_t psa_copy_key(
 
             status = psa_import_key(&dst_attr, key_data,
                                     key_data_length, target_key);
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return status;
         }
     }
@@ -1524,14 +1589,14 @@ psa_status_t psa_copy_key(
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)key_data_length) {
-        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        wolfpsa_forcezero_free_key_data(buffer, key_data_length);
         return PSA_ERROR_STORAGE_FAILURE;
     }
     
     /* Import the key with new attributes */
     status = psa_import_key(&dst_attr, buffer, key_data_length, target_key);
     
-    XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    wolfpsa_forcezero_free_key_data(buffer, key_data_length);
     
     return status;
 }

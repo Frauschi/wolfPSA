@@ -48,6 +48,9 @@ psa_status_t psa_generate_random(uint8_t *output, size_t output_size)
     if (output == NULL && output_size > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if (output_size > UINT32_MAX) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     wolfpsa_trace("psa_generate_random(%zu)", output_size);
     
