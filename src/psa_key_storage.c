@@ -1479,12 +1479,12 @@ psa_status_t psa_copy_key(
     {
         psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
         uint8_t* key_data = NULL;
-        size_t key_data_length = 0;
+        key_data_length = 0;
 
         status = wolfpsa_volatile_get(source_key, &vol_attr,
                                       &key_data, &key_data_length);
         if (status == PSA_SUCCESS) {
-            psa_key_attributes_t dst_attr = *attributes;
+            dst_attr = *attributes;
 
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_COPY) == 0) {
