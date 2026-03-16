@@ -196,6 +196,7 @@ static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
                 g_volatile_keys = cur->next;
             }
             if (cur->data != NULL) {
+                wc_ForceZero(cur->data, cur->data_length);
                 XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             }
             XMEMSET(cur, 0, sizeof(*cur));
@@ -461,6 +462,7 @@ void psa_key_storage_cleanup(void)
     while (cur != NULL) {
         wolfpsa_volatile_key_node* next = cur->next;
         if (cur->data != NULL) {
+            wc_ForceZero(cur->data, cur->data_length);
             XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         XMEMSET(cur, 0, sizeof(*cur));
