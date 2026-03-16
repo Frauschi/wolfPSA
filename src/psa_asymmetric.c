@@ -655,10 +655,18 @@ int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits)
         case PSA_ECC_FAMILY_SECP_R1:
             switch (bits) {
                 case 192:
+                #ifdef HAVE_ECC192
+                    return ECC_SECP192R1;
+                #else
                     return ECC_CURVE_INVALID;
+                #endif
                 
                 case 224:
+                #ifdef HAVE_ECC224
+                    return ECC_SECP224R1;
+                #else
                     return ECC_CURVE_INVALID;
+                #endif
                 
                 case 256:
                     return ECC_SECP256R1;
@@ -676,10 +684,18 @@ int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits)
         case PSA_ECC_FAMILY_SECP_K1:
             switch (bits) {
                 case 192:
+                #if defined(HAVE_ECC192) && defined(HAVE_ECC_KOBLITZ)
+                    return ECC_SECP192K1;
+                #else
                     return ECC_CURVE_INVALID;
+                #endif
                 
                 case 224:
+                #if defined(HAVE_ECC224) && defined(HAVE_ECC_KOBLITZ)
+                    return ECC_SECP224K1;
+                #else
                     return ECC_CURVE_INVALID;
+                #endif
                 
                 case 256:
                     return ECC_SECP256K1;
