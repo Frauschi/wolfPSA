@@ -113,6 +113,50 @@ static psa_status_t psa_wc_error_to_psa_status(int ret)
     return status;
 }
 
+static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
+                                                   size_t length_bytes)
+{
+    switch (family) {
+        case PSA_ECC_FAMILY_SECP_R1:
+            switch (length_bytes) {
+                case 24: return 192;
+                case 28: return 224;
+                case 32: return 256;
+                case 48: return 384;
+                case 66: return 521;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_SECP_K1:
+            switch (length_bytes) {
+                case 24: return 192;
+                case 28: return 224;
+                case 32: return 256;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
+            switch (length_bytes) {
+                case 32: return 256;
+                case 48: return 384;
+                case 64: return 512;
+                default: return 0;
+            }
+
+        case PSA_ECC_FAMILY_MONTGOMERY:
+        case PSA_ECC_FAMILY_TWISTED_EDWARDS:
+            switch (length_bytes) {
+                case 32: return 255;
+                case 56: return 448;
+                case 57: return 448;
+                default: return 0;
+            }
+
+        default:
+            return 0;
+    }
+}
+
 static int wolfpsa_usage_flags_valid(psa_key_usage_t usage)
 {
     psa_key_usage_t mask = PSA_KEY_USAGE_EXPORT |
@@ -292,15 +336,25 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
     }
 
     if (PSA_KEY_TYPE_IS_ECC(attr->type)) {
+        psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(attr->type);
+        psa_key_bits_t inferred_bits;
+
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr->type)) {
             if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
-            attr->bits = (psa_key_bits_t)(((data_length - 1u) / 2u) * 8u);
+            inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                         (data_length - 1u) / 2u);
         }
         else {
-            attr->bits = (psa_key_bits_t)(data_length * 8U);
+            inferred_bits = wolfpsa_ecc_bits_from_length(family, data_length);
         }
+
+        if (inferred_bits == 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        attr->bits = inferred_bits;
         return PSA_SUCCESS;
     }
 
