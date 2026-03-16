@@ -829,6 +829,7 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
         status = PSA_SUCCESS;
     }
 
+    wc_ForceZero(premaster, premaster_len);
     XFREE(premaster, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
 }
