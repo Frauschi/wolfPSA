@@ -1101,11 +1101,13 @@ psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *attribute
 
     status = psa_key_derivation_output_bytes(operation, buffer, key_len);
     if (status != PSA_SUCCESS) {
+        wc_ForceZero(buffer, key_len);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
 
     status = psa_import_key(attributes, buffer, key_len, key);
+    wc_ForceZero(buffer, key_len);
     XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
 }
