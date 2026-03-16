@@ -874,11 +874,13 @@ psa_status_t psa_generate_key(
 
         status = psa_generate_random(key_data, key_data_length);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, key_data_length);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, key_data_length, key_id);
+        wc_ForceZero(key_data, key_data_length);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
     }
@@ -899,11 +901,13 @@ psa_status_t psa_generate_key(
                                                  &priv_len,
                                                  NULL, 0, NULL);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, priv_len, key_id);
+        wc_ForceZero(key_data, priv_buf_size);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
 #else
@@ -927,6 +931,7 @@ psa_status_t psa_generate_key(
         pub_buf = (uint8_t *)XMALLOC(pub_buf_size, NULL,
                                      DYNAMIC_TYPE_TMP_BUFFER);
         if (pub_buf == NULL) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
@@ -938,11 +943,13 @@ psa_status_t psa_generate_key(
                                                  &pub_len);
         XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (status != PSA_SUCCESS) {
+            wc_ForceZero(key_data, priv_buf_size);
             XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return status;
         }
 
         status = psa_import_key(attributes, key_data, priv_len, key_id);
+        wc_ForceZero(key_data, priv_buf_size);
         XFREE(key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
 #else
