@@ -869,29 +869,35 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         int ret;
         Cmac cmac;
         word32 out_sz = WC_AES_BLOCK_SIZE;
+        psa_status_t status = PSA_SUCCESS;
 
         XMEMSET(zero_key, 0, sizeof(zero_key));
         ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
                           WC_CMAC_AES, NULL);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            goto cleanup;
         }
         ret = wc_CmacUpdate(&cmac, ctx->password, (word32)ctx->password_length);
         if (ret != 0) {
             wc_CmacFree(&cmac);
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            goto cleanup;
         }
         ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
         wc_CmacFree(&cmac);
         if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
-            return ret == 0 ? PSA_ERROR_NOT_SUPPORTED : wc_error_to_psa_status(ret);
+            status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                wc_error_to_psa_status(ret);
+            goto cleanup;
         }
 
         block_input_len = ctx->salt_length + 4;
         block_input = (uint8_t *)XMALLOC(block_input_len, NULL,
                                          DYNAMIC_TYPE_TMP_BUFFER);
         if (block_input == NULL) {
-            return PSA_ERROR_INSUFFICIENT_MEMORY;
+            status = PSA_ERROR_INSUFFICIENT_MEMORY;
+            goto cleanup;
         }
 
         blocks = (output_length + WC_AES_BLOCK_SIZE - 1) / WC_AES_BLOCK_SIZE;
@@ -905,8 +911,8 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             ret = wc_InitCmac(&cmac, prf_key, (word32)sizeof(prf_key),
                               WC_CMAC_AES, NULL);
             if (ret != 0) {
-                XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-                return wc_error_to_psa_status(ret);
+                status = wc_error_to_psa_status(ret);
+                goto cleanup;
             }
             out_sz = WC_AES_BLOCK_SIZE;
             ret = wc_CmacUpdate(&cmac, block_input, (word32)block_input_len);
@@ -915,8 +921,9 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             }
             wc_CmacFree(&cmac);
             if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
-                XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-                return ret == 0 ? PSA_ERROR_NOT_SUPPORTED : wc_error_to_psa_status(ret);
+                status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                    wc_error_to_psa_status(ret);
+                goto cleanup;
             }
 
             XMEMCPY(t_block, u_block, WC_AES_BLOCK_SIZE);
@@ -924,8 +931,8 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
                 ret = wc_InitCmac(&cmac, prf_key, (word32)sizeof(prf_key),
                                   WC_CMAC_AES, NULL);
                 if (ret != 0) {
-                    XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-                    return wc_error_to_psa_status(ret);
+                    status = wc_error_to_psa_status(ret);
+                    goto cleanup;
                 }
                 out_sz = WC_AES_BLOCK_SIZE;
                 ret = wc_CmacUpdate(&cmac, u_block, WC_AES_BLOCK_SIZE);
@@ -934,8 +941,9 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
                 }
                 wc_CmacFree(&cmac);
                 if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
-                    XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-                    return ret == 0 ? PSA_ERROR_NOT_SUPPORTED : wc_error_to_psa_status(ret);
+                    status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                        wc_error_to_psa_status(ret);
+                    goto cleanup;
                 }
                 t_block[0] ^= u_block[0];
                 t_block[1] ^= u_block[1];
@@ -964,8 +972,12 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
                 offset = output_length;
             }
         }
+cleanup:
+        wc_ForceZero(t_block, sizeof(t_block));
+        wc_ForceZero(u_block, sizeof(u_block));
+        wc_ForceZero(prf_key, sizeof(prf_key));
         XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-        return PSA_SUCCESS;
+        return status;
 #else
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
