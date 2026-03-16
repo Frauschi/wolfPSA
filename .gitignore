@@ -5,6 +5,8 @@ test-psa-api/psa-arch-tests
 libwolfpsa.so
 *.o
 test/psa_api_test
+test/psa_ecc_bit_inference_test
+test/psa_ecc_curve_id_test
 test/psa_tls_server
 psa_server/tls_client/psa_tls_client
 psa_tls_client

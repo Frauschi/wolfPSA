@@ -310,12 +310,14 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {
+            wc_ForceZero(des_key, sizeof(des_key));
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_ENCRYPTION);
+        wc_ForceZero(des_key, sizeof(des_key));
 #else
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -444,12 +446,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {
+            wc_ForceZero(des_key, sizeof(des_key));
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_DECRYPTION);
+        wc_ForceZero(des_key, sizeof(des_key));
 #else
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
