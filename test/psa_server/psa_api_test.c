@@ -302,6 +302,92 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+typedef struct test_wolfpsa_aead_ctx {
+    psa_algorithm_t alg;
+    psa_key_type_t key_type;
+    size_t key_bits;
+    int direction;
+    uint8_t *key;
+    size_t key_length;
+    uint8_t nonce[PSA_AEAD_NONCE_MAX_SIZE];
+    size_t nonce_length;
+    uint8_t *aad;
+    size_t aad_length;
+    uint8_t *input;
+    size_t input_length;
+    size_t ad_expected;
+    size_t plaintext_expected;
+    size_t tag_length;
+    int lengths_set;
+} test_wolfpsa_aead_ctx_t;
+
+static int test_aead_multipart_length_overflow_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t chunk[2] = { 0xaa, 0x55 };
+    uint8_t out[sizeof(chunk)];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    test_wolfpsa_aead_ctx_t *ctx;
+    int ret = TEST_OK;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM overflow)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup") != TEST_OK) goto cleanup;
+    st = psa_aead_set_lengths(&op, SIZE_MAX, SIZE_MAX);
+    if (check_status(st, "psa_aead_set_lengths") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce") != TEST_OK) goto cleanup;
+
+    ctx = (test_wolfpsa_aead_ctx_t *)(uintptr_t)op.opaque;
+    ctx->aad_length = SIZE_MAX - 1;
+    st = psa_aead_update_ad(&op, chunk, sizeof(chunk));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_update_ad rejects wrapped accumulated length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(plaintext)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_lengths(&op, 0, SIZE_MAX);
+    if (check_status(st, "psa_aead_set_lengths(plaintext)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(plaintext)") != TEST_OK) goto cleanup;
+
+    ctx = (test_wolfpsa_aead_ctx_t *)(uintptr_t)op.opaque;
+    ctx->input_length = SIZE_MAX - 1;
+    st = psa_aead_update(&op, chunk, sizeof(chunk), out, sizeof(out), &out_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_update rejects wrapped accumulated length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM overflow)") != TEST_OK) return TEST_FAIL;
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -557,6 +643,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_multipart_length_overflow") == 0) {
+        if (run_named_test("aead_multipart_length_overflow",
+                           test_aead_multipart_length_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "chacha20_aes_reject") == 0) {
         if (run_named_test("chacha20_aes_reject",

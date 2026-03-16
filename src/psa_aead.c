@@ -398,7 +398,8 @@ psa_status_t psa_aead_update_ad(psa_aead_operation_t *operation,
         return PSA_ERROR_BAD_STATE;
     }
     if (ctx->lengths_set &&
-        ctx->aad_length + input_length > ctx->ad_expected) {
+        (input_length > SIZE_MAX - ctx->aad_length ||
+         ctx->aad_length + input_length > ctx->ad_expected)) {
         status = PSA_ERROR_INVALID_ARGUMENT;
         psa_aead_abort(operation);
         return status;
@@ -443,7 +444,8 @@ psa_status_t psa_aead_update(psa_aead_operation_t *operation,
         return status;
     }
     if (ctx->lengths_set &&
-        ctx->input_length + input_length > ctx->plaintext_expected) {
+        (input_length > SIZE_MAX - ctx->input_length ||
+         ctx->input_length + input_length > ctx->plaintext_expected)) {
         status = PSA_ERROR_INVALID_ARGUMENT;
         psa_aead_abort(operation);
         return status;
