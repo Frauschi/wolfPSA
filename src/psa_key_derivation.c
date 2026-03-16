@@ -697,6 +697,7 @@ psa_status_t psa_key_derivation_key_agreement(psa_key_derivation_operation_t *op
                                                 secret, output_len);
     }
 
+    wc_ForceZero(secret, secret_len);
     XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
 }
