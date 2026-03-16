@@ -98,7 +98,8 @@ WOLFSSL_API psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
                                              psa_key_attributes_t* attributes,
                                              uint8_t** key_data,
                                              size_t* key_data_length);
-WOLFSSL_API void wolfpsa_free_key_data(uint8_t* key_data);
+WOLFSSL_API void wolfpsa_forcezero_free_key_data(uint8_t* key_data,
+                                                size_t key_data_length);
 
 #ifdef __cplusplus
 }

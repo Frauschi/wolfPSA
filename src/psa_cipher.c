@@ -138,7 +138,7 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     if (alg == PSA_ALG_STREAM_CIPHER) {
         if (attributes->type != PSA_KEY_TYPE_CHACHA20) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
@@ -146,7 +146,7 @@ static psa_status_t wolfpsa_cipher_check_key(
     }
     else if (attributes->type == PSA_KEY_TYPE_DES) {
         if (alg != PSA_ALG_CBC_NO_PADDING && alg != PSA_ALG_ECB_NO_PADDING) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
@@ -154,7 +154,7 @@ static psa_status_t wolfpsa_cipher_check_key(
     }
     else {
         if (attributes->type != PSA_KEY_TYPE_AES) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
@@ -163,7 +163,7 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     key_usage = psa_get_key_usage_flags(attributes);
     if ((key_usage & usage) == 0) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_PERMITTED;
@@ -171,7 +171,7 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     key_alg = psa_get_key_algorithm(attributes);
     if (key_alg != PSA_ALG_NONE && key_alg != alg) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_PERMITTED;
@@ -179,13 +179,13 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     if (attributes->type == PSA_KEY_TYPE_CHACHA20) {
         if (*key_data_length != CHACHA_MAX_KEY_SZ) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         if (attributes->bits != 256) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
@@ -195,14 +195,14 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     if (attributes->type == PSA_KEY_TYPE_DES) {
         if (*key_data_length != 16 && *key_data_length != 24) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
         }
 
         if (attributes->bits != (psa_key_bits_t)(*key_data_length * 8U)) {
-            wolfpsa_free_key_data(*key_data);
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_INVALID_ARGUMENT;
@@ -213,7 +213,7 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     if (*key_data_length != 16 && *key_data_length != 24 &&
         *key_data_length != 32) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -221,7 +221,7 @@ static psa_status_t wolfpsa_cipher_check_key(
 
     if (attributes->bits != 128 && attributes->bits != 192 &&
         attributes->bits != 256) {
-        wolfpsa_free_key_data(*key_data);
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -267,7 +267,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     ctx = (wolfpsa_cipher_ctx_t *)XMALLOC(sizeof(*ctx), NULL,
                                           DYNAMIC_TYPE_TMP_BUFFER);
     if (ctx == NULL) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     XMEMSET(ctx, 0, sizeof(*ctx));
@@ -283,7 +283,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 #else
     ctx->is_des3 = 0;
     if (attributes.type == PSA_KEY_TYPE_DES) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -310,14 +310,14 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_ENCRYPTION);
 #else
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
@@ -325,7 +325,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     else {
         ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
         if (ret != 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
@@ -343,7 +343,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
                                ctx->iv, AES_ENCRYPTION);
         }
     }
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     if (ret != 0) {
 #ifndef NO_DES3
         if (ctx->is_des3) {
@@ -401,7 +401,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     ctx = (wolfpsa_cipher_ctx_t *)XMALLOC(sizeof(*ctx), NULL,
                                           DYNAMIC_TYPE_TMP_BUFFER);
     if (ctx == NULL) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     XMEMSET(ctx, 0, sizeof(*ctx));
@@ -417,7 +417,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 #else
     ctx->is_des3 = 0;
     if (attributes.type == PSA_KEY_TYPE_DES) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -444,14 +444,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
 
         ret = wc_Des3_SetKey(&ctx->des3, des_key, ctx->iv, AES_DECRYPTION);
 #else
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
@@ -459,7 +459,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     else {
         ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
         if (ret != 0) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return wc_error_to_psa_status(ret);
         }
@@ -477,7 +477,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
                                ctx->iv, AES_DECRYPTION);
         }
     }
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     if (ret != 0) {
 #ifndef NO_DES3
         if (ctx->is_des3) {

@@ -584,32 +584,32 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
 
     status = wolfpsa_kdf_validate_step(ctx, step, key_data_length);
     if (status != PSA_SUCCESS) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
     if ((psa_get_key_usage_flags(&attributes) &
          (PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_VERIFY_DERIVATION)) == 0) {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_NOT_PERMITTED;
     }
 
     if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
         if (step != PSA_KEY_DERIVATION_INPUT_PASSWORD ||
             psa_get_key_type(&attributes) != PSA_KEY_TYPE_PASSWORD) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
     else if (step == PSA_KEY_DERIVATION_INPUT_SECRET ||
              step == PSA_KEY_DERIVATION_INPUT_OTHER_SECRET) {
         if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_DERIVE) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
     else {
-        wolfpsa_free_key_data(key_data);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
@@ -618,19 +618,19 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
         if (ctx->is_key_agreement) {
             if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
                 PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
-                wolfpsa_free_key_data(key_data);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_NOT_PERMITTED;
             }
         }
         else if (key_alg != ctx->alg) {
-            wolfpsa_free_key_data(key_data);
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_PERMITTED;
         }
     }
 
     status = psa_key_derivation_input_bytes(operation, step,
                                             key_data, key_data_length);
-    wolfpsa_free_key_data(key_data);
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
 
@@ -1161,13 +1161,13 @@ psa_status_t psa_key_derivation_verify_key(psa_key_derivation_operation_t *opera
 
     status = wolfpsa_get_key_data(expected, NULL, &expected_data, &expected_length);
     if (status != PSA_SUCCESS) {
-        wolfpsa_free_key_data(expected_data);
+        wolfpsa_forcezero_free_key_data(expected_data, expected_length);
         return status;
     }
 
     status = psa_key_derivation_verify_bytes(operation, expected_data,
                                              expected_length);
-    wolfpsa_free_key_data(expected_data);
+    wolfpsa_forcezero_free_key_data(expected_data, expected_length);
     return status;
 }
 
