@@ -921,7 +921,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
-                    bytes_to_process -= block_size;
+                    if (bytes_to_process >= block_size) {
+                        bytes_to_process -= block_size;
+                    }
+                    else {
+                        bytes_to_process = 0;
+                    }
                 }
 
                 full_blocks_len = bytes_to_process;
