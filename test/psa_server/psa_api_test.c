@@ -29,6 +29,8 @@
 #define TEST_OK 0
 #define TEST_FAIL 1
 #define TEST_SKIPPED 2
+#define ED25519_PUBLIC_KEY_BYTES 32u
+#define ED448_PUBLIC_KEY_BYTES   57u
 
 typedef int (*test_fn_t)(void);
 
@@ -735,6 +737,62 @@ static int test_ed25519_signature_length(void)
     return TEST_OK;
 }
 
+static int test_twisted_edwards_export_public_key(size_t bits,
+                                                  psa_algorithm_t alg,
+                                                  size_t expected_pub_len,
+                                                  const char* label)
+{
+    uint8_t pub[ED448_PUBLIC_KEY_BYTES];
+    size_t pub_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs,
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, label) != TEST_OK) return TEST_FAIL;
+
+    st = psa_export_public_key(key_id, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "psa_export_public_key(Twisted Edwards)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(pub_len == expected_pub_len,
+                   "psa_export_public_key(Twisted Edwards) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(Twisted Edwards)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_ed25519_export_public_key(void)
+{
+    return test_twisted_edwards_export_public_key(255, PSA_ALG_ED25519PH,
+                                                  ED25519_PUBLIC_KEY_BYTES,
+                                                  "psa_generate_key(ED25519 export)");
+}
+
+static int test_ed448_export_public_key(void)
+{
+    return test_twisted_edwards_export_public_key(448, PSA_ALG_ED448PH,
+                                                  ED448_PUBLIC_KEY_BYTES,
+                                                  "psa_generate_key(ED448 export)");
+}
+
 static int test_kdf_null_capacity(void)
 {
     size_t capacity = 0;
@@ -811,6 +869,16 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
         if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed25519_export_pub") == 0) {
+        if (run_named_test("ed25519_export_pub", test_ed25519_export_public_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed448_export_pub") == 0) {
+        if (run_named_test("ed448_export_pub", test_ed448_export_public_key) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

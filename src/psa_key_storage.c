@@ -88,6 +88,13 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
                                                 uint8_t *public_key,
                                                 size_t public_key_size,
                                                 size_t *public_key_length);
+psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
+                                                     size_t key_bits,
+                                                     const uint8_t *key_buffer,
+                                                     size_t key_buffer_size,
+                                                     uint8_t *output,
+                                                     size_t output_size,
+                                                     size_t *output_length);
 #endif
 #ifdef HAVE_ED448
 psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
@@ -98,6 +105,13 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
                                               uint8_t *public_key,
                                               size_t public_key_size,
                                               size_t *public_key_length);
+psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
+                                                   size_t key_bits,
+                                                   const uint8_t *key_buffer,
+                                                   size_t key_buffer_size,
+                                                   uint8_t *output,
+                                                   size_t output_size,
+                                                   size_t *output_length);
 #endif
 
 static psa_status_t psa_wc_error_to_psa_status(int ret)
@@ -1395,40 +1409,65 @@ psa_status_t psa_export_public_key(
             }
         }
         else {
-            ecc_key ecc;
-            word32 out_len = (word32)data_size;
-            int curve_id = wc_psa_get_ecc_curve_id(attributes.type,
-                                                   attributes.bits);
+            psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(attributes.type);
 
-            if (curve_id == ECC_CURVE_INVALID) {
-                status = PSA_ERROR_NOT_SUPPORTED;
-            }
-            else if (wc_ecc_init(&ecc) != 0) {
-                status = PSA_ERROR_INSUFFICIENT_MEMORY;
+            if (family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+            #ifdef HAVE_ED25519
+                if (attributes.bits == 255) {
+                    status = psa_asymmetric_export_public_key_ed25519(
+                        attributes.type, attributes.bits, key_data,
+                        key_data_length, data, data_size, data_length);
+                }
+                else
+            #endif
+            #ifdef HAVE_ED448
+                if (attributes.bits == 448) {
+                    status = psa_asymmetric_export_public_key_ed448(
+                        attributes.type, attributes.bits, key_data,
+                        key_data_length, data, data_size, data_length);
+                }
+                else
+            #endif
+                {
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                }
             }
             else {
-                ret = wc_ecc_import_private_key_ex(key_data,
-                                                   (word32)key_data_length,
-                                                   NULL, 0, &ecc, curve_id);
-                if (ret != 0) {
-                    wc_ecc_free(&ecc);
-                    status = psa_wc_error_to_psa_status(ret);
+                ecc_key ecc;
+                word32 out_len = (word32)data_size;
+                int curve_id = wc_psa_get_ecc_curve_id(attributes.type,
+                                                       attributes.bits);
+
+                if (curve_id == ECC_CURVE_INVALID) {
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                }
+                else if (wc_ecc_init(&ecc) != 0) {
+                    status = PSA_ERROR_INSUFFICIENT_MEMORY;
                 }
                 else {
-                    ret = wc_ecc_make_pub_ex(&ecc, NULL, NULL);
+                    ret = wc_ecc_import_private_key_ex(key_data,
+                                                       (word32)key_data_length,
+                                                       NULL, 0, &ecc, curve_id);
                     if (ret != 0) {
                         wc_ecc_free(&ecc);
                         status = psa_wc_error_to_psa_status(ret);
                     }
                     else {
-                        ret = wc_ecc_export_x963(&ecc, data, &out_len);
-                        wc_ecc_free(&ecc);
+                        ret = wc_ecc_make_pub_ex(&ecc, NULL, NULL);
                         if (ret != 0) {
+                            wc_ecc_free(&ecc);
                             status = psa_wc_error_to_psa_status(ret);
                         }
                         else {
-                            *data_length = (size_t)out_len;
-                            status = PSA_SUCCESS;
+                            ret = wc_ecc_export_x963(&ecc, data, &out_len);
+                            wc_ecc_free(&ecc);
+                            if (ret != 0) {
+                                status = psa_wc_error_to_psa_status(ret);
+                            }
+                            else {
+                                *data_length = (size_t)out_len;
+                                status = PSA_SUCCESS;
+                            }
                         }
                     }
                 }
