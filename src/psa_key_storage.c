@@ -867,6 +867,7 @@ psa_status_t psa_import_key(
         }
     }
     
+    wc_ForceZero(buffer, buffer_size);
     XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     
     if (ret < 0 || (size_t)ret != (attr_length + sizeof(size_t) + data_length)) {
