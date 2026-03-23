@@ -840,9 +840,11 @@ psa_status_t psa_aead_abort(psa_aead_operation_t *operation)
 
     if (ctx != NULL) {
         if (ctx->aad != NULL) {
+            wc_ForceZero(ctx->aad, ctx->aad_length);
             XFREE(ctx->aad, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         if (ctx->input != NULL) {
+            wc_ForceZero(ctx->input, ctx->input_length);
             XFREE(ctx->input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
         if (ctx->key != NULL) {
