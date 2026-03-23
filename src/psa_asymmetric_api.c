@@ -383,7 +383,8 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
                                            signature, signature_length);
     }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
-    else if (attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+    else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) ||
+             attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
         if (attributes.bits == 255) {
             status = psa_asymmetric_verify_ed25519(attributes.type, attributes.bits,
@@ -576,7 +577,8 @@ psa_status_t psa_verify_message(psa_key_id_t key,
                                            signature, signature_length);
     }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
-    else if (attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+    else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) ||
+             attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
         if (attributes.bits == 255) {
             status = psa_asymmetric_verify_ed25519(attributes.type, attributes.bits,

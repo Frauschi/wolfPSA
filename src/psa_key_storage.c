@@ -1013,6 +1013,24 @@ psa_status_t psa_generate_key(
         size_t pub_len = 0;
         uint8_t *pub_buf = NULL;
 
+        if (family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+#ifdef HAVE_ED25519
+            if (key_bits == 255) {
+                priv_buf_size = PSA_BITS_TO_BYTES(key_bits) + 1U;
+            }
+            else
+#endif
+#ifdef HAVE_ED448
+            if (key_bits == 448) {
+                priv_buf_size = PSA_BITS_TO_BYTES(key_bits) + 1U;
+            }
+            else
+#endif
+            {
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+
         key_data = (uint8_t *)XMALLOC(priv_buf_size, NULL,
                                       DYNAMIC_TYPE_TMP_BUFFER);
         if (key_data == NULL) {
