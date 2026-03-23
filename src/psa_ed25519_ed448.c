@@ -61,7 +61,7 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     ed25519_key ed_key;
     word32 sig_len32;
     
-    if (alg != PSA_ALG_ED25519 && alg != PSA_ALG_ED25519PH) {
+    if (alg != PSA_ALG_ED25519PH) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
@@ -77,9 +77,12 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Import private key */
-    ret = wc_ed25519_import_private_key(key_buffer, (word32)key_buffer_size,
-                                      NULL, 0, &ed_key);
+    /* Import the stored private seed and derive the public component. */
+    ret = wc_ed25519_import_private_only(key_buffer, (word32)key_buffer_size,
+                                         &ed_key);
+    if (ret == 0) {
+        ret = wc_ed25519_make_public(&ed_key, ed_key.p, ED25519_PUB_KEY_SIZE);
+    }
     if (ret != 0) {
         wc_ed25519_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -87,16 +90,8 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     
     /* Sign message */
     sig_len32 = (word32)signature_size;
-    if (alg == PSA_ALG_ED25519PH) {
-        /* Sign hash */
-        ret = wc_ed25519ph_sign_hash(hash, (word32)hash_length, signature,
-                                   &sig_len32, &ed_key, NULL, 0);
-    }
-    else if (alg == PSA_ALG_ED25519) {
-        /* Sign message */
-        ret = wc_ed25519_sign_msg(hash, (word32)hash_length, signature,
-                                &sig_len32, &ed_key);
-    }
+    ret = wc_ed25519ph_sign_hash(hash, (word32)hash_length, signature,
+                                 &sig_len32, &ed_key, NULL, 0);
     
     wc_ed25519_free(&ed_key);
     
@@ -124,12 +119,13 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
     ed25519_key ed_key;
     int verify_res = 0;
     
-    if (alg != PSA_ALG_ED25519 && alg != PSA_ALG_ED25519PH) {
+    if (alg != PSA_ALG_ED25519PH) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
-    /* Check if key type is ED25519 public key */
-    if (key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
+    /* Check if key type is ED25519 */
+    if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) &&
+         key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) ||
         key_bits != 255) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -141,26 +137,27 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Import public key */
-    ret = wc_ed25519_import_public(key_buffer, (word32)key_buffer_size, &ed_key);
+    /* Import the key material needed for verification. */
+    if (key_type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+        ret = wc_ed25519_import_private_only(key_buffer, (word32)key_buffer_size,
+                                             &ed_key);
+        if (ret == 0) {
+            ret = wc_ed25519_make_public(&ed_key, ed_key.p,
+                                         ED25519_PUB_KEY_SIZE);
+        }
+    }
+    else {
+        ret = wc_ed25519_import_public(key_buffer, (word32)key_buffer_size, &ed_key);
+    }
     if (ret != 0) {
         wc_ed25519_free(&ed_key);
         return wc_error_to_psa_status(ret);
     }
     
     /* Verify signature */
-    if (alg == PSA_ALG_ED25519PH) {
-        /* Verify hash */
-        ret = wc_ed25519ph_verify_hash(signature, (word32)signature_length,
-                                     hash, (word32)hash_length,
-                                     &verify_res, &ed_key);
-    }
-    else if (alg == PSA_ALG_ED25519) {
-        /* Verify message */
-        ret = wc_ed25519_verify_msg(signature, (word32)signature_length,
-                                  hash, (word32)hash_length,
-                                  &verify_res, &ed_key);
-    }
+    ret = wc_ed25519ph_verify_hash(signature, (word32)signature_length,
+                                   hash, (word32)hash_length,
+                                   &verify_res, &ed_key, NULL, 0);
     
     wc_ed25519_free(&ed_key);
     
@@ -273,8 +270,12 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
     
     /* Import key */
     if (key_type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
-        ret = wc_ed25519_import_private_key(key_buffer, (word32)key_buffer_size,
-                                          NULL, 0, &ed_key);
+        ret = wc_ed25519_import_private_only(key_buffer, (word32)key_buffer_size,
+                                             &ed_key);
+        if (ret == 0) {
+            ret = wc_ed25519_make_public(&ed_key, ed_key.p,
+                                         ED25519_PUB_KEY_SIZE);
+        }
     }
     else {
         ret = wc_ed25519_import_public(key_buffer, (word32)key_buffer_size, &ed_key);
@@ -318,7 +319,7 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     ed448_key ed_key;
     word32 sig_len32;
     
-    if (alg != PSA_ALG_ED448 && alg != PSA_ALG_ED448PH) {
+    if (alg != PSA_ALG_ED448PH) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
@@ -334,9 +335,12 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Import private key */
-    ret = wc_ed448_import_private_key(key_buffer, (word32)key_buffer_size,
-                                    NULL, 0, &ed_key);
+    /* Import the stored private seed and derive the public component. */
+    ret = wc_ed448_import_private_only(key_buffer, (word32)key_buffer_size,
+                                       &ed_key);
+    if (ret == 0) {
+        ret = wc_ed448_make_public(&ed_key, ed_key.p, ED448_PUB_KEY_SIZE);
+    }
     if (ret != 0) {
         wc_ed448_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -344,16 +348,8 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     
     /* Sign message */
     sig_len32 = (word32)signature_size;
-    if (alg == PSA_ALG_ED448PH) {
-        /* Sign hash */
-        ret = wc_ed448ph_sign_hash(hash, (word32)hash_length, signature,
-                                 &sig_len32, &ed_key, NULL, 0);
-    }
-    else if (alg == PSA_ALG_ED448) {
-        /* Sign message */
-        ret = wc_ed448_sign_msg(hash, (word32)hash_length, signature,
-                              &sig_len32, &ed_key, NULL, 0);
-    }
+    ret = wc_ed448ph_sign_hash(hash, (word32)hash_length, signature,
+                               &sig_len32, &ed_key, NULL, 0);
     
     wc_ed448_free(&ed_key);
     
@@ -381,12 +377,13 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
     ed448_key ed_key;
     int verify_res = 0;
     
-    if (alg != PSA_ALG_ED448 && alg != PSA_ALG_ED448PH) {
+    if (alg != PSA_ALG_ED448PH) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
-    /* Check if key type is ED448 public key */
-    if (key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
+    /* Check if key type is ED448 */
+    if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) &&
+         key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) ||
         key_bits != 448) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -398,26 +395,26 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Import public key */
-    ret = wc_ed448_import_public(key_buffer, (word32)key_buffer_size, &ed_key);
+    /* Import the key material needed for verification. */
+    if (key_type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+        ret = wc_ed448_import_private_only(key_buffer, (word32)key_buffer_size,
+                                           &ed_key);
+        if (ret == 0) {
+            ret = wc_ed448_make_public(&ed_key, ed_key.p, ED448_PUB_KEY_SIZE);
+        }
+    }
+    else {
+        ret = wc_ed448_import_public(key_buffer, (word32)key_buffer_size, &ed_key);
+    }
     if (ret != 0) {
         wc_ed448_free(&ed_key);
         return wc_error_to_psa_status(ret);
     }
     
     /* Verify signature */
-    if (alg == PSA_ALG_ED448PH) {
-        /* Verify hash */
-        ret = wc_ed448ph_verify_hash(signature, (word32)signature_length,
-                                   hash, (word32)hash_length,
-                                   &verify_res, &ed_key);
-    }
-    else if (alg == PSA_ALG_ED448) {
-        /* Verify message */
-        ret = wc_ed448_verify_msg(signature, (word32)signature_length,
-                                hash, (word32)hash_length,
-                                &verify_res, &ed_key, NULL, 0);
-    }
+    ret = wc_ed448ph_verify_hash(signature, (word32)signature_length,
+                                 hash, (word32)hash_length,
+                                 &verify_res, &ed_key, NULL, 0);
     
     wc_ed448_free(&ed_key);
     
@@ -530,8 +527,11 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
     
     /* Import key */
     if (key_type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
-        ret = wc_ed448_import_private_key(key_buffer, (word32)key_buffer_size,
-                                        NULL, 0, &ed_key);
+        ret = wc_ed448_import_private_only(key_buffer, (word32)key_buffer_size,
+                                           &ed_key);
+        if (ret == 0) {
+            ret = wc_ed448_make_public(&ed_key, ed_key.p, ED448_PUB_KEY_SIZE);
+        }
     }
     else {
         ret = wc_ed448_import_public(key_buffer, (word32)key_buffer_size, &ed_key);

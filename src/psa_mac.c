@@ -352,6 +352,7 @@ static psa_status_t wolfpsa_mac_final(wolfpsa_mac_ctx_t *ctx,
     uint8_t full_mac[PSA_MAC_MAX_SIZE];
     word32 full_len = 0;
     int ret;
+    psa_status_t status;
 
     if (mac == NULL || mac_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -369,7 +370,8 @@ static psa_status_t wolfpsa_mac_final(wolfpsa_mac_ctx_t *ctx,
         full_len = (word32)sizeof(full_mac);
         ret = wc_HmacFinal(&ctx->ctx.hmac, full_mac);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            goto cleanup;
         }
         full_len = (word32)ctx->full_length;
     }
@@ -377,20 +379,27 @@ static psa_status_t wolfpsa_mac_final(wolfpsa_mac_ctx_t *ctx,
         full_len = (word32)ctx->full_length;
         ret = wc_CmacFinal(&ctx->ctx.cmac, full_mac, &full_len);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            status = wc_error_to_psa_status(ret);
+            goto cleanup;
         }
     }
     else {
-        return PSA_ERROR_BAD_STATE;
+        status = PSA_ERROR_BAD_STATE;
+        goto cleanup;
     }
 
     if (ctx->mac_length > (size_t)full_len) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        status = PSA_ERROR_INVALID_ARGUMENT;
+        goto cleanup;
     }
 
     XMEMCPY(mac, full_mac, ctx->mac_length);
     *mac_length = ctx->mac_length;
-    return PSA_SUCCESS;
+    status = PSA_SUCCESS;
+
+cleanup:
+    wc_ForceZero(full_mac, sizeof(full_mac));
+    return status;
 }
 
 psa_status_t psa_mac_sign_finish(psa_mac_operation_t *operation,
@@ -422,7 +431,7 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
     uint8_t computed[PSA_MAC_MAX_SIZE];
     size_t computed_length = 0;
     size_t min_length;
-    psa_status_t status;
+    psa_status_t status = PSA_ERROR_BAD_STATE;
 
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
@@ -449,18 +458,24 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
                                &computed_length);
     psa_mac_abort(operation);
     if (status != PSA_SUCCESS) {
-        return status;
+        goto cleanup;
     }
 
     if (mac_length > computed_length) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
     if (ConstantCompare(computed, mac, (int)mac_length) != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
-    return PSA_SUCCESS;
+    status = PSA_SUCCESS;
+
+cleanup:
+    wc_ForceZero(computed, sizeof(computed));
+    return status;
 }
 
 psa_status_t psa_mac_abort(psa_mac_operation_t *operation)
@@ -478,6 +493,7 @@ psa_status_t psa_mac_abort(psa_mac_operation_t *operation)
         if (ctx->type == WOLFPSA_MAC_CMAC) {
             wc_CmacFree(&ctx->ctx.cmac);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }

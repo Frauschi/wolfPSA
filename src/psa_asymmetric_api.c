@@ -310,13 +310,6 @@ psa_status_t psa_sign_hash(psa_key_id_t key,
                                          signature, signature_size,
                                          signature_length);
     }
-    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-        status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
-                                         key_data, key_data_length,
-                                         alg, hash, hash_length,
-                                         signature, signature_size,
-                                         signature_length);
-    }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
     else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
@@ -344,6 +337,13 @@ psa_status_t psa_sign_hash(psa_key_id_t key,
         }
     }
 #endif
+    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
+                                         key_data, key_data_length,
+                                         alg, hash, hash_length,
+                                         signature, signature_size,
+                                         signature_length);
+    }
     else {
         status = PSA_ERROR_NOT_SUPPORTED;
     }
@@ -382,14 +382,9 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
                                            alg, hash, hash_length,
                                            signature, signature_length);
     }
-    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-        status = psa_asymmetric_verify_ecc(attributes.type, attributes.bits,
-                                           key_data, key_data_length,
-                                           alg, hash, hash_length,
-                                           signature, signature_length);
-    }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
-    else if (attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+    else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) ||
+             attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
         if (attributes.bits == 255) {
             status = psa_asymmetric_verify_ed25519(attributes.type, attributes.bits,
@@ -413,6 +408,12 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
         }
     }
 #endif
+    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        status = psa_asymmetric_verify_ecc(attributes.type, attributes.bits,
+                                           key_data, key_data_length,
+                                           alg, hash, hash_length,
+                                           signature, signature_length);
+    }
     else {
         status = PSA_ERROR_NOT_SUPPORTED;
     }
@@ -478,13 +479,6 @@ psa_status_t psa_sign_message(psa_key_id_t key,
                                          signature, signature_size,
                                          signature_length);
     }
-    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-        status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
-                                         key_data, key_data_length,
-                                         alg, hash, hash_length,
-                                         signature, signature_size,
-                                         signature_length);
-    }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
     else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
@@ -512,6 +506,13 @@ psa_status_t psa_sign_message(psa_key_id_t key,
         }
     }
 #endif
+    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
+                                         key_data, key_data_length,
+                                         alg, hash, hash_length,
+                                         signature, signature_size,
+                                         signature_length);
+    }
     else {
         status = PSA_ERROR_NOT_SUPPORTED;
     }
@@ -575,14 +576,9 @@ psa_status_t psa_verify_message(psa_key_id_t key,
                                            alg, hash, hash_length,
                                            signature, signature_length);
     }
-    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-        status = psa_asymmetric_verify_ecc(attributes.type, attributes.bits,
-                                           key_data, key_data_length,
-                                           alg, hash, hash_length,
-                                           signature, signature_length);
-    }
 #if defined(HAVE_ED25519) || defined(HAVE_ED448)
-    else if (attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+    else if (attributes.type == PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) ||
+             attributes.type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
     #ifdef HAVE_ED25519
         if (attributes.bits == 255) {
             status = psa_asymmetric_verify_ed25519(attributes.type, attributes.bits,
@@ -606,6 +602,12 @@ psa_status_t psa_verify_message(psa_key_id_t key,
         }
     }
 #endif
+    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        status = psa_asymmetric_verify_ecc(attributes.type, attributes.bits,
+                                           key_data, key_data_length,
+                                           alg, hash, hash_length,
+                                           signature, signature_length);
+    }
     else {
         status = PSA_ERROR_NOT_SUPPORTED;
     }

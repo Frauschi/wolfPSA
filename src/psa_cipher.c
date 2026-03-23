@@ -37,6 +37,11 @@
 #endif
 #include <wolfssl/wolfcrypt/chacha.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 #define WOLFPSA_CHACHA20_IV_BYTES 12
 
@@ -867,7 +872,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 return PSA_SUCCESS;
             }
             else {
-                size_t bytes_to_process;
+                size_t process_len;
                 size_t full_blocks_len;
 
                 if (total < block_size) {
@@ -878,21 +883,15 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     return PSA_SUCCESS;
                 }
 
-                bytes_to_process = total - block_size;
-                if (bytes_to_process == 0) {
-                    if (ctx->partial_len > 0) {
-                        size_t needed = block_size - ctx->partial_len;
-                        XMEMCPY(ctx->partial + ctx->partial_len, input, needed);
-                        ctx->partial_len = block_size;
-                    }
-                    else {
-                        XMEMCPY(ctx->partial, input, block_size);
-                        ctx->partial_len = block_size;
-                    }
+                /* Decrypt whole blocks while retaining the final ciphertext block. */
+                process_len = ((total - 1U) / block_size) * block_size;
+                if (process_len == 0) {
+                    XMEMCPY(ctx->partial + ctx->partial_len, input, input_length);
+                    ctx->partial_len += input_length;
                     return PSA_SUCCESS;
                 }
 
-                if (output_size < bytes_to_process) {
+                if (output_size < process_len) {
                     return PSA_ERROR_BUFFER_TOO_SMALL;
                 }
 
@@ -921,10 +920,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
-                    bytes_to_process -= block_size;
                 }
 
-                full_blocks_len = bytes_to_process;
+                full_blocks_len = process_len - output_offset;
                 if (full_blocks_len > 0) {
                     if (ctx->is_des3) {
 #ifndef NO_DES3
@@ -1229,8 +1227,10 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
         }
         else {
             uint8_t block[AES_BLOCK_SIZE];
+            byte invalid;
             size_t pad_len;
             size_t plain_len;
+            psa_status_t status = PSA_SUCCESS;
 
             if (ctx->partial_len != block_size) {
                 return PSA_ERROR_INVALID_PADDING;
@@ -1249,29 +1249,37 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                                        (word32)block_size);
             }
             if (ret != 0) {
+                wc_ForceZero(block, sizeof(block));
                 return wc_error_to_psa_status(ret);
             }
 
             pad_len = block[block_size - 1];
-            if (pad_len == 0 || pad_len > block_size) {
-                return PSA_ERROR_INVALID_PADDING;
+            invalid = ctMaskEq((int)pad_len, 0);
+            invalid |= ctMaskGT((int)pad_len, (int)block_size);
+            for (size_t i = 0; i < block_size; i++) {
+                volatile byte mask = ctMaskLT((int)i, (int)pad_len);
+                invalid |= mask & (byte)(block[block_size - 1 - i] ^
+                                         (byte)pad_len);
             }
-            for (size_t i = 0; i < pad_len; i++) {
-                if (block[block_size - 1 - i] != pad_len) {
-                    return PSA_ERROR_INVALID_PADDING;
-                }
+            if (invalid != 0) {
+                status = PSA_ERROR_INVALID_PADDING;
+                goto cbc_pkcs7_decrypt_done;
             }
 
             plain_len = block_size - pad_len;
             if (output_size < plain_len) {
-                return PSA_ERROR_BUFFER_TOO_SMALL;
+                status = PSA_ERROR_BUFFER_TOO_SMALL;
+                goto cbc_pkcs7_decrypt_done;
             }
             if (plain_len > 0) {
                 XMEMCPY(output, block, plain_len);
             }
             ctx->partial_len = 0;
             *output_length = plain_len;
-            return PSA_SUCCESS;
+
+cbc_pkcs7_decrypt_done:
+            wc_ForceZero(block, sizeof(block));
+            return status;
         }
     }
 
@@ -1302,6 +1310,7 @@ psa_status_t psa_cipher_abort(psa_cipher_operation_t *operation)
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
