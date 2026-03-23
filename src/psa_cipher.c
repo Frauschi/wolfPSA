@@ -872,7 +872,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 return PSA_SUCCESS;
             }
             else {
-                size_t bytes_to_process;
+                size_t process_len;
                 size_t full_blocks_len;
 
                 if (total < block_size) {
@@ -883,21 +883,15 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     return PSA_SUCCESS;
                 }
 
-                bytes_to_process = total - block_size;
-                if (bytes_to_process == 0) {
-                    if (ctx->partial_len > 0) {
-                        size_t needed = block_size - ctx->partial_len;
-                        XMEMCPY(ctx->partial + ctx->partial_len, input, needed);
-                        ctx->partial_len = block_size;
-                    }
-                    else {
-                        XMEMCPY(ctx->partial, input, block_size);
-                        ctx->partial_len = block_size;
-                    }
+                /* Decrypt whole blocks while retaining the final ciphertext block. */
+                process_len = ((total - 1U) / block_size) * block_size;
+                if (process_len == 0) {
+                    XMEMCPY(ctx->partial + ctx->partial_len, input, input_length);
+                    ctx->partial_len += input_length;
                     return PSA_SUCCESS;
                 }
 
-                if (output_size < bytes_to_process) {
+                if (output_size < process_len) {
                     return PSA_ERROR_BUFFER_TOO_SMALL;
                 }
 
@@ -926,15 +920,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
-                    if (bytes_to_process >= block_size) {
-                        bytes_to_process -= block_size;
-                    }
-                    else {
-                        bytes_to_process = 0;
-                    }
                 }
 
-                full_blocks_len = bytes_to_process;
+                full_blocks_len = process_len - output_offset;
                 if (full_blocks_len > 0) {
                     if (ctx->is_des3) {
 #ifndef NO_DES3

@@ -1014,19 +1014,21 @@ psa_status_t psa_generate_key(
         uint8_t *pub_buf = NULL;
 
         if (family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
-#ifdef HAVE_ED25519
             if (key_bits == 255) {
+#ifdef HAVE_ED25519
                 priv_buf_size = PSA_BITS_TO_BYTES(key_bits) + 1U;
-            }
-            else
+#else
+                return PSA_ERROR_NOT_SUPPORTED;
 #endif
+            }
+            else if (key_bits == 448) {
 #ifdef HAVE_ED448
-            if (key_bits == 448) {
                 priv_buf_size = PSA_BITS_TO_BYTES(key_bits) + 1U;
-            }
-            else
+#else
+                return PSA_ERROR_NOT_SUPPORTED;
 #endif
-            {
+            }
+            else {
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
         }
@@ -1045,27 +1047,29 @@ psa_status_t psa_generate_key(
         }
 
         if (family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
-#ifdef HAVE_ED25519
             if (key_bits == 255) {
+#ifdef HAVE_ED25519
                 status = psa_asymmetric_generate_key_ed25519(key_type, key_bits,
                                                              key_data, priv_buf_size,
                                                              &priv_len,
                                                              pub_buf, pub_buf_size,
                                                              &pub_len);
-            }
-            else
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
 #endif
+            }
+            else if (key_bits == 448) {
 #ifdef HAVE_ED448
-            if (key_bits == 448) {
                 status = psa_asymmetric_generate_key_ed448(key_type, key_bits,
                                                            key_data, priv_buf_size,
                                                            &priv_len,
                                                            pub_buf, pub_buf_size,
                                                            &pub_len);
-            }
-            else
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
 #endif
-            {
+            }
+            else {
                 status = PSA_ERROR_INVALID_ARGUMENT;
             }
         }

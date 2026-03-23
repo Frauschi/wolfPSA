@@ -270,6 +270,7 @@ static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_cipher_operation_t op = psa_cipher_operation_init();
     psa_status_t st;
+    int result = TEST_FAIL;
 
     psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&attrs, 128);
@@ -277,74 +278,64 @@ static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
     psa_set_key_algorithm(&attrs, PSA_ALG_CBC_PKCS7);
 
     st = psa_import_key(&attrs, key, sizeof(key), &key_id);
-    if (check_status(st, "psa_import_key(AES PKCS7)") != TEST_OK) return TEST_FAIL;
+    if (check_status(st, "psa_import_key(AES PKCS7)") != TEST_OK) goto cleanup;
 
     st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
     if (st == PSA_ERROR_NOT_SUPPORTED) {
-        (void)psa_destroy_key(key_id);
-        return TEST_SKIPPED;
+        result = TEST_SKIPPED;
+        goto cleanup;
     }
     if (check_status(st, "psa_cipher_encrypt_setup(PKCS7)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     st = psa_cipher_set_iv(&op, iv, sizeof(iv));
     if (check_status(st, "psa_cipher_set_iv(PKCS7)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     st = psa_cipher_update(&op, plaintext, sizeof(plaintext),
                            ciphertext, sizeof(ciphertext), &part_len);
     if (check_status(st, "psa_cipher_update(PKCS7 enc)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     ciphertext_len += part_len;
     st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
                            sizeof(ciphertext) - ciphertext_len, &finish_len);
     if (check_status(st, "psa_cipher_finish(PKCS7 enc)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     ciphertext_len += finish_len;
+    (void)psa_cipher_abort(&op);
 
     op = psa_cipher_operation_init();
     st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
     if (check_status(st, "psa_cipher_decrypt_setup(PKCS7)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     st = psa_cipher_set_iv(&op, iv, sizeof(iv));
     if (check_status(st, "psa_cipher_set_iv(PKCS7 dec)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_cipher_update(&op, ciphertext, 1,
                            decrypted, sizeof(decrypted), &dec_part_len);
     if (check_status(st, "psa_cipher_update(PKCS7 dec 1)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_true(dec_part_len == 0, "psa_cipher_update(PKCS7 dec 1) length") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_cipher_update(&op, ciphertext + 1, 16,
                            decrypted, sizeof(decrypted), &dec_part_len);
     if (check_status(st, "psa_cipher_update(PKCS7 dec 16)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_true(dec_part_len == 16, "psa_cipher_update(PKCS7 dec 16) length") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_cipher_update(PKCS7 dec 16)",
                      decrypted, plaintext, dec_part_len) != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     dec_len += dec_part_len;
 
@@ -352,33 +343,138 @@ static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
                            decrypted + dec_len, sizeof(decrypted) - dec_len,
                            &dec_part_len);
     if (check_status(st, "psa_cipher_update(PKCS7 dec tail)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_true(dec_part_len == 0, "psa_cipher_update(PKCS7 dec tail) length") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_cipher_finish(&op, decrypted + dec_len, sizeof(decrypted) - dec_len,
                            &dec_finish_len);
     if (check_status(st, "psa_cipher_finish(PKCS7 dec)") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     dec_len += dec_finish_len;
+    (void)psa_cipher_abort(&op);
 
     if (check_true(dec_len == sizeof(plaintext), "psa_cipher_decrypt(PKCS7) length") != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_cipher_decrypt(PKCS7)", decrypted, plaintext, sizeof(plaintext)) != TEST_OK) {
-        (void)psa_destroy_key(key_id);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(AES PKCS7)") != TEST_OK) return TEST_FAIL;
+
+    key_id = 0;
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
+static int test_cipher_cbc_pkcs7_decrypt_update_small_output(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t iv[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    static const uint8_t plaintext[17] = {
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x61,0x62,0x63,0x64,0x65,0x66,
+        0x67
+    };
+    uint8_t ciphertext[sizeof(plaintext) + 16];
+    uint8_t too_small[1];
+    size_t ciphertext_len = 0;
+    size_t part_len = 0;
+    size_t finish_len = 0;
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_PKCS7);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES PKCS7 small out)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (check_status(st, "psa_cipher_encrypt_setup(PKCS7 small out)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 small out enc)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext),
+                           ciphertext, sizeof(ciphertext), &part_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 small out enc)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    ciphertext_len += part_len;
+    st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
+                           sizeof(ciphertext) - ciphertext_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(PKCS7 small out enc)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    ciphertext_len += finish_len;
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (check_status(st, "psa_cipher_decrypt_setup(PKCS7 small out)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 small out dec)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_cipher_update(&op, ciphertext, 1, too_small, sizeof(too_small), &out_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 small out seed)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(out_len == 0,
+                   "psa_cipher_update(PKCS7 small out seed) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_cipher_update(&op, ciphertext + 1, 16, too_small, sizeof(too_small), &out_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "psa_cipher_update(PKCS7 small out status)") != TEST_OK) {
+        (void)psa_cipher_abort(&op);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    (void)psa_cipher_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES PKCS7 small out)") != TEST_OK) {
+        return TEST_FAIL;
+    }
 
     return TEST_OK;
 }
@@ -846,6 +942,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_multipart") == 0) {
         if (run_named_test("cipher_cbc_pkcs7_multipart",
                            test_cipher_cbc_pkcs7_multipart_decrypt) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_small_output") == 0) {
+        if (run_named_test("cipher_cbc_pkcs7_small_output",
+                           test_cipher_cbc_pkcs7_decrypt_update_small_output) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
