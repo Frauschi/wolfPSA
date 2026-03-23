@@ -431,7 +431,7 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
     uint8_t computed[PSA_MAC_MAX_SIZE];
     size_t computed_length = 0;
     size_t min_length;
-    psa_status_t status;
+    psa_status_t status = PSA_ERROR_BAD_STATE;
 
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
@@ -458,18 +458,24 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
                                &computed_length);
     psa_mac_abort(operation);
     if (status != PSA_SUCCESS) {
-        return status;
+        goto cleanup;
     }
 
     if (mac_length > computed_length) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
     if (ConstantCompare(computed, mac, (int)mac_length) != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
-    return PSA_SUCCESS;
+    status = PSA_SUCCESS;
+
+cleanup:
+    wc_ForceZero(computed, sizeof(computed));
+    return status;
 }
 
 psa_status_t psa_mac_abort(psa_mac_operation_t *operation)
