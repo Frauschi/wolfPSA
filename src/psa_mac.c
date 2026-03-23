@@ -478,6 +478,7 @@ psa_status_t psa_mac_abort(psa_mac_operation_t *operation)
         if (ctx->type == WOLFPSA_MAC_CMAC) {
             wc_CmacFree(&ctx->ctx.cmac);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
