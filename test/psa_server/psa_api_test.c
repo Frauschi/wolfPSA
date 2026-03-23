@@ -663,6 +663,7 @@ static int test_ed25519_signature_length(void)
         0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
         0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
     };
+    static const uint8_t msg[] = "ed25519 message dispatch";
     uint8_t sig[128];
     /*
      * The original bug cast `size_t*` to `word32*`. On 64-bit builds that can
@@ -679,7 +680,8 @@ static int test_ed25519_signature_length(void)
     psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
     psa_set_key_bits(&attrs, 255);
     psa_set_key_usage_flags(&attrs,
-        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH |
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
     psa_set_key_algorithm(&attrs, PSA_ALG_ED25519PH);
 
     st = psa_generate_key(&attrs, &key_id);
@@ -703,6 +705,26 @@ static int test_ed25519_signature_length(void)
     st = psa_verify_hash(key_id, PSA_ALG_ED25519PH,
                          hash, sizeof(hash), sig, sig_len);
     if (check_status(st, "psa_verify_hash(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    sig_len = sizeof(sig);
+    st = psa_sign_message(key_id, PSA_ALG_ED25519PH,
+                          msg, sizeof(msg) - 1,
+                          sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_message(ED25519PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(sig_len == 64u, "psa_sign_message(ED25519PH) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_message(key_id, PSA_ALG_ED25519PH,
+                            msg, sizeof(msg) - 1, sig, sig_len);
+    if (check_status(st, "psa_verify_message(ED25519PH)") != TEST_OK) {
         (void)psa_destroy_key(key_id);
         return TEST_FAIL;
     }
