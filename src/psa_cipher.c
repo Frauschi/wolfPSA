@@ -1242,6 +1242,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             byte invalid;
             size_t pad_len;
             size_t plain_len;
+            psa_status_t status = PSA_SUCCESS;
 
             if (ctx->partial_len != block_size) {
                 return PSA_ERROR_INVALID_PADDING;
@@ -1260,6 +1261,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                                        (word32)block_size);
             }
             if (ret != 0) {
+                wc_ForceZero(block, sizeof(block));
                 return wc_error_to_psa_status(ret);
             }
 
@@ -1272,19 +1274,24 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                                          (byte)pad_len);
             }
             if (invalid != 0) {
-                return PSA_ERROR_INVALID_PADDING;
+                status = PSA_ERROR_INVALID_PADDING;
+                goto cbc_pkcs7_decrypt_done;
             }
 
             plain_len = block_size - pad_len;
             if (output_size < plain_len) {
-                return PSA_ERROR_BUFFER_TOO_SMALL;
+                status = PSA_ERROR_BUFFER_TOO_SMALL;
+                goto cbc_pkcs7_decrypt_done;
             }
             if (plain_len > 0) {
                 XMEMCPY(output, block, plain_len);
             }
             ctx->partial_len = 0;
             *output_length = plain_len;
-            return PSA_SUCCESS;
+
+cbc_pkcs7_decrypt_done:
+            wc_ForceZero(block, sizeof(block));
+            return status;
         }
     }
 
