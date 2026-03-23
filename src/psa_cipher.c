@@ -37,6 +37,11 @@
 #endif
 #include <wolfssl/wolfcrypt/chacha.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#include <wolfssl/wolfcrypt/misc.h>
+#ifndef NO_INLINE
+    #define WOLFSSL_MISC_INCLUDED
+    #include <wolfcrypt/src/misc.c>
+#endif
 
 #define WOLFPSA_CHACHA20_IV_BYTES 12
 
@@ -1234,6 +1239,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
         }
         else {
             uint8_t block[AES_BLOCK_SIZE];
+            byte invalid;
             size_t pad_len;
             size_t plain_len;
 
@@ -1258,13 +1264,15 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             }
 
             pad_len = block[block_size - 1];
-            if (pad_len == 0 || pad_len > block_size) {
-                return PSA_ERROR_INVALID_PADDING;
+            invalid = ctMaskEq((int)pad_len, 0);
+            invalid |= ctMaskGT((int)pad_len, (int)block_size);
+            for (size_t i = 0; i < block_size; i++) {
+                volatile byte mask = ctMaskLT((int)i, (int)pad_len);
+                invalid |= mask & (byte)(block[block_size - 1 - i] ^
+                                         (byte)pad_len);
             }
-            for (size_t i = 0; i < pad_len; i++) {
-                if (block[block_size - 1 - i] != pad_len) {
-                    return PSA_ERROR_INVALID_PADDING;
-                }
+            if (invalid != 0) {
+                return PSA_ERROR_INVALID_PADDING;
             }
 
             plain_len = block_size - pad_len;
