@@ -1307,6 +1307,7 @@ psa_status_t psa_cipher_abort(psa_cipher_operation_t *operation)
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
