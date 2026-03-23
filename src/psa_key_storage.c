@@ -79,6 +79,26 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
                                             uint8_t *public_key,
                                             size_t public_key_size,
                                             size_t *public_key_length);
+#ifdef HAVE_ED25519
+psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
+                                                size_t key_bits,
+                                                uint8_t *private_key,
+                                                size_t private_key_size,
+                                                size_t *private_key_length,
+                                                uint8_t *public_key,
+                                                size_t public_key_size,
+                                                size_t *public_key_length);
+#endif
+#ifdef HAVE_ED448
+psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
+                                              size_t key_bits,
+                                              uint8_t *private_key,
+                                              size_t private_key_size,
+                                              size_t *private_key_length,
+                                              uint8_t *public_key,
+                                              size_t public_key_size,
+                                              size_t *public_key_length);
+#endif
 
 static psa_status_t psa_wc_error_to_psa_status(int ret)
 {
@@ -972,6 +992,7 @@ psa_status_t psa_generate_key(
 
     if (PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
 #ifdef HAVE_ECC
+        psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(key_type);
         size_t priv_buf_size = PSA_KEY_EXPORT_ECC_KEY_PAIR_MAX_SIZE(key_bits);
         size_t pub_buf_size = PSA_KEY_EXPORT_ECC_PUBLIC_KEY_MAX_SIZE(key_bits);
         size_t priv_len = 0;
@@ -991,11 +1012,38 @@ psa_status_t psa_generate_key(
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
 
-        status = psa_asymmetric_generate_key_ecc(key_type, key_bits,
-                                                 key_data, priv_buf_size,
-                                                 &priv_len,
-                                                 pub_buf, pub_buf_size,
-                                                 &pub_len);
+        if (family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+#ifdef HAVE_ED25519
+            if (key_bits == 255) {
+                status = psa_asymmetric_generate_key_ed25519(key_type, key_bits,
+                                                             key_data, priv_buf_size,
+                                                             &priv_len,
+                                                             pub_buf, pub_buf_size,
+                                                             &pub_len);
+            }
+            else
+#endif
+#ifdef HAVE_ED448
+            if (key_bits == 448) {
+                status = psa_asymmetric_generate_key_ed448(key_type, key_bits,
+                                                           key_data, priv_buf_size,
+                                                           &priv_len,
+                                                           pub_buf, pub_buf_size,
+                                                           &pub_len);
+            }
+            else
+#endif
+            {
+                status = PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        else {
+            status = psa_asymmetric_generate_key_ecc(key_type, key_bits,
+                                                     key_data, priv_buf_size,
+                                                     &priv_len,
+                                                     pub_buf, pub_buf_size,
+                                                     &pub_len);
+        }
         XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (status != PSA_SUCCESS) {
             wc_ForceZero(key_data, priv_buf_size);
