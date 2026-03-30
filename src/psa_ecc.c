@@ -151,12 +151,14 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     wc_ecc_free(&ecc);
     
     if (ret != 0) {
+        wc_ForceZero(der_sig, sig_len);
         XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
 
     rs = (byte*)XMALLOC(raw_sig_len, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (rs == NULL) {
+        wc_ForceZero(der_sig, sig_len);
         XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
@@ -164,6 +166,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     r_len = (word32)key_bytes;
     s_len = (word32)key_bytes;
     ret = wc_ecc_sig_to_rs(der_sig, der_len, rs, &r_len, rs + key_bytes, &s_len);
+    wc_ForceZero(der_sig, sig_len);
     XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (ret != 0) {
         XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
