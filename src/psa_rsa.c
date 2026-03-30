@@ -292,6 +292,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
                 ret = SIG_VERIFY_E;
             }
         }
+        wc_ForceZero(decoded, sizeof(decoded));
     }
     else if (padding == WC_RSA_PSS_PAD) {
     #ifdef WC_RSA_PSS
@@ -305,6 +306,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     #else
         if (PSA_ALG_IS_RSA_PSS_ANY_SALT(alg)) {
             ret = NOT_COMPILED_IN;
+            wc_ForceZero(decoded, sizeof(decoded));
             wc_FreeRsaKey(&rsa_key);
             return wc_error_to_psa_status(ret);
         }
@@ -322,6 +324,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
                 ret = (int)hash_length;
             }
         }
+        wc_ForceZero(decoded, sizeof(decoded));
     #else
         ret = NOT_COMPILED_IN;
     #endif
