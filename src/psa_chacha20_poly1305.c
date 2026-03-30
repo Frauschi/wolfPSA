@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_chacha20_poly1305.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
@@ -105,6 +106,10 @@ psa_status_t psa_chacha20_poly1305_encrypt(
     if (plaintext == NULL && plaintext_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(additional_data_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(plaintext_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Check output buffer size */
     if (ciphertext_size < plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
@@ -162,6 +167,11 @@ psa_status_t psa_chacha20_poly1305_decrypt(
     
     /* Ciphertext must include authentication tag */
     if (ciphertext_length < CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(additional_data_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ciphertext_length -
+            CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     

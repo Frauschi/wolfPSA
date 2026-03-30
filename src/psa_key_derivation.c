@@ -29,6 +29,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/hmac.h>
@@ -714,6 +715,10 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
         if (hash_len <= 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
+        if ((wolfpsa_check_word32_length(ctx->salt_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS)) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         if (output_length != (size_t)hash_len) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
@@ -725,6 +730,11 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
     }
 
     if (PSA_ALG_IS_HKDF_EXPAND(ctx->alg)) {
+        if ((wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(ctx->info_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         ret = wc_HKDF_Expand(hash_type,
                              ctx->secret, (word32)ctx->secret_length,
                              ctx->info, (word32)ctx->info_length,
@@ -739,6 +749,12 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
 
         if (hash_len <= 0 || (size_t)hash_len > sizeof(prk)) {
             return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if ((wolfpsa_check_word32_length(ctx->salt_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(ctx->info_length) != PSA_SUCCESS) ||
+            (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
+            return PSA_ERROR_INVALID_ARGUMENT;
         }
         ret = wc_HKDF_Extract(hash_type,
                               ctx->salt, (word32)ctx->salt_length,
@@ -776,6 +792,12 @@ static psa_status_t wolfpsa_kdf_tls12_prf(wolfpsa_kdf_ctx_t *ctx,
     if (hash_type == WC_HASH_TYPE_NONE) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if ((wolfpsa_check_word32_length(output_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->seed_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     ret = wc_PRF_TLS(output, (word32)output_length,
                      ctx->secret, (word32)ctx->secret_length,
                      ctx->label, (word32)ctx->label_length,
@@ -812,6 +834,11 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
     }
 
     premaster_len = 2u + ctx->secret_length + 2u + other_secret_length;
+    if ((wolfpsa_check_word32_length(output_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(premaster_len) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->seed_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     premaster = (uint8_t *)XMALLOC(premaster_len, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (premaster == NULL) {
         return PSA_ERROR_INSUFFICIENT_MEMORY;
@@ -884,6 +911,10 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         word32 out_sz = WC_AES_BLOCK_SIZE;
         psa_status_t status = PSA_SUCCESS;
 
+        if (wolfpsa_check_word32_length(ctx->password_length) != PSA_SUCCESS) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
         XMEMSET(zero_key, 0, sizeof(zero_key));
         ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
                           WC_CMAC_AES, NULL);
@@ -906,6 +937,10 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         }
 
         block_input_len = ctx->salt_length + 4;
+        if (wolfpsa_check_word32_length(block_input_len) != PSA_SUCCESS) {
+            status = PSA_ERROR_INVALID_ARGUMENT;
+            goto cleanup;
+        }
         block_input = (uint8_t *)XMALLOC(block_input_len, NULL,
                                          DYNAMIC_TYPE_TMP_BUFFER);
         if (block_input == NULL) {
