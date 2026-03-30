@@ -217,6 +217,7 @@ psa_status_t psa_xchacha20_poly1305_encrypt(
     uint8_t *ciphertext, size_t ciphertext_size, size_t *ciphertext_length)
 {
     int ret;
+    size_t required_size;
     
     /* Check parameters */
     if (key == NULL || key_length != CHACHA20_POLY1305_AEAD_KEYSIZE) {
