@@ -1084,6 +1084,104 @@ static int test_kdf_hkdf_extract_optional_salt(void)
     return TEST_OK;
 }
 
+static int test_kdf_hkdf_expand_optional_info(void)
+{
+    static const uint8_t prk[WC_SHA256_DIGEST_SIZE] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    uint8_t expected[42];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF_Expand(WC_HASH_TYPE_SHA256,
+                         prk, (word32)sizeof(prk),
+                         NULL, 0,
+                         expected, (word32)sizeof(expected));
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Expand(HKDF_EXPAND optional info reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXPAND(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXPAND optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        prk, sizeof(prk));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF_EXPAND optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF_EXPAND optional info)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_kdf_hkdf_optional_info(void)
+{
+    static const uint8_t secret[] = "hkdf secret";
+    uint8_t expected[42];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF(WC_HASH_TYPE_SHA256,
+                  secret, (word32)(sizeof(secret) - 1u),
+                  NULL, 0,
+                  NULL, 0,
+                  expected, (word32)sizeof(expected));
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF(HKDF optional info reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF optional info)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     int ret;
@@ -1181,6 +1279,18 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_hkdf_extract_optional_salt") == 0) {
         if (run_named_test("kdf_hkdf_extract_optional_salt",
                            test_kdf_hkdf_extract_optional_salt) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_expand_optional_info") == 0) {
+        if (run_named_test("kdf_hkdf_expand_optional_info",
+                           test_kdf_hkdf_expand_optional_info) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_optional_info") == 0) {
+        if (run_named_test("kdf_hkdf_optional_info",
+                           test_kdf_hkdf_optional_info) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

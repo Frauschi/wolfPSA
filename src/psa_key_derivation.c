@@ -1023,14 +1023,12 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
             }
         }
         else if (PSA_ALG_IS_HKDF_EXPAND(ctx->alg)) {
-            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-                (ctx->steps_set & WOLFPSA_KDF_STEP_INFO) == 0) {
+            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
                 return PSA_ERROR_BAD_STATE;
             }
         }
         else {
-            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-                (ctx->steps_set & WOLFPSA_KDF_STEP_INFO) == 0) {
+            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
                 return PSA_ERROR_BAD_STATE;
             }
         }
