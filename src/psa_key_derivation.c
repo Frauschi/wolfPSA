@@ -810,13 +810,13 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    premaster[0] = (uint8_t)((ctx->secret_length >> 8) & 0xff);
-    premaster[1] = (uint8_t)(ctx->secret_length & 0xff);
-    XMEMCPY(premaster + 2u, ctx->secret, ctx->secret_length);
-    premaster[2u + ctx->secret_length] = (uint8_t)((ctx->other_secret_length >> 8) & 0xff);
-    premaster[3u + ctx->secret_length] = (uint8_t)(ctx->other_secret_length & 0xff);
-    XMEMCPY(premaster + 4u + ctx->secret_length, ctx->other_secret,
-            ctx->other_secret_length);
+    premaster[0] = (uint8_t)((ctx->other_secret_length >> 8) & 0xff);
+    premaster[1] = (uint8_t)(ctx->other_secret_length & 0xff);
+    XMEMCPY(premaster + 2u, ctx->other_secret, ctx->other_secret_length);
+    premaster[2u + ctx->other_secret_length] = (uint8_t)((ctx->secret_length >> 8) & 0xff);
+    premaster[3u + ctx->other_secret_length] = (uint8_t)(ctx->secret_length & 0xff);
+    XMEMCPY(premaster + 4u + ctx->other_secret_length, ctx->secret,
+            ctx->secret_length);
 
     ret = wc_PRF_TLS(output, (word32)output_length,
                      premaster, (word32)premaster_len,

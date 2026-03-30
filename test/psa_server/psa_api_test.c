@@ -19,6 +19,7 @@
 
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <wolfssl/wolfcrypt/hmac.h>
+#include <wolfssl/wolfcrypt/kdf.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
 
@@ -903,6 +904,77 @@ static int test_kdf_null_capacity(void)
     return TEST_OK;
 }
 
+static int test_kdf_tls12_psk_to_ms_rfc4279_order(void)
+{
+    static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
+    static const uint8_t other_secret[] = { 0x10, 0x20, 0x30 };
+    static const uint8_t seed[] = "clienthello||serverhello";
+    uint8_t premaster[2u + sizeof(other_secret) + 2u + sizeof(psk)];
+    uint8_t expected[48];
+    uint8_t output[sizeof(expected)];
+    size_t seed_len = sizeof(seed) - 1u;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    premaster[0] = 0x00;
+    premaster[1] = (uint8_t)sizeof(other_secret);
+    memcpy(premaster + 2u, other_secret, sizeof(other_secret));
+    premaster[2u + sizeof(other_secret)] = 0x00;
+    premaster[3u + sizeof(other_secret)] = (uint8_t)sizeof(psk);
+    memcpy(premaster + 4u + sizeof(other_secret), psk, sizeof(psk));
+
+    ret = wc_PRF_TLS(expected, (word32)sizeof(expected),
+                     premaster, (word32)sizeof(premaster),
+                     (const byte*)"master secret", 13u,
+                     seed, (word32)seed_len,
+                     1, WC_HASH_TYPE_SHA256, NULL, INVALID_DEVID);
+    if (ret != 0) {
+        printf("FAIL: wc_PRF_TLS(TLS12_PSK_TO_MS reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_TLS12_PSK_TO_MS(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(TLS12_PSK_TO_MS)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SEED,
+                                        seed, seed_len);
+    if (check_status(st, "psa_key_derivation_input_bytes(SEED)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op,
+                                        PSA_KEY_DERIVATION_INPUT_OTHER_SECRET,
+                                        other_secret, sizeof(other_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(OTHER_SECRET)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        psk, sizeof(psk));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(TLS12_PSK_TO_MS)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(TLS12_PSK_TO_MS)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(TLS12_PSK_TO_MS RFC4279)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     int ret;
@@ -986,6 +1058,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
         if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "kdf_tls12_psk_to_ms") == 0) {
+        if (run_named_test("kdf_tls12_psk_to_ms",
+                           test_kdf_tls12_psk_to_ms_rfc4279_order) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
 
     printf("PSA API test: OK (passed=%d skipped=%d)\n",
