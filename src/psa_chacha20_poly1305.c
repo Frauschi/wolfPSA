@@ -83,6 +83,7 @@ psa_status_t psa_chacha20_poly1305_encrypt(
     uint8_t *ciphertext, size_t ciphertext_size, size_t *ciphertext_length)
 {
     int ret;
+    size_t required_size;
     
     /* Check parameters */
     if (key == NULL || key_length != CHACHA20_POLY1305_AEAD_KEYSIZE) {
@@ -111,8 +112,13 @@ psa_status_t psa_chacha20_poly1305_encrypt(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
+    if (plaintext_length > SIZE_MAX - CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    required_size = plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+
     /* Check output buffer size */
-    if (ciphertext_size < plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+    if (ciphertext_size < required_size) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
     
@@ -131,7 +137,7 @@ psa_status_t psa_chacha20_poly1305_encrypt(
     }
     
     /* Set output length */
-    *ciphertext_length = plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+    *ciphertext_length = required_size;
     
     return PSA_SUCCESS;
 }
@@ -235,8 +241,13 @@ psa_status_t psa_xchacha20_poly1305_encrypt(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
+    if (plaintext_length > SIZE_MAX - CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    required_size = plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+
     /* Check output buffer size */
-    if (ciphertext_size < plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+    if (ciphertext_size < required_size) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
     
@@ -254,7 +265,7 @@ psa_status_t psa_xchacha20_poly1305_encrypt(
     }
     
     /* Set output length */
-    *ciphertext_length = plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+    *ciphertext_length = required_size;
     
     return PSA_SUCCESS;
 }
