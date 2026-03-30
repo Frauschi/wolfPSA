@@ -114,6 +114,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     int hash_oid;
     byte* sig_input = NULL;
     word32 sig_input_len = 0;
+    word32 sig_input_alloc_len = 0;
     WC_RNG rng;
     
     (void)key_bits;
@@ -175,6 +176,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                 wc_FreeRsaKey(&rsa_key);
                 return PSA_ERROR_INSUFFICIENT_MEMORY;
             }
+            sig_input_alloc_len = PSA_HASH_MAX_SIZE + 32;
             sig_input_len = wc_EncodeSignature(sig_input, hash,
                                                (word32)hash_length, hash_oid);
         }
@@ -196,6 +198,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     }
     
     if (sig_input != NULL && sig_input != hash) {
+        wc_ForceZero(sig_input, sig_input_alloc_len);
         XFREE(sig_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
     wc_FreeRng(&rng);
