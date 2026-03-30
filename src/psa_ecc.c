@@ -169,10 +169,12 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     wc_ForceZero(der_sig, sig_len);
     XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (ret != 0) {
+        wc_ForceZero(rs, raw_sig_len);
         XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
     if (r_len > key_bytes || s_len > key_bytes) {
+        wc_ForceZero(rs, raw_sig_len);
         XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_SIGNATURE;
     }
@@ -181,6 +183,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     XMEMCPY(signature + (key_bytes - r_len), rs, r_len);
     XMEMCPY(signature + key_bytes + (key_bytes - s_len),
             rs + key_bytes, s_len);
+    wc_ForceZero(rs, raw_sig_len);
     XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
 
     *signature_length = raw_sig_len;
