@@ -452,23 +452,22 @@ psa_status_t psa_sign_message(psa_key_id_t key,
         hash_alg = 0;
         hash_length = input_length;
         if (hash_length > sizeof(hash)) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return PSA_ERROR_INVALID_ARGUMENT;
+            status = PSA_ERROR_INVALID_ARGUMENT;
+            goto cleanup;
         }
         XMEMCPY(hash, input, hash_length);
     }
     else {
         hash_alg = PSA_ALG_SIGN_GET_HASH(alg);
         if (hash_alg == 0) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return PSA_ERROR_NOT_SUPPORTED;
+            status = PSA_ERROR_NOT_SUPPORTED;
+            goto cleanup;
         }
 
         status = psa_hash_compute(hash_alg, input, input_length,
                                   hash, sizeof(hash), &hash_length);
         if (status != PSA_SUCCESS) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return status;
+            goto cleanup;
         }
     }
 
@@ -517,6 +516,8 @@ psa_status_t psa_sign_message(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
+cleanup:
+    wc_ForceZero(hash, sizeof(hash));
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
@@ -550,23 +551,22 @@ psa_status_t psa_verify_message(psa_key_id_t key,
         hash_alg = 0;
         hash_length = input_length;
         if (hash_length > sizeof(hash)) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return PSA_ERROR_INVALID_ARGUMENT;
+            status = PSA_ERROR_INVALID_ARGUMENT;
+            goto cleanup;
         }
         XMEMCPY(hash, input, hash_length);
     }
     else {
         hash_alg = PSA_ALG_SIGN_GET_HASH(alg);
         if (hash_alg == 0) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return PSA_ERROR_NOT_SUPPORTED;
+            status = PSA_ERROR_NOT_SUPPORTED;
+            goto cleanup;
         }
 
         status = psa_hash_compute(hash_alg, input, input_length,
                                   hash, sizeof(hash), &hash_length);
         if (status != PSA_SUCCESS) {
-            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-            return status;
+            goto cleanup;
         }
     }
 
@@ -612,6 +612,8 @@ psa_status_t psa_verify_message(psa_key_id_t key,
         status = PSA_ERROR_NOT_SUPPORTED;
     }
 
+cleanup:
+    wc_ForceZero(hash, sizeof(hash));
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
