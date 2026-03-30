@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && !defined(NO_RSA)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -113,12 +114,18 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     int hash_oid;
     byte* sig_input = NULL;
     word32 sig_input_len = 0;
+    word32 sig_input_alloc_len = 0;
     WC_RNG rng;
     
     (void)key_bits;
 
     /* Check if key type is RSA key pair */
     if (key_type != PSA_KEY_TYPE_RSA_KEY_PAIR) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -169,6 +176,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                 wc_FreeRsaKey(&rsa_key);
                 return PSA_ERROR_INSUFFICIENT_MEMORY;
             }
+            sig_input_alloc_len = PSA_HASH_MAX_SIZE + 32;
             sig_input_len = wc_EncodeSignature(sig_input, hash,
                                                (word32)hash_length, hash_oid);
         }
@@ -190,6 +198,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     }
     
     if (sig_input != NULL && sig_input != hash) {
+        wc_ForceZero(sig_input, sig_input_alloc_len);
         XFREE(sig_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
     wc_FreeRng(&rng);
@@ -226,6 +235,11 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     /* Check if key type is RSA public key or key pair */
     if (key_type != PSA_KEY_TYPE_RSA_PUBLIC_KEY &&
         key_type != PSA_KEY_TYPE_RSA_KEY_PAIR) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -278,6 +292,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
                 ret = SIG_VERIFY_E;
             }
         }
+        wc_ForceZero(decoded, sizeof(decoded));
     }
     else if (padding == WC_RSA_PSS_PAD) {
     #ifdef WC_RSA_PSS
@@ -291,6 +306,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     #else
         if (PSA_ALG_IS_RSA_PSS_ANY_SALT(alg)) {
             ret = NOT_COMPILED_IN;
+            wc_ForceZero(decoded, sizeof(decoded));
             wc_FreeRsaKey(&rsa_key);
             return wc_error_to_psa_status(ret);
         }
@@ -308,6 +324,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
                 ret = (int)hash_length;
             }
         }
+        wc_ForceZero(decoded, sizeof(decoded));
     #else
         ret = NOT_COMPILED_IN;
     #endif
@@ -357,6 +374,12 @@ psa_status_t psa_asymmetric_encrypt_rsa(psa_key_type_t key_type,
     /* Check if key type is RSA public key or key pair */
     if (key_type != PSA_KEY_TYPE_RSA_PUBLIC_KEY &&
         key_type != PSA_KEY_TYPE_RSA_KEY_PAIR) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(salt_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -460,6 +483,12 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
     if (key_type != PSA_KEY_TYPE_RSA_KEY_PAIR) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(salt_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize RSA key */
     ret = wc_InitRsaKey(&rsa_key, NULL);
@@ -549,6 +578,10 @@ psa_status_t psa_asymmetric_generate_key_rsa(psa_key_type_t key_type,
     if (key_type != PSA_KEY_TYPE_RSA_KEY_PAIR) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize RSA key */
     ret = wc_InitRsaKey(&rsa_key, NULL);
@@ -622,6 +655,10 @@ psa_status_t psa_asymmetric_export_public_key_rsa(psa_key_type_t key_type,
     /* Check if key type is RSA */
     if (key_type != PSA_KEY_TYPE_RSA_KEY_PAIR && 
         key_type != PSA_KEY_TYPE_RSA_PUBLIC_KEY) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     

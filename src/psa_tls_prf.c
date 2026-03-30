@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_tls_prf.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
@@ -74,15 +75,6 @@ static int psa_tls13_get_hash_type(psa_algorithm_t alg, enum wc_HashType* hashTy
     }
 }
 
-static psa_status_t psa_tls13_check_word32_length(size_t length)
-{
-    if (length > UINT32_MAX) {
-        return PSA_ERROR_INVALID_ARGUMENT;
-    }
-
-    return PSA_SUCCESS;
-}
-
 /* TLS 1.3 PRF (HKDF) */
 psa_status_t psa_tls13_prf(
     psa_algorithm_t alg,
@@ -114,10 +106,10 @@ psa_status_t psa_tls13_prf(
     if (output == NULL || output_length == 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    if ((psa_tls13_check_word32_length(secret_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(label_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(context_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(output_length) != PSA_SUCCESS)) {
+    if ((wolfpsa_check_word32_length(secret_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(context_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -171,8 +163,8 @@ psa_status_t psa_tls13_hkdf_extract(
     if (output == NULL || output_size == 0 || output_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    if ((psa_tls13_check_word32_length(salt_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(ikm_length) != PSA_SUCCESS)) {
+    if ((wolfpsa_check_word32_length(salt_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ikm_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -237,9 +229,9 @@ psa_status_t psa_tls13_hkdf_expand(
     if (output == NULL || output_length == 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    if ((psa_tls13_check_word32_length(prk_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(info_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(output_length) != PSA_SUCCESS)) {
+    if ((wolfpsa_check_word32_length(prk_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(info_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -295,10 +287,10 @@ psa_status_t psa_tls13_hkdf_expand_label(
     if (output == NULL || output_length == 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    if ((psa_tls13_check_word32_length(secret_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(label_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(context_length) != PSA_SUCCESS) ||
-        (psa_tls13_check_word32_length(output_length) != PSA_SUCCESS)) {
+    if ((wolfpsa_check_word32_length(secret_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(context_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     

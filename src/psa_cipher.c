@@ -29,6 +29,7 @@
 
 #include <psa/crypto.h>
 #include "psa_trace.h"
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/aes.h>
@@ -296,6 +297,11 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
     ctx->block_size = wolfpsa_cipher_block_size(attributes.type);
     ctx->partial_len = 0;
     XMEMCPY(ctx->iv, zero_iv, sizeof(ctx->iv));
+    if (wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     if (ctx->is_chacha) {
         ret = wc_Chacha_SetKey(&ctx->chacha, key_data,
@@ -432,6 +438,11 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
     ctx->block_size = wolfpsa_cipher_block_size(attributes.type);
     ctx->partial_len = 0;
     XMEMCPY(ctx->iv, zero_iv, sizeof(ctx->iv));
+    if (wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     if (ctx->is_chacha) {
         ret = wc_Chacha_SetKey(&ctx->chacha, key_data,
@@ -656,6 +667,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     if (output == NULL && output_size > 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 

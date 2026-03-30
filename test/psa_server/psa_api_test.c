@@ -19,6 +19,7 @@
 
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <wolfssl/wolfcrypt/hmac.h>
+#include <wolfssl/wolfcrypt/kdf.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
 
@@ -608,6 +609,106 @@ cleanup:
     return ret;
 }
 
+static int test_aead_finish_verify_word32_overflow_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t empty_gcm_tag[16] = {
+        0x58,0xe2,0xfc,0xce,0xfa,0x7e,0x30,0x61,
+        0x36,0x7f,0x1d,0x57,0xa4,0xe7,0x45,0x5a
+    };
+    uint8_t out[1];
+    uint8_t tag[sizeof(empty_gcm_tag)];
+    size_t out_len = 0;
+    size_t tag_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    wolfpsa_aead_ctx_t *ctx;
+    int ret = TEST_OK;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM word32 overflow)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(word32 input)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 input)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->input = NULL;
+    ctx->input_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_finish(&op, out, SIZE_MAX, &out_len, tag, sizeof(tag), &tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_finish rejects input_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(word32 aad)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 aad)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->aad = NULL;
+    ctx->aad_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_finish(&op, out, sizeof(out), &out_len, tag, sizeof(tag), &tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_finish rejects aad_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(word32 input)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 verify input)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->input = NULL;
+    ctx->input_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_verify(&op, out, SIZE_MAX, &out_len, empty_gcm_tag, sizeof(empty_gcm_tag));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_verify rejects input_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(word32 aad)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 verify aad)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->aad = NULL;
+    ctx->aad_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_verify(&op, out, sizeof(out), &out_len, empty_gcm_tag, sizeof(empty_gcm_tag));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_verify rejects aad_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM word32 overflow)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -903,6 +1004,299 @@ static int test_kdf_null_capacity(void)
     return TEST_OK;
 }
 
+static int test_kdf_tls12_psk_to_ms_rfc4279_order(void)
+{
+    static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
+    static const uint8_t other_secret[] = { 0x10, 0x20, 0x30 };
+    static const uint8_t seed[] = "clienthello||serverhello";
+    uint8_t premaster[2u + sizeof(other_secret) + 2u + sizeof(psk)];
+    uint8_t expected[48];
+    uint8_t output[sizeof(expected)];
+    size_t seed_len = sizeof(seed) - 1u;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    premaster[0] = 0x00;
+    premaster[1] = (uint8_t)sizeof(other_secret);
+    memcpy(premaster + 2u, other_secret, sizeof(other_secret));
+    premaster[2u + sizeof(other_secret)] = 0x00;
+    premaster[3u + sizeof(other_secret)] = (uint8_t)sizeof(psk);
+    memcpy(premaster + 4u + sizeof(other_secret), psk, sizeof(psk));
+
+    ret = wc_PRF_TLS(expected, (word32)sizeof(expected),
+                     premaster, (word32)sizeof(premaster),
+                     (const byte*)"master secret", 13u,
+                     seed, (word32)seed_len,
+                     1, WC_HASH_TYPE_SHA256, NULL, INVALID_DEVID);
+    if (ret != 0) {
+        printf("FAIL: wc_PRF_TLS(TLS12_PSK_TO_MS reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_TLS12_PSK_TO_MS(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(TLS12_PSK_TO_MS)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SEED,
+                                        seed, seed_len);
+    if (check_status(st, "psa_key_derivation_input_bytes(SEED)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op,
+                                        PSA_KEY_DERIVATION_INPUT_OTHER_SECRET,
+                                        other_secret, sizeof(other_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(OTHER_SECRET)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        psk, sizeof(psk));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(TLS12_PSK_TO_MS)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(TLS12_PSK_TO_MS)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(TLS12_PSK_TO_MS RFC4279)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_kdf_tls12_psk_to_ms_plain_psk_optional_other_secret(void)
+{
+    static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
+    static const uint8_t seed[] = "clienthello||serverhello";
+    uint8_t premaster[2u + sizeof(psk) + 2u + sizeof(psk)];
+    uint8_t expected[48];
+    uint8_t output[sizeof(expected)];
+    size_t seed_len = sizeof(seed) - 1u;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    premaster[0] = 0x00;
+    premaster[1] = (uint8_t)sizeof(psk);
+    memset(premaster + 2u, 0, sizeof(psk));
+    premaster[2u + sizeof(psk)] = 0x00;
+    premaster[3u + sizeof(psk)] = (uint8_t)sizeof(psk);
+    memcpy(premaster + 4u + sizeof(psk), psk, sizeof(psk));
+
+    ret = wc_PRF_TLS(expected, (word32)sizeof(expected),
+                     premaster, (word32)sizeof(premaster),
+                     (const byte*)"master secret", 13u,
+                     seed, (word32)seed_len,
+                     1, WC_HASH_TYPE_SHA256, NULL, INVALID_DEVID);
+    if (ret != 0) {
+        printf("FAIL: wc_PRF_TLS(TLS12_PSK_TO_MS plain PSK reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_TLS12_PSK_TO_MS(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(TLS12_PSK_TO_MS plain PSK)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SEED,
+                                        seed, seed_len);
+    if (check_status(st, "psa_key_derivation_input_bytes(SEED plain PSK)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        psk, sizeof(psk));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET plain PSK)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(TLS12_PSK_TO_MS plain PSK)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(TLS12_PSK_TO_MS plain PSK)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(TLS12_PSK_TO_MS plain PSK RFC4279)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_kdf_hkdf_extract_optional_salt(void)
+{
+    static const uint8_t secret[] = "hkdf extract secret";
+    uint8_t expected[WC_SHA256_DIGEST_SIZE];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF_Extract(WC_HASH_TYPE_SHA256,
+                          NULL, 0,
+                          secret, (word32)(sizeof(secret) - 1u),
+                          expected);
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Extract(HKDF_EXTRACT optional salt reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF_EXTRACT optional salt)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_kdf_hkdf_expand_optional_info(void)
+{
+    static const uint8_t prk[WC_SHA256_DIGEST_SIZE] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    uint8_t expected[42];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF_Expand(WC_HASH_TYPE_SHA256,
+                         prk, (word32)sizeof(prk),
+                         NULL, 0,
+                         expected, (word32)sizeof(expected));
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Expand(HKDF_EXPAND optional info reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXPAND(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXPAND optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        prk, sizeof(prk));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF_EXPAND optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF_EXPAND optional info)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_kdf_hkdf_optional_info(void)
+{
+    static const uint8_t secret[] = "hkdf secret";
+    uint8_t expected[42];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF(WC_HASH_TYPE_SHA256,
+                  secret, (word32)(sizeof(secret) - 1u),
+                  NULL, 0,
+                  NULL, 0,
+                  expected, (word32)sizeof(expected));
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF(HKDF optional info reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF optional info)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF optional info)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     int ret;
@@ -960,6 +1354,12 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
+    if (only == NULL || strcmp(only, "aead_word32_overflow") == 0) {
+        if (run_named_test("aead_word32_overflow",
+                           test_aead_finish_verify_word32_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "chacha20_aes_reject") == 0) {
         if (run_named_test("chacha20_aes_reject",
                            test_chacha20_poly1305_rejects_aes_key) == TEST_FAIL) {
@@ -986,6 +1386,34 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
         if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "kdf_tls12_psk_to_ms") == 0) {
+        if (run_named_test("kdf_tls12_psk_to_ms",
+                           test_kdf_tls12_psk_to_ms_rfc4279_order) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+        if (run_named_test("kdf_tls12_psk_to_ms_plain_psk",
+                           test_kdf_tls12_psk_to_ms_plain_psk_optional_other_secret) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_extract_optional_salt") == 0) {
+        if (run_named_test("kdf_hkdf_extract_optional_salt",
+                           test_kdf_hkdf_extract_optional_salt) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_expand_optional_info") == 0) {
+        if (run_named_test("kdf_hkdf_expand_optional_info",
+                           test_kdf_hkdf_expand_optional_info) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_optional_info") == 0) {
+        if (run_named_test("kdf_hkdf_optional_info",
+                           test_kdf_hkdf_optional_info) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
 
     printf("PSA API test: OK (passed=%d skipped=%d)\n",

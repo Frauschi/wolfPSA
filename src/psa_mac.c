@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/hmac.h>
@@ -241,6 +242,11 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     ctx->mac_length = PSA_MAC_LENGTH(attributes.type, attributes.bits, alg);
     ctx->full_length = PSA_MAC_LENGTH(attributes.type, attributes.bits,
                                        PSA_ALG_FULL_LENGTH_MAC(alg));
+    if (wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     if (PSA_ALG_IS_HMAC(alg)) {
         int hash_type = wolfpsa_hash_type_from_alg(alg);
@@ -320,6 +326,9 @@ psa_status_t psa_mac_update(psa_mac_operation_t *operation,
         return PSA_ERROR_BAD_STATE;
     }
     if (input == NULL && input_length > 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 

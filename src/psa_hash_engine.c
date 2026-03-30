@@ -29,6 +29,7 @@
 
 #include <psa/crypto.h>
 #include "psa_trace.h"
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -433,6 +434,9 @@ psa_status_t psa_hash_update(psa_hash_operation_t *operation,
     if (ctx->finalized) {
         return PSA_ERROR_BAD_STATE;
     }
+    if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Update the hash context based on algorithm */
     switch (ctx->alg) {
@@ -640,18 +644,24 @@ psa_status_t psa_hash_verify(psa_hash_operation_t *operation,
     status = psa_hash_finish(operation, computed_hash, sizeof(computed_hash),
                              &computed_hash_length);
     if (status != PSA_SUCCESS) {
-        return status;
+        goto cleanup;
     }
 
     if (hash_length != computed_hash_length) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
     if (ConstantCompare(computed_hash, hash, (int)computed_hash_length) != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
 
-    return PSA_SUCCESS;
+    status = PSA_SUCCESS;
+
+cleanup:
+    wc_ForceZero(computed_hash, sizeof(computed_hash));
+    return status;
 }
 
 /* Abort a hash operation */
@@ -866,15 +876,20 @@ psa_status_t psa_hash_compare(psa_algorithm_t alg,
     status = psa_hash_compute(alg, input, input_length, computed_hash,
                              sizeof(computed_hash), &computed_hash_length);
     if (status != PSA_SUCCESS) {
-        return status;
+        goto cleanup;
     }
     
     /* Compare the computed hash with the reference hash */
     if (ConstantCompare(computed_hash, hash, (int)computed_hash_length) != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        status = PSA_ERROR_INVALID_SIGNATURE;
+        goto cleanup;
     }
     
-    return PSA_SUCCESS;
+    status = PSA_SUCCESS;
+
+cleanup:
+    wc_ForceZero(computed_hash, sizeof(computed_hash));
+    return status;
 }
 
 #endif /* WOLFSSL_PSA_ENGINE */

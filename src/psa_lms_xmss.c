@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && (defined(WOLFSSL_HAVE_LMS) || defined(WOLFSSL_HAVE_XMSS))
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -53,6 +54,11 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     word32 priv_len32;
     word32 pub_len32;
     
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize LMS key */
     ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
@@ -121,6 +127,12 @@ psa_status_t psa_lms_sign(const uint8_t *private_key,
     LmsKey key;
     word32 sig_len32;
     
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(message_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize LMS key */
     ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
@@ -162,6 +174,12 @@ psa_status_t psa_lms_verify(const uint8_t *public_key,
     LmsKey key;
     int verify_res = 0;
     
+    if ((wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(message_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize LMS key */
     ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
@@ -210,6 +228,11 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     word32 priv_len32;
     word32 pub_len32;
     
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize XMSS key */
     ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
@@ -278,6 +301,12 @@ psa_status_t psa_xmss_sign(const uint8_t *private_key,
     XmssKey key;
     word32 sig_len32;
     
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(message_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize XMSS key */
     ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
@@ -319,6 +348,12 @@ psa_status_t psa_xmss_verify(const uint8_t *public_key,
     XmssKey key;
     int verify_res = 0;
     
+    if ((wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(message_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize XMSS key */
     ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {

@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && defined(HAVE_ECC)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -82,6 +83,10 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     curve_id = wc_psa_get_ecc_curve_id(key_type, key_bits);
     if (curve_id == ECC_CURVE_INVALID) {
         return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
     
     /* Initialize ECC key */
@@ -146,12 +151,14 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     wc_ecc_free(&ecc);
     
     if (ret != 0) {
+        wc_ForceZero(der_sig, sig_len);
         XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
 
     rs = (byte*)XMALLOC(raw_sig_len, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (rs == NULL) {
+        wc_ForceZero(der_sig, sig_len);
         XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
@@ -159,12 +166,15 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     r_len = (word32)key_bytes;
     s_len = (word32)key_bytes;
     ret = wc_ecc_sig_to_rs(der_sig, der_len, rs, &r_len, rs + key_bytes, &s_len);
+    wc_ForceZero(der_sig, sig_len);
     XFREE(der_sig, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (ret != 0) {
+        wc_ForceZero(rs, raw_sig_len);
         XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
     if (r_len > key_bytes || s_len > key_bytes) {
+        wc_ForceZero(rs, raw_sig_len);
         XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_SIGNATURE;
     }
@@ -173,6 +183,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     XMEMCPY(signature + (key_bytes - r_len), rs, r_len);
     XMEMCPY(signature + key_bytes + (key_bytes - s_len),
             rs + key_bytes, s_len);
+    wc_ForceZero(rs, raw_sig_len);
     XFREE(rs, NULL, DYNAMIC_TYPE_TMP_BUFFER);
 
     *signature_length = raw_sig_len;
@@ -213,6 +224,10 @@ psa_status_t psa_asymmetric_verify_ecc(psa_key_type_t key_type,
     curve_id = wc_psa_get_ecc_curve_id(key_type, key_bits);
     if (curve_id == ECC_CURVE_INVALID) {
         return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
     
     /* Initialize ECC key */
@@ -304,6 +319,9 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     if (curve_id == ECC_CURVE_INVALID) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize ECC key */
     ret = wc_ecc_init(&ecc);
@@ -387,6 +405,10 @@ psa_status_t psa_asymmetric_export_public_key_ecc(psa_key_type_t key_type,
     curve_id = wc_psa_get_ecc_curve_id(key_type, key_bits);
     if (curve_id == ECC_CURVE_INVALID) {
         return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
     
     /* Initialize ECC key */
