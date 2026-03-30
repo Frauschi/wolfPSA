@@ -1160,6 +1160,11 @@ static int test_kdf_hkdf_extract_optional_salt(void)
     if (check_status(st, "psa_key_derivation_setup(HKDF_EXTRACT optional salt)") != TEST_OK) {
         return TEST_FAIL;
     }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
     st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                         secret, sizeof(secret) - 1u);
     if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXTRACT optional salt)") != TEST_OK) {
@@ -1217,6 +1222,11 @@ static int test_kdf_hkdf_expand_optional_info(void)
         (void)psa_key_derivation_abort(&op);
         return TEST_FAIL;
     }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF_EXPAND optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
     st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
     if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXPAND optional info)") != TEST_OK) {
         (void)psa_key_derivation_abort(&op);
@@ -1261,6 +1271,11 @@ static int test_kdf_hkdf_optional_info(void)
     st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                         secret, sizeof(secret) - 1u);
     if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF optional info)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF optional info)") != TEST_OK) {
         (void)psa_key_derivation_abort(&op);
         return TEST_FAIL;
     }
