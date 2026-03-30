@@ -1038,6 +1038,52 @@ static int test_kdf_tls12_psk_to_ms_plain_psk_optional_other_secret(void)
     return TEST_OK;
 }
 
+static int test_kdf_hkdf_extract_optional_salt(void)
+{
+    static const uint8_t secret[] = "hkdf extract secret";
+    uint8_t expected[WC_SHA256_DIGEST_SIZE];
+    uint8_t output[sizeof(expected)];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF_Extract(WC_HASH_TYPE_SHA256,
+                          NULL, 0,
+                          secret, (word32)(sizeof(secret) - 1u),
+                          expected);
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Extract(HKDF_EXTRACT optional salt reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF_EXTRACT optional salt)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF_EXTRACT optional salt)",
+                     output, expected, sizeof(expected)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     int ret;
@@ -1129,6 +1175,12 @@ int main(int argc, char** argv)
         }
         if (run_named_test("kdf_tls12_psk_to_ms_plain_psk",
                            test_kdf_tls12_psk_to_ms_plain_psk_optional_other_secret) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_extract_optional_salt") == 0) {
+        if (run_named_test("kdf_hkdf_extract_optional_salt",
+                           test_kdf_hkdf_extract_optional_salt) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

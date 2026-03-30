@@ -253,9 +253,6 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
                 return PSA_SUCCESS;
             }
             if (step == PSA_KEY_DERIVATION_INPUT_SECRET) {
-                if ((ctx->steps_set & WOLFPSA_KDF_STEP_SALT) == 0) {
-                    return PSA_ERROR_BAD_STATE;
-                }
                 if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) != 0) {
                     return PSA_ERROR_BAD_STATE;
                 }
@@ -1021,8 +1018,7 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     }
     else if (PSA_ALG_IS_ANY_HKDF(ctx->alg)) {
         if (PSA_ALG_IS_HKDF_EXTRACT(ctx->alg)) {
-            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-                (ctx->steps_set & WOLFPSA_KDF_STEP_SALT) == 0) {
+            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
                 return PSA_ERROR_BAD_STATE;
             }
         }
