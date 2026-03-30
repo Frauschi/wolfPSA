@@ -318,8 +318,7 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         if (step == PSA_KEY_DERIVATION_INPUT_SECRET) {
-            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0 ||
-                (ctx->steps_set & WOLFPSA_KDF_STEP_OTHER_SECRET) == 0) {
+            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0) {
                 return PSA_ERROR_BAD_STATE;
             }
         }
@@ -796,6 +795,8 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
                                                 size_t output_length)
 {
     int hash_type = wolfpsa_hash_type_from_alg(ctx->alg);
+    size_t other_secret_length;
+    const uint8_t *other_secret;
     uint8_t *premaster = NULL;
     size_t premaster_len;
     psa_status_t status;
@@ -804,18 +805,32 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
     if (hash_type == WC_HASH_TYPE_NONE) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
-    premaster_len = 2u + ctx->secret_length + 2u + ctx->other_secret_length;
+    if ((ctx->steps_set & WOLFPSA_KDF_STEP_OTHER_SECRET) == 0) {
+        other_secret = NULL;
+        other_secret_length = ctx->secret_length;
+    }
+    else {
+        other_secret = ctx->other_secret;
+        other_secret_length = ctx->other_secret_length;
+    }
+
+    premaster_len = 2u + ctx->secret_length + 2u + other_secret_length;
     premaster = (uint8_t *)XMALLOC(premaster_len, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (premaster == NULL) {
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    premaster[0] = (uint8_t)((ctx->other_secret_length >> 8) & 0xff);
-    premaster[1] = (uint8_t)(ctx->other_secret_length & 0xff);
-    XMEMCPY(premaster + 2u, ctx->other_secret, ctx->other_secret_length);
-    premaster[2u + ctx->other_secret_length] = (uint8_t)((ctx->secret_length >> 8) & 0xff);
-    premaster[3u + ctx->other_secret_length] = (uint8_t)(ctx->secret_length & 0xff);
-    XMEMCPY(premaster + 4u + ctx->other_secret_length, ctx->secret,
+    premaster[0] = (uint8_t)((other_secret_length >> 8) & 0xff);
+    premaster[1] = (uint8_t)(other_secret_length & 0xff);
+    if (other_secret == NULL) {
+        XMEMSET(premaster + 2u, 0, other_secret_length);
+    }
+    else {
+        XMEMCPY(premaster + 2u, other_secret, other_secret_length);
+    }
+    premaster[2u + other_secret_length] = (uint8_t)((ctx->secret_length >> 8) & 0xff);
+    premaster[3u + other_secret_length] = (uint8_t)(ctx->secret_length & 0xff);
+    XMEMCPY(premaster + 4u + other_secret_length, ctx->secret,
             ctx->secret_length);
 
     ret = wc_PRF_TLS(output, (word32)output_length,
@@ -1033,7 +1048,6 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     }
     else if (PSA_ALG_IS_TLS12_PSK_TO_MS(ctx->alg)) {
         if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-            (ctx->steps_set & WOLFPSA_KDF_STEP_OTHER_SECRET) == 0 ||
             (ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0) {
             return PSA_ERROR_BAD_STATE;
         }
