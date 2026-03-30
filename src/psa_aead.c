@@ -34,6 +34,7 @@
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include "psa_aead_internal.h"
+#include "psa_size.h"
 
 static wolfpsa_aead_ctx_t* wolfpsa_aead_get_ctx(psa_aead_operation_t *operation)
 {
@@ -475,6 +476,11 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
 
+    if ((wolfpsa_check_word32_length(ctx->input_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->aad_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
@@ -573,6 +579,11 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     if (tag_length < ctx->tag_length &&
         (ctx->alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
         return PSA_ERROR_INVALID_SIGNATURE;
+    }
+
+    if ((wolfpsa_check_word32_length(ctx->input_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->aad_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {

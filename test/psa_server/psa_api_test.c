@@ -609,6 +609,106 @@ cleanup:
     return ret;
 }
 
+static int test_aead_finish_verify_word32_overflow_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t empty_gcm_tag[16] = {
+        0x58,0xe2,0xfc,0xce,0xfa,0x7e,0x30,0x61,
+        0x36,0x7f,0x1d,0x57,0xa4,0xe7,0x45,0x5a
+    };
+    uint8_t out[1];
+    uint8_t tag[sizeof(empty_gcm_tag)];
+    size_t out_len = 0;
+    size_t tag_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    wolfpsa_aead_ctx_t *ctx;
+    int ret = TEST_OK;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM word32 overflow)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(word32 input)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 input)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->input = NULL;
+    ctx->input_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_finish(&op, out, SIZE_MAX, &out_len, tag, sizeof(tag), &tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_finish rejects input_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(word32 aad)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 aad)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->aad = NULL;
+    ctx->aad_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_finish(&op, out, sizeof(out), &out_len, tag, sizeof(tag), &tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_finish rejects aad_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(word32 input)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 verify input)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->input = NULL;
+    ctx->input_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_verify(&op, out, SIZE_MAX, &out_len, empty_gcm_tag, sizeof(empty_gcm_tag));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_verify rejects input_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(word32 aad)") != TEST_OK) goto cleanup;
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(word32 verify aad)") != TEST_OK) goto cleanup;
+    ctx = wolfpsa_aead_get_ctx_ptr(&op);
+    ctx->aad = NULL;
+    ctx->aad_length = (size_t)UINT32_MAX + 1u;
+    st = psa_aead_verify(&op, out, sizeof(out), &out_len, empty_gcm_tag, sizeof(empty_gcm_tag));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_verify rejects aad_length above word32") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM word32 overflow)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -1236,6 +1336,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_multipart_length_overflow") == 0) {
         if (run_named_test("aead_multipart_length_overflow",
                            test_aead_multipart_length_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_word32_overflow") == 0) {
+        if (run_named_test("aead_word32_overflow",
+                           test_aead_finish_verify_word32_overflow_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
