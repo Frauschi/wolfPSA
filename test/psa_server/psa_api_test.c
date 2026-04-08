@@ -4642,6 +4642,68 @@ cleanup:
     return TEST_FAIL;
 }
 
+/* F-2416: Cipher setup error paths must ForceZero ctx before freeing.
+ * This test exercises the cipher abort path and a setup-then-abort
+ * sequence to verify no crash occurs from the cleanup code. It also
+ * verifies that a double-abort is safe (returns SUCCESS, not crash). */
+static int test_cipher_setup_cleanup(void)
+{
+    psa_status_t st;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key = 0;
+    psa_cipher_operation_t op;
+    const uint8_t key_data[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+    };
+
+    /* Import AES-128 key */
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_set_key_algorithm(&attr, PSA_ALG_CBC_NO_PADDING);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+    st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
+    if (check_status(st, "import key for cipher cleanup test") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Test 1: encrypt setup + immediate abort (exercises cleanup path) */
+    memset(&op, 0, sizeof(op));
+    st = psa_cipher_encrypt_setup(&op, key, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "cipher encrypt setup for abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher abort after encrypt setup") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    /* Test 2: decrypt setup + immediate abort */
+    memset(&op, 0, sizeof(op));
+    st = psa_cipher_decrypt_setup(&op, key, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "cipher decrypt setup for abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher abort after decrypt setup") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    /* Test 3: double abort must not crash */
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher double abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    psa_destroy_key(key);
+    return TEST_OK;
+}
+
 /* F-2423: HKDF-Extract must accept output_bytes smaller than hash digest.
  * Before the fix, requesting fewer bytes than the digest returned
  * PSA_ERROR_INVALID_ARGUMENT because of a strict equality check. */
@@ -5045,6 +5107,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "hkdf_extract_truncated_output") == 0) {
         if (run_named_test("hkdf_extract_truncated_output",
                            test_hkdf_extract_truncated_output) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_setup_cleanup") == 0) {
+        if (run_named_test("cipher_setup_cleanup",
+                           test_cipher_setup_cleanup) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
