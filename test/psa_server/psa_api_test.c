@@ -2788,6 +2788,45 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_mac_setup_truncated_too_short(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import an HMAC key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs,
+                          PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 2));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC trunc-short)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Truncation length 2 < 4: must be rejected after wc_HmacSetKey ran */
+    st = psa_mac_sign_setup(&op, key_id,
+                            PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 2));
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_mac_sign_setup rejects trunc < 4") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_SUPPORTED (-134), got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HMAC trunc-short)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_export_key_no_export_flag(void)
 {
     static const uint8_t key[16] = {
@@ -4078,6 +4117,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "export_key_no_export_flag") == 0) {
         if (run_named_test("export_key_no_export_flag",
                            test_export_key_no_export_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_setup_truncated_too_short") == 0) {
+        if (run_named_test("mac_setup_truncated_too_short",
+                           test_mac_setup_truncated_too_short) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
