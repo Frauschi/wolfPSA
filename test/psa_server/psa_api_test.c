@@ -2788,6 +2788,78 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_asymmetric_alg_mismatch(void)
+{
+    uint8_t hash[WC_SHA256_DIGEST_SIZE] = {0};
+    uint8_t sig[128];
+    size_t sig_len = 0;
+    uint8_t pub[128];
+    size_t pub_len = 0;
+    uint8_t dh_out[128];
+    size_t dh_out_len = 0;
+    psa_key_id_t ecdsa_key = 0;
+    psa_key_id_t ecdh_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Generate ECDSA key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &ecdsa_key);
+    if (check_status(st, "psa_generate_key(ECDSA)") != TEST_OK) return TEST_FAIL;
+
+    /* Get public key for use in raw_key_agreement */
+    st = psa_export_public_key(ecdsa_key, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "psa_export_public_key(ECDSA)") != TEST_OK) {
+        (void)psa_destroy_key(ecdsa_key);
+        return TEST_FAIL;
+    }
+
+    /* Attempt ECDH with ECDSA key -- must be rejected */
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, ecdsa_key,
+                               pub, pub_len,
+                               dh_out, sizeof(dh_out), &dh_out_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "raw_key_agreement rejects ECDSA key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(ecdsa_key);
+        return TEST_FAIL;
+    }
+
+    (void)psa_destroy_key(ecdsa_key);
+
+    /* Generate ECDH key */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_SIGN_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &ecdh_key);
+    if (check_status(st, "psa_generate_key(ECDH)") != TEST_OK) return TEST_FAIL;
+
+    /* Attempt sign_hash with ECDH key -- must be rejected */
+    st = psa_sign_hash(ecdh_key, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "sign_hash rejects ECDH key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(ecdh_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(ecdh_key);
+    if (check_status(st, "psa_destroy_key(ECDH)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_cipher_alg_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -4465,6 +4537,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
         if (run_named_test("alg_none_not_permitted",
                            test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "asymmetric_alg_mismatch") == 0) {
+        if (run_named_test("asymmetric_alg_mismatch",
+                           test_asymmetric_alg_mismatch) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
