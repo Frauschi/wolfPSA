@@ -4529,6 +4529,119 @@ static int run_named_test(const char* name, test_fn_t fn)
     return ret;
 }
 
+/* F-2422: CCM_STAR_NO_TAG multi-part cipher must allow multiple update calls.
+ * Before the fix, the second update call would return PSA_ERROR_BAD_STATE. */
+static int test_ccm_star_no_tag_multipart(void)
+{
+    psa_status_t st;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key = 0;
+    psa_cipher_operation_t op_single;
+    psa_cipher_operation_t op_multi;
+    /* 128-bit AES key */
+    const uint8_t key_data[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+    };
+    /* 13-byte nonce required for CCM_STAR_NO_TAG */
+    const uint8_t nonce[13] = {
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6,
+        0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC
+    };
+    /* 32-byte plaintext to split into two 16-byte parts */
+    const uint8_t plaintext[32] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    uint8_t ct_single[32];
+    uint8_t ct_multi[32];
+    size_t out_len = 0;
+    size_t total_multi = 0;
+
+    /* Import AES-128 key for CCM_STAR_NO_TAG encrypt */
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_set_key_algorithm(&attr, PSA_ALG_CCM_STAR_NO_TAG);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+    st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
+    if (check_status(st, "import key for CCM_STAR_NO_TAG") != TEST_OK)
+        return TEST_FAIL;
+
+    /* --- Single-call: encrypt all 32 bytes at once --- */
+    memset(&op_single, 0, sizeof(op_single));
+    st = psa_cipher_encrypt_setup(&op_single, key, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "cipher encrypt setup (single)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_set_iv(&op_single, nonce, sizeof(nonce));
+    if (check_status(st, "cipher set iv (single)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_update(&op_single, plaintext, 32, ct_single, sizeof(ct_single),
+                           &out_len);
+    if (check_status(st, "cipher update (single 32B)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 32, "single update produced 32 bytes") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_abort(&op_single);
+    if (check_status(st, "cipher abort (single)") != TEST_OK)
+        goto cleanup;
+
+    /* --- Multi-call: encrypt as two 16-byte updates --- */
+    memset(&op_multi, 0, sizeof(op_multi));
+    st = psa_cipher_encrypt_setup(&op_multi, key, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "cipher encrypt setup (multi)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_set_iv(&op_multi, nonce, sizeof(nonce));
+    if (check_status(st, "cipher set iv (multi)") != TEST_OK)
+        goto cleanup;
+
+    /* First 16 bytes */
+    st = psa_cipher_update(&op_multi, plaintext, 16, ct_multi, sizeof(ct_multi),
+                           &out_len);
+    if (check_status(st, "cipher update (multi part 1)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 16, "multi update part 1 produced 16 bytes") != TEST_OK)
+        goto cleanup;
+    total_multi += out_len;
+
+    /* Second 16 bytes - this is the call that would fail before the fix */
+    st = psa_cipher_update(&op_multi, plaintext + 16, 16,
+                           ct_multi + total_multi,
+                           sizeof(ct_multi) - total_multi, &out_len);
+    if (check_status(st, "cipher update (multi part 2)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 16, "multi update part 2 produced 16 bytes") != TEST_OK)
+        goto cleanup;
+    total_multi += out_len;
+
+    st = psa_cipher_abort(&op_multi);
+    if (check_status(st, "cipher abort (multi)") != TEST_OK)
+        goto cleanup;
+
+    /* Verify: single-call and multi-call must produce identical ciphertext */
+    if (check_true(total_multi == 32,
+                   "multi total output is 32 bytes") != TEST_OK)
+        goto cleanup;
+    if (check_true(memcmp(ct_single, ct_multi, 32) == 0,
+                   "single-call and multi-call ciphertext match") != TEST_OK)
+        goto cleanup;
+
+    psa_destroy_key(key);
+    return TEST_OK;
+
+cleanup:
+    psa_cipher_abort(&op_single);
+    psa_cipher_abort(&op_multi);
+    psa_destroy_key(key);
+    return TEST_FAIL;
+}
+
 int main(int argc, char** argv)
 {
     psa_status_t st;
@@ -4859,6 +4972,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_output_bytes_are_sequential") == 0) {
         if (run_named_test("kdf_output_bytes_are_sequential",
                            test_kdf_output_bytes_are_sequential) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ccm_star_no_tag_multipart") == 0) {
+        if (run_named_test("ccm_star_no_tag_multipart",
+                           test_ccm_star_no_tag_multipart) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
