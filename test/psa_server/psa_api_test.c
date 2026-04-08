@@ -2788,6 +2788,78 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_kdf_key_agreement_derive_check(void)
+{
+    psa_key_id_t key_with = 0, key_without = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
+    uint8_t pub[128];
+    size_t pub_len = 0;
+    psa_status_t st;
+
+    /* Generate ECC key WITH DERIVE */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &key_with);
+    if (check_status(st, "psa_generate_key(ECDH+DERIVE)") != TEST_OK)
+        return TEST_FAIL;
+
+    st = psa_export_public_key(key_with, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "export_pub(ECDH)") != TEST_OK) {
+        (void)psa_destroy_key(key_with);
+        return TEST_FAIL;
+    }
+
+    /* Test 1: key_agreement with DERIVE flag should succeed */
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "kdf_setup(ka)") != TEST_OK) goto fail;
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          key_with, pub, pub_len);
+    if (check_status(st, "kdf_key_agreement with DERIVE") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_with);
+
+    /* Generate ECC key WITHOUT DERIVE */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &key_without);
+    if (check_status(st, "psa_generate_key(ECDH no-DERIVE)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Test 2: key_agreement without DERIVE must fail */
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "kdf_setup(ka no-derive)") != TEST_OK) goto fail2;
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          key_without, pub, pub_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "kdf_key_agreement rejects key without DERIVE") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        goto fail2;
+    }
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_without);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_with);
+    return TEST_FAIL;
+fail2:
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_without);
+    return TEST_FAIL;
+}
+
 static int test_kdf_input_key_checks(void)
 {
     static const uint8_t ikm[16] = {
@@ -4629,6 +4701,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
         if (run_named_test("alg_none_not_permitted",
                            test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_key_agreement_derive_check") == 0) {
+        if (run_named_test("kdf_key_agreement_derive_check",
+                           test_kdf_key_agreement_derive_check) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
