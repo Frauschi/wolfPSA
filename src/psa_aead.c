@@ -153,6 +153,7 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+
     {
         psa_algorithm_t key_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_alg);
         psa_algorithm_t req_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(alg);

@@ -2788,6 +2788,86 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_alg_none_not_permitted(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t cipher_op = psa_cipher_operation_init();
+    psa_mac_operation_t mac_op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import AES key with PSA_ALG_NONE (no algorithm set) */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT |
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
+    /* Deliberately do NOT call psa_set_key_algorithm => PSA_ALG_NONE */
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Cipher with ALG_NONE key must be rejected */
+    st = psa_cipher_encrypt_setup(&cipher_op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "cipher_encrypt_setup rejects ALG_NONE key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    /* AEAD with ALG_NONE key must be rejected */
+    {
+        uint8_t ct[32];
+        size_t ct_len = 0;
+        st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                              (const uint8_t *)"nonce123nonce", 12,
+                              NULL, 0,
+                              key, sizeof(key),
+                              ct, sizeof(ct), &ct_len);
+        if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                       "aead_encrypt rejects ALG_NONE key") != TEST_OK) {
+            printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+            (void)psa_destroy_key(key_id);
+            return TEST_FAIL;
+        }
+    }
+
+    (void)psa_destroy_key(key_id);
+
+    /* Import HMAC key with PSA_ALG_NONE */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    /* No algorithm set => PSA_ALG_NONE */
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* MAC with ALG_NONE key must be rejected */
+    st = psa_mac_sign_setup(&mac_op, key_id,
+                            PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "mac_sign_setup rejects ALG_NONE key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_kdf_output_bytes_consecutive(void)
 {
     /* Property: concat(output_bytes(16), output_bytes(16)) == output_bytes(32) */
@@ -4343,6 +4423,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_output_bytes_consecutive") == 0) {
         if (run_named_test("kdf_output_bytes_consecutive",
                            test_kdf_output_bytes_consecutive) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
+        if (run_named_test("alg_none_not_permitted",
+                           test_alg_none_not_permitted) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

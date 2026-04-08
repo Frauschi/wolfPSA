@@ -162,6 +162,12 @@ static psa_status_t wolfpsa_mac_check_key(psa_key_id_t key,
     }
 
     key_alg = psa_get_key_algorithm(attributes);
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
+    }
     key_alg_full = PSA_ALG_FULL_LENGTH_MAC(key_alg);
     req_alg_full = PSA_ALG_FULL_LENGTH_MAC(alg);
     if (key_alg == PSA_ALG_NONE) {
