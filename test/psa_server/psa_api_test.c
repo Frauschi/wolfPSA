@@ -2788,6 +2788,44 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_export_key_no_export_flag(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t export_buf[16];
+    size_t export_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import a volatile AES key with ENCRYPT only -- no EXPORT flag */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES no-export)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* psa_export_key must refuse because EXPORT usage is not set */
+    st = psa_export_key(key_id, export_buf, sizeof(export_buf), &export_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_export_key rejects key without EXPORT flag") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED (-133), got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(no-export)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_kdf_null_capacity(void)
 {
     size_t capacity = 0;
@@ -4034,6 +4072,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_key_agreement_policy") == 0) {
         if (run_named_test("kdf_key_agreement_policy",
                            test_kdf_key_agreement_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "export_key_no_export_flag") == 0) {
+        if (run_named_test("export_key_no_export_flag",
+                           test_export_key_no_export_flag) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
