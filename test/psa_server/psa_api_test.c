@@ -2788,6 +2788,51 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_aead_alg_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b
+    };
+    static const uint8_t pt[] = "hello";
+    uint8_t ct[64];
+    size_t ct_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import AES key bound to GCM */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM key)") != TEST_OK) return TEST_FAIL;
+
+    /* Attempt CCM with a GCM key -- must be rejected */
+    st = psa_aead_encrypt(key_id, PSA_ALG_CCM,
+                          nonce, sizeof(nonce), NULL, 0,
+                          pt, sizeof(pt) - 1,
+                          ct, sizeof(ct), &ct_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "aead_encrypt rejects GCM key for CCM") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(aead mismatch)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_kdf_key_agreement_derive_check(void)
 {
     psa_key_id_t key_with = 0, key_without = 0;
@@ -4701,6 +4746,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
         if (run_named_test("alg_none_not_permitted",
                            test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_alg_mismatch") == 0) {
+        if (run_named_test("aead_alg_mismatch",
+                           test_aead_alg_mismatch) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
