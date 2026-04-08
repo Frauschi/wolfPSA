@@ -2788,6 +2788,98 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_kdf_input_key_checks(void)
+{
+    static const uint8_t ikm[16] = {
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b
+    };
+    psa_key_id_t derive_key = 0;
+    psa_key_id_t no_derive_key = 0;
+    psa_key_id_t aes_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_status_t st;
+
+    /* Test 1: DERIVE key with correct usage -- should succeed */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &derive_key);
+    if (check_status(st, "psa_import_key(DERIVE)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(input_key test)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      derive_key);
+    if (check_status(st, "kdf_input_key(DERIVE key)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op);
+
+    /* Test 2: key lacking DERIVE usage -- must fail NOT_PERMITTED */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &no_derive_key);
+    if (check_status(st, "psa_import_key(no DERIVE)") != TEST_OK) goto fail;
+
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(no-derive)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt(no-derive)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      no_derive_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "kdf_input_key rejects key without DERIVE") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        goto fail;
+    }
+    psa_key_derivation_abort(&op);
+
+    /* Test 3: AES key for SECRET step -- must fail INVALID_ARGUMENT */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &aes_key);
+    if (check_status(st, "psa_import_key(AES for KDF)") != TEST_OK) goto fail;
+
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(aes)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt(aes)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      aes_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "kdf_input_key rejects AES key for SECRET") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        goto fail;
+    }
+    psa_key_derivation_abort(&op);
+
+    (void)psa_destroy_key(derive_key);
+    (void)psa_destroy_key(no_derive_key);
+    (void)psa_destroy_key(aes_key);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op);
+    if (derive_key) (void)psa_destroy_key(derive_key);
+    if (no_derive_key) (void)psa_destroy_key(no_derive_key);
+    if (aes_key) (void)psa_destroy_key(aes_key);
+    return TEST_FAIL;
+}
+
 static int test_asymmetric_alg_mismatch(void)
 {
     uint8_t hash[WC_SHA256_DIGEST_SIZE] = {0};
@@ -4537,6 +4629,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
         if (run_named_test("alg_none_not_permitted",
                            test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_input_key_checks") == 0) {
+        if (run_named_test("kdf_input_key_checks",
+                           test_kdf_input_key_checks) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
