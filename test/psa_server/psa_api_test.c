@@ -2788,6 +2788,100 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_kdf_output_bytes_consecutive(void)
+{
+    /* Property: concat(output_bytes(16), output_bytes(16)) == output_bytes(32) */
+    static const uint8_t ikm[] = {
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b
+    };
+    static const uint8_t salt[] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c
+    };
+    static const uint8_t info[] = {
+        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9
+    };
+    uint8_t split_a[16], split_b[16];
+    uint8_t whole[32];
+    psa_key_derivation_operation_t op1 = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_key_derivation_operation_t op2 = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import IKM as a DERIVE key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 8 * sizeof(ikm));
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &key_id);
+    if (check_status(st, "psa_import_key(HKDF ikm)") != TEST_OK) return TEST_FAIL;
+
+    /* Operation 1: two split calls of 16 bytes each */
+    st = psa_key_derivation_setup(&op1, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op1, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt));
+    if (check_status(st, "kdf_input_salt(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op1, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      key_id);
+    if (check_status(st, "kdf_input_key(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op1, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info));
+    if (check_status(st, "kdf_input_info(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_set_capacity(&op1, 32);
+    if (check_status(st, "kdf_set_capacity(split)") != TEST_OK) goto fail;
+
+    st = psa_key_derivation_output_bytes(&op1, split_a, 16);
+    if (check_status(st, "kdf_output_bytes(split 1st 16)") != TEST_OK) goto fail;
+    st = psa_key_derivation_output_bytes(&op1, split_b, 16);
+    if (check_status(st, "kdf_output_bytes(split 2nd 16)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op1);
+
+    /* Operation 2: single call of 32 bytes */
+    st = psa_key_derivation_setup(&op2, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op2, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt));
+    if (check_status(st, "kdf_input_salt(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op2, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      key_id);
+    if (check_status(st, "kdf_input_key(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op2, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info));
+    if (check_status(st, "kdf_input_info(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_set_capacity(&op2, 32);
+    if (check_status(st, "kdf_set_capacity(whole)") != TEST_OK) goto fail;
+
+    st = psa_key_derivation_output_bytes(&op2, whole, 32);
+    if (check_status(st, "kdf_output_bytes(whole 32)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op2);
+
+    /* Verify: split_a || split_b == whole */
+    if (check_buf_eq("kdf consecutive first half", split_a, whole, 16) != TEST_OK) {
+        printf("  split first 16 bytes differ from whole\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_buf_eq("kdf consecutive second half", split_b, whole + 16, 16) != TEST_OK) {
+        printf("  split second 16 bytes differ from whole\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    (void)psa_destroy_key(key_id);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op1);
+    psa_key_derivation_abort(&op2);
+    (void)psa_destroy_key(key_id);
+    return TEST_FAIL;
+}
+
 static int test_copy_key(void)
 {
     static const uint8_t key[16] = {
@@ -4243,6 +4337,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "copy_key") == 0) {
         if (run_named_test("copy_key", test_copy_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_output_bytes_consecutive") == 0) {
+        if (run_named_test("kdf_output_bytes_consecutive",
+                           test_kdf_output_bytes_consecutive) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
