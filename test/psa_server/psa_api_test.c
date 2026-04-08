@@ -2788,6 +2788,43 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_mac_alg_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import HMAC key bound to SHA-256 */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC-SHA256 key)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Attempt HMAC-SHA-512 with a SHA-256 key -- must be rejected */
+    st = psa_mac_sign_setup(&op, key_id, PSA_ALG_HMAC(PSA_ALG_SHA_512));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "mac_sign_setup rejects HMAC alg mismatch") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(mac mismatch)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_aead_alg_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -4746,6 +4783,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
         if (run_named_test("alg_none_not_permitted",
                            test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_alg_mismatch") == 0) {
+        if (run_named_test("mac_alg_mismatch",
+                           test_mac_alg_mismatch) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
