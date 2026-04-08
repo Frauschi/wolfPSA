@@ -4642,6 +4642,67 @@ cleanup:
     return TEST_FAIL;
 }
 
+/* F-2423: HKDF-Extract must accept output_bytes smaller than hash digest.
+ * Before the fix, requesting fewer bytes than the digest returned
+ * PSA_ERROR_INVALID_ARGUMENT because of a strict equality check. */
+static int test_hkdf_extract_truncated_output(void)
+{
+    static const uint8_t secret[] = "hkdf extract truncation test";
+    static const uint8_t salt[] = "some salt";
+    uint8_t full[WC_SHA256_DIGEST_SIZE];
+    uint8_t truncated[16]; /* half the digest */
+    psa_key_derivation_operation_t op;
+    psa_status_t st;
+    int ret;
+
+    /* Compute the full extract as reference using wolfCrypt directly */
+    ret = wc_HKDF_Extract(WC_HASH_TYPE_SHA256,
+                          salt, (word32)(sizeof(salt) - 1u),
+                          secret, (word32)(sizeof(secret) - 1u),
+                          full);
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Extract reference (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    /* Now request only 16 bytes through PSA API */
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "setup(HKDF_EXTRACT truncated)") != TEST_OK)
+        return TEST_FAIL;
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt) - 1u);
+    if (check_status(st, "input salt(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "input secret(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_output_bytes(&op, truncated, sizeof(truncated));
+    if (check_status(st, "output_bytes 16(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "abort(HKDF_EXTRACT truncated)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* The first 16 bytes must match the full extract */
+    if (check_buf_eq("HKDF_EXTRACT truncated output matches prefix",
+                     truncated, full, sizeof(truncated)) != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 int main(int argc, char** argv)
 {
     psa_status_t st;
@@ -4978,6 +5039,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "ccm_star_no_tag_multipart") == 0) {
         if (run_named_test("ccm_star_no_tag_multipart",
                            test_ccm_star_no_tag_multipart) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "hkdf_extract_truncated_output") == 0) {
+        if (run_named_test("hkdf_extract_truncated_output",
+                           test_hkdf_extract_truncated_output) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
