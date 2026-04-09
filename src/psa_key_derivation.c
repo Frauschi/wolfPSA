@@ -643,6 +643,7 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+    /* Algorithm match checks */
     if (ctx->is_key_agreement) {
         if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
             PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {

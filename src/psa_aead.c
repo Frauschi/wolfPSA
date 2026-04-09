@@ -105,6 +105,8 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
     psa_status_t status;
     psa_key_usage_t key_usage;
     psa_algorithm_t key_alg;
+    psa_algorithm_t key_base;
+    psa_algorithm_t req_base;
     size_t key_tag_len;
     size_t req_tag_len;
 
@@ -153,41 +155,39 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+    /* Algorithm match checks */
+    key_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_alg);
+    req_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(alg);
+    key_tag_len = wolfpsa_aead_tag_length(key_alg);
+    req_tag_len = wolfpsa_aead_tag_length(alg);
 
-    {
-        psa_algorithm_t key_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_alg);
-        psa_algorithm_t req_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(alg);
-        key_tag_len = wolfpsa_aead_tag_length(key_alg);
-        req_tag_len = wolfpsa_aead_tag_length(alg);
+    if (key_tag_len == 0 || req_tag_len == 0) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
-        if (key_tag_len == 0 || req_tag_len == 0) {
-            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-            *key_data = NULL;
-            *key_data_length = 0;
-            return PSA_ERROR_INVALID_ARGUMENT;
-        }
+    if (key_base != req_base) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
+    }
 
-        if (key_base != req_base) {
-            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-            *key_data = NULL;
-            *key_data_length = 0;
-            return PSA_ERROR_NOT_PERMITTED;
-        }
-
-        if ((key_alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
-            if (req_tag_len < key_tag_len) {
-                wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-                *key_data = NULL;
-                *key_data_length = 0;
-                return PSA_ERROR_NOT_PERMITTED;
-            }
-        }
-        else if (req_tag_len != key_tag_len) {
+    if ((key_alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
+        if (req_tag_len < key_tag_len) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
         }
+    }
+    else if (req_tag_len != key_tag_len) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
     }
 
     return PSA_SUCCESS;
