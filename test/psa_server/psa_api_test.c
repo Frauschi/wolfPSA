@@ -3351,7 +3351,7 @@ static int test_copy_key(void)
         return TEST_FAIL;
     }
 
-    /* --- Test 3: verify copied key attributes match source --- */
+    /* --- Test 2: verify copied key attributes match source --- */
     st = psa_get_key_attributes(dst_id, &got_attrs);
     if (check_status(st, "psa_get_key_attributes(copied)") != TEST_OK) {
         (void)psa_destroy_key(src_id);
@@ -3398,7 +3398,7 @@ static int test_copy_key(void)
     (void)psa_destroy_key(dst_id);
     (void)psa_destroy_key(src_id);
 
-    /* --- Test 2: copy WITHOUT COPY flag must fail --- */
+    /* --- Test 3: copy WITHOUT COPY flag must fail --- */
     src_attrs = psa_key_attributes_init();
     psa_set_key_type(&src_attrs, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&src_attrs, 128);
