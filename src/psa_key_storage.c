@@ -374,11 +374,18 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         psa_key_bits_t inferred_bits;
 
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr->type)) {
-            if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
-                return PSA_ERROR_INVALID_ARGUMENT;
+            if (family == PSA_ECC_FAMILY_MONTGOMERY ||
+                family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+                inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                             data_length);
             }
-            inferred_bits = wolfpsa_ecc_bits_from_length(family,
-                                                         (data_length - 1u) / 2u);
+            else {
+                if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
+                    return PSA_ERROR_INVALID_ARGUMENT;
+                }
+                inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                             (data_length - 1u) / 2u);
+            }
         }
         else {
             inferred_bits = wolfpsa_ecc_bits_from_length(family, data_length);
