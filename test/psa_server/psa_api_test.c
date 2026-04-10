@@ -346,6 +346,52 @@ cleanup:
     return ret;
 }
 
+static int test_secondary_algorithm_is_not_supported(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+    attrs.policy.alg2 = PSA_ALG_CTR;
+
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_import_key rejects unsupported secondary algorithm policy") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null when alg2 is unsupported") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+    attrs.policy.alg2 = PSA_ALG_CTR;
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_generate_key rejects unsupported secondary algorithm policy") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_generate_key leaves key id null when alg2 is unsupported") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_mac_error_aborts_operation(void)
 {
     static const uint8_t key[] = {
@@ -3347,6 +3393,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "alg_none_policy") == 0) {
         if (run_named_test("alg_none_policy",
                            test_algorithm_none_rejects_key_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "secondary_algorithm_not_supported") == 0) {
+        if (run_named_test("secondary_algorithm_not_supported",
+                           test_secondary_algorithm_is_not_supported) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

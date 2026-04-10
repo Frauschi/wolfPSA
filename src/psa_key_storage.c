@@ -823,6 +823,12 @@ psa_status_t psa_import_key(
 
     attr = *attributes;
 
+    if (attr.policy.alg2 != PSA_ALG_NONE) {
+        wolfpsa_debug_import_reason("unsupported secondary algorithm", &attr,
+                                    data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
     if (attr.type == PSA_KEY_TYPE_NONE) {
         wolfpsa_debug_import_reason("unsupported key type", &attr, data_length);
         return PSA_ERROR_NOT_SUPPORTED;
