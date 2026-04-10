@@ -502,6 +502,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
                                    ctx->aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -523,6 +524,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
                                    ctx->aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -607,6 +609,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
                                    ctx->aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_GCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
@@ -631,6 +634,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
                                    ctx->aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_CCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
