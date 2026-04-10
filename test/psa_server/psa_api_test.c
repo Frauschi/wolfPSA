@@ -2119,6 +2119,85 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_asym_algorithm_mismatch_policy(void)
+{
+    static const uint8_t msg[] = "wolfpsa asym mismatch";
+    uint8_t hash[WC_SHA256_DIGEST_SIZE];
+    uint8_t peer_pub[100];
+    uint8_t secret[100];
+    uint8_t sig[80];
+    size_t peer_pub_len = 0;
+    size_t secret_len = 0;
+    size_t sig_len = 0;
+    psa_key_id_t ecdsa_key = PSA_KEY_ID_NULL;
+    psa_key_id_t ecdh_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    wc_Sha256 sha;
+    int ret;
+
+    ret = wc_InitSha256(&sha);
+    if (ret != 0) {
+        printf("FAIL: wc_InitSha256 (asym mismatch) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+    wc_Sha256Update(&sha, msg, (word32)sizeof(msg) - 1u);
+    wc_Sha256Final(&sha, hash);
+    wc_Sha256Free(&sha);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &ecdsa_key);
+    if (check_status(st, "psa_generate_key(ECDSA mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &ecdh_key);
+    if (check_status(st, "psa_generate_key(ECDH mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_export_public_key(ecdh_key, peer_pub, sizeof(peer_pub), &peer_pub_len);
+    if (check_status(st, "psa_export_public_key(ECDH mismatch peer)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, ecdsa_key, peer_pub, peer_pub_len,
+                               secret, sizeof(secret), &secret_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_raw_key_agreement rejects ECDSA key policy") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_sign_hash(ecdh_key, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_sign_hash rejects ECDH key policy") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (ecdh_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(ecdh_key);
+    }
+    if (ecdsa_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(ecdsa_key);
+    }
+
+    return ret;
+}
+
 static int test_generate_key_rejects_public_key_type(void)
 {
     psa_key_id_t key_id = PSA_KEY_ID_NULL;
@@ -3625,6 +3704,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "asym_algorithm_mismatch_policy") == 0) {
+        if (run_named_test("asym_algorithm_mismatch_policy",
+                           test_asym_algorithm_mismatch_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "generate_key_rejects_public_key_type") == 0) {
         if (run_named_test("generate_key_rejects_public_key_type",
