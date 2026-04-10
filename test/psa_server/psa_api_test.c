@@ -1195,6 +1195,83 @@ cleanup:
     return ret;
 }
 
+static int test_aead_policy_mismatch_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM policy)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_CCM);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_aead_encrypt_setup rejects AEAD base mismatch") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id,
+                                PSA_ALG_AEAD_WITH_SHORTENED_TAG(PSA_ALG_GCM, 8));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_aead_encrypt_setup rejects exact tag mismatch") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM policy)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    psa_set_key_algorithm(&attrs,
+                          PSA_ALG_AEAD_WITH_AT_LEAST_THIS_LENGTH_TAG(PSA_ALG_GCM, 8));
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM at least tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id,
+                                PSA_ALG_AEAD_WITH_SHORTENED_TAG(PSA_ALG_GCM, 12));
+    if (check_status(st, "psa_aead_encrypt_setup(allows longer AEAD tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup_at_least;
+    }
+    psa_aead_abort(&op);
+
+    st = psa_aead_encrypt_setup(&op, key_id,
+                                PSA_ALG_AEAD_WITH_SHORTENED_TAG(PSA_ALG_GCM, 4));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_aead_encrypt_setup rejects shorter AEAD tag than policy") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup_at_least;
+    }
+
+cleanup_at_least:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM at least tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -2264,6 +2341,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_word32_overflow") == 0) {
         if (run_named_test("aead_word32_overflow",
                            test_aead_finish_verify_word32_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_policy_mismatch") == 0) {
+        if (run_named_test("aead_policy_mismatch",
+                           test_aead_policy_mismatch_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
