@@ -39,12 +39,18 @@
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/random.h>
 
+extern int wolfPSA_CryptoIsInitialized(void);
+
 /* Generate random bytes */
 psa_status_t psa_generate_random(uint8_t *output, size_t output_size)
 {
     int ret;
     WC_RNG rng;
-    
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+
     if (output == NULL && output_size > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }

@@ -67,11 +67,29 @@ static int test_hash_requires_psa_crypto_init(void)
     return 0;
 }
 
+static int test_random_requires_psa_crypto_init(void)
+{
+    uint8_t buf[16];
+    psa_status_t st;
+
+    st = psa_generate_random(buf, sizeof(buf));
+    if (expect_status("psa_generate_random before init", st,
+                      PSA_ERROR_BAD_STATE) != 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     psa_status_t st;
 
     if (test_hash_requires_psa_crypto_init() != 0) {
+        return 1;
+    }
+
+    if (test_random_requires_psa_crypto_init() != 0) {
         return 1;
     }
 
