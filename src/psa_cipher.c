@@ -1260,6 +1260,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             }
             ctx->partial_len = 0;
             *output_length = block_size;
+            psa_cipher_abort(operation);
             return PSA_SUCCESS;
         }
         else {
@@ -1319,6 +1320,7 @@ cbc_pkcs7_decrypt_done:
             if (status != PSA_SUCCESS) {
                 return wolfpsa_cipher_fail(operation, status);
             }
+            psa_cipher_abort(operation);
             return status;
         }
     }
@@ -1330,6 +1332,7 @@ cbc_pkcs7_decrypt_done:
     }
 
     *output_length = 0;
+    psa_cipher_abort(operation);
     return PSA_SUCCESS;
 }
 

@@ -688,8 +688,13 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
         size_t out_len = 0;
         uint8_t *ciphertext = ctx->input;
-        size_t ciphertext_len = ctx->input_length + tag_length;
-        uint8_t *tmp = (uint8_t *)XMALLOC(ciphertext_len, NULL,
+        size_t ciphertext_len;
+        uint8_t *tmp;
+        if (ctx->input_length > SIZE_MAX - tag_length) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        ciphertext_len = ctx->input_length + tag_length;
+        tmp = (uint8_t *)XMALLOC(ciphertext_len, NULL,
                                           DYNAMIC_TYPE_TMP_BUFFER);
         if (tmp == NULL) {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
@@ -701,6 +706,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
                                             aad, ctx->aad_length,
                                             tmp, ciphertext_len,
                                             plaintext, plaintext_size, &out_len);
+        wc_ForceZero(tmp, ciphertext_len);
         XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (ret != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
