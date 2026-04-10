@@ -554,6 +554,10 @@ psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *op
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    if (value == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     if (value > 0xFFFFFFFFu) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
