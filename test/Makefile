@@ -88,7 +88,7 @@ psa_api_test: require-wolfssl-lib $(PSA_API_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_API_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 psa_crypto_init_test: require-wolfssl-lib $(PSA_CRYPTO_INIT_TEST_OBJS)
-	$(CC) $(CFLAGS) -o $@ $(PSA_CRYPTO_INIT_TEST_OBJS) ../libwolfpsa.a $(LDFLAGS) -L../../wolfssl/src/.libs -lwolfssl -lpthread -lm $(RPATH_WOLFSSL) -Wl,--wrap=wolfCrypt_Init
+	$(CC) $(CFLAGS) -o $@ $(PSA_CRYPTO_INIT_TEST_OBJS) $(WOLFPSA_PATH)/libwolfpsa.a $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL) -Wl,--wrap=wolfCrypt_Init
 
 psa_des3_stack_scrub_test: require-wolfssl-lib $(PSA_DES3_STACK_SCRUB_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_DES3_STACK_SCRUB_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)

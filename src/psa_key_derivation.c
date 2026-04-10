@@ -68,6 +68,8 @@ typedef struct wolfpsa_kdf_ctx {
     int is_key_agreement;
     int is_raw_kdf;
     int output_started;
+    uint8_t *output_cache;
+    size_t output_cache_length;
 } wolfpsa_kdf_ctx_t;
 
 #define WOLFPSA_KDF_STEP_SECRET        (1u << 0)
@@ -427,6 +429,12 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
         wolfpsa_kdf_free_buf(&ctx->label, &ctx->label_length);
         wolfpsa_kdf_free_buf(&ctx->seed, &ctx->seed_length);
         wolfpsa_kdf_free_buf(&ctx->password, &ctx->password_length);
+        if (ctx->output_cache != NULL) {
+            wc_ForceZero(ctx->output_cache, ctx->output_cache_length);
+            XFREE(ctx->output_cache, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            ctx->output_cache = NULL;
+            ctx->output_cache_length = 0;
+        }
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
@@ -743,6 +751,9 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
         }
         if ((wolfpsa_check_word32_length(ctx->salt_length) != PSA_SUCCESS) ||
             (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS)) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (output_length > (size_t)hash_len) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         ret = wc_HKDF_Extract(hash_type,
@@ -1164,7 +1175,39 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    if (ctx->output_offset == 0) {
+    if (ctx->output_cache == NULL
+        && !ctx->is_raw_kdf
+        && ctx->capacity != PSA_KEY_DERIVATION_UNLIMITED_CAPACITY
+        && ctx->output_offset == 0) {
+        /* First output_bytes() call with a bounded capacity: compute the
+         * full derivation once and cache it. Subsequent calls serve slices
+         * from the cache, avoiding O(n^2) recomputation. */
+        size_t cache_length = output_length + ctx->capacity;
+
+        ctx->output_cache = (uint8_t *)XMALLOC(cache_length, NULL,
+                                               DYNAMIC_TYPE_TMP_BUFFER);
+        if (ctx->output_cache == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        status = wolfpsa_kdf_compute_output(ctx, ctx->output_cache,
+                                            cache_length);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(ctx->output_cache, cache_length);
+            XFREE(ctx->output_cache, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            ctx->output_cache = NULL;
+            return status;
+        }
+        ctx->output_cache_length = cache_length;
+    }
+
+    if (ctx->output_cache != NULL) {
+        if (total_output_length > ctx->output_cache_length) {
+            return PSA_ERROR_INSUFFICIENT_DATA;
+        }
+        XMEMCPY(output, ctx->output_cache + ctx->output_offset, output_length);
+        status = PSA_SUCCESS;
+    }
+    else if (ctx->output_offset == 0) {
         status = wolfpsa_kdf_compute_output(ctx, output, output_length);
     }
     else {
