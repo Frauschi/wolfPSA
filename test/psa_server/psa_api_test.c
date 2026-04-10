@@ -421,6 +421,69 @@ cleanup:
     return ret;
 }
 
+static int test_mac_rejects_algorithm_mismatch(void)
+{
+    static const uint8_t hmac_key[16] = {
+        0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,
+        0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, sizeof(hmac_key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, hmac_key, sizeof(hmac_key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC SHA-256 policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_mac_sign_setup(&op, key_id, PSA_ALG_HMAC(PSA_ALG_SHA_512));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_mac_sign_setup rejects mismatched HMAC algorithm policy") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HMAC SHA-256 policy)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, sizeof(hmac_key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_AT_LEAST_THIS_LENGTH_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 16));
+
+    st = psa_import_key(&attrs, hmac_key, sizeof(hmac_key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC minimum-length policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_mac_sign_setup(&op, key_id,
+        PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 8));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_mac_sign_setup rejects MAC shorter than minimum policy") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    (void)psa_mac_abort(&op);
+    return ret;
+}
+
 static int test_export_key_requires_usage_flag(void)
 {
     static const uint8_t key[16] = {
@@ -2284,6 +2347,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_algorithm_mismatch") == 0) {
         if (run_named_test("cipher_algorithm_mismatch",
                            test_cipher_rejects_algorithm_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_algorithm_mismatch") == 0) {
+        if (run_named_test("mac_algorithm_mismatch",
+                           test_mac_rejects_algorithm_mismatch) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
