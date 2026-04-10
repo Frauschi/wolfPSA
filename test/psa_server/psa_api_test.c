@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #include <wolfpsa/psa/crypto.h>
 #include "psa_aead_internal.h"
@@ -668,6 +669,52 @@ static void setup_aes_key_attrs(psa_key_attributes_t* attrs, psa_key_usage_t usa
     psa_set_key_lifetime(attrs, lifetime);
 }
 
+static int get_persistent_key_store_path(psa_key_id_t key_id, char* path,
+                                         size_t path_size)
+{
+    const char* root = getenv("WOLFPSA_TOKEN_PATH");
+
+    if (root == NULL) {
+        root = "./.store";
+    }
+
+    return snprintf(path, path_size, "%s/psa_key_%016lx_%016lx", root,
+                    (unsigned long)key_id, 0ul);
+}
+
+static int overwrite_persistent_key_data_length(psa_key_id_t key_id,
+                                                size_t key_data_length)
+{
+    char path[256];
+    FILE* file;
+    long offset;
+    size_t written;
+    int len;
+
+    len = get_persistent_key_store_path(key_id, path, sizeof(path));
+    if (len <= 0 || (size_t)len >= sizeof(path)) {
+        return TEST_FAIL;
+    }
+
+    offset = (long)(sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
+                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
+                    sizeof(psa_key_lifetime_t));
+
+    file = fopen(path, "r+b");
+    if (file == NULL) {
+        return TEST_FAIL;
+    }
+
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        fclose(file);
+        return TEST_FAIL;
+    }
+
+    written = fwrite(&key_data_length, sizeof(key_data_length), 1, file);
+    fclose(file);
+    return written == 1 ? TEST_OK : TEST_FAIL;
+}
+
 static int test_copy_key_copies_material_and_attributes(void)
 {
     static const uint8_t key[16] = {
@@ -754,6 +801,66 @@ cleanup:
     }
     if (src_key != 0) {
         (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
+static int test_export_key_rejects_oversized_persistent_length(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t exported[sizeof(key)];
+    size_t exported_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 2406u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    size_t oversized_length;
+    int ret = TEST_FAIL;
+
+    if (sizeof(size_t) <= sizeof(int)) {
+        return TEST_SKIPPED;
+    }
+
+    (void)psa_destroy_key(persistent_id);
+
+    setup_aes_key_attrs(&attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES persistent oversized length)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    oversized_length = (size_t)UINT32_MAX + 17u;
+    if (check_true(oversized_length > (size_t)INT_MAX,
+                   "oversized persistent length exceeds INT_MAX") != TEST_OK) {
+        goto cleanup;
+    }
+    if (overwrite_persistent_key_data_length(key_id, oversized_length) != TEST_OK) {
+        printf("FAIL: overwrite_persistent_key_data_length\n");
+        goto cleanup;
+    }
+
+    st = psa_export_key(key_id, exported, sizeof(exported), &exported_len);
+    if (check_true(st == PSA_ERROR_DATA_INVALID,
+                   "psa_export_key rejects oversized persistent length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&attrs);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    else {
+        (void)psa_destroy_key(persistent_id);
     }
     return ret;
 }
@@ -3420,6 +3527,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "export_requires_usage") == 0) {
         if (run_named_test("export_requires_usage",
                            test_export_key_requires_usage_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "export_oversized_persistent_length") == 0) {
+        if (run_named_test("export_oversized_persistent_length",
+                           test_export_key_rejects_oversized_persistent_length) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

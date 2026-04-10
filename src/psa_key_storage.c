@@ -31,6 +31,7 @@
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
+#include "psa_size.h"
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
@@ -39,6 +40,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/misc.h>
+#include <limits.h>
 
 #ifdef WOLFPSA_DEBUG_IMPORT
 #include <stdio.h>
@@ -145,6 +147,15 @@ static psa_status_t psa_wc_error_to_psa_status(int ret)
     }
 
     return status;
+}
+
+static psa_status_t wolfpsa_validate_stored_key_data_length(size_t key_data_length)
+{
+    if (key_data_length == 0 || key_data_length > (size_t)INT_MAX) {
+        return PSA_ERROR_DATA_INVALID;
+    }
+
+    return PSA_SUCCESS;
 }
 
 static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
@@ -760,9 +771,10 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     }
 
     XMEMCPY(key_data_length, header + attr_length, sizeof(size_t));
-    if (*key_data_length == 0) {
+    status = wolfpsa_validate_stored_key_data_length(*key_data_length);
+    if (status != PSA_SUCCESS) {
         wolfPSA_Store_Close(store);
-        return PSA_ERROR_DATA_INVALID;
+        return status;
     }
 
     *key_data = (uint8_t*)XMALLOC(*key_data_length, NULL,
@@ -1253,6 +1265,11 @@ psa_status_t psa_export_key(
 
     /* Get key data length */
     XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    status = wolfpsa_validate_stored_key_data_length(key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfPSA_Store_Close(store);
+        return status;
+    }
     
     /* Check if the output buffer is large enough */
     if (data_size < key_data_length) {
@@ -1349,6 +1366,11 @@ psa_status_t psa_export_public_key(
         }
 
         XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+        status = wolfpsa_validate_stored_key_data_length(key_data_length);
+        if (status != PSA_SUCCESS) {
+            wolfPSA_Store_Close(store);
+            return status;
+        }
         key_data = (uint8_t*)XMALLOC(key_data_length, NULL,
                                      DYNAMIC_TYPE_TMP_BUFFER);
         if (key_data == NULL) {
@@ -1726,6 +1748,11 @@ psa_status_t psa_copy_key(
                             psa_get_key_usage_flags(&dst_attr);
 
     XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    status = wolfpsa_validate_stored_key_data_length(key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfPSA_Store_Close(store);
+        return status;
+    }
     buffer = (uint8_t*)XMALLOC(key_data_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (buffer == NULL) {
         wolfPSA_Store_Close(store);
