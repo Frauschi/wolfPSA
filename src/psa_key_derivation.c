@@ -137,6 +137,17 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
     return PSA_SUCCESS;
 }
 
+static const uint8_t* wolfpsa_kdf_input_ptr(const uint8_t *buf, size_t len)
+{
+    static const uint8_t empty[1] = { 0 };
+
+    if (buf == NULL && len == 0) {
+        return empty;
+    }
+
+    return buf;
+}
+
 static int wolfpsa_hash_type_from_alg(psa_algorithm_t alg)
 {
     psa_algorithm_t hash_alg = 0;
@@ -897,6 +908,10 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
                                        uint8_t *output,
                                        size_t output_length)
 {
+    const uint8_t *password = wolfpsa_kdf_input_ptr(ctx->password,
+                                                    ctx->password_length);
+    const uint8_t *salt = wolfpsa_kdf_input_ptr(ctx->salt, ctx->salt_length);
+
     if (PSA_ALG_IS_PBKDF2_HMAC(ctx->alg)) {
         int hash_type = wolfpsa_hash_type_from_alg(ctx->alg);
         int ret;
@@ -904,8 +919,8 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         if (hash_type == WC_HASH_TYPE_NONE) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_PBKDF2(output, ctx->password, (int)ctx->password_length,
-                        ctx->salt, (int)ctx->salt_length,
+        ret = wc_PBKDF2(output, password, (int)ctx->password_length,
+                        salt, (int)ctx->salt_length,
                         (int)ctx->cost, (int)output_length, hash_type);
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
@@ -941,7 +956,7 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             status = wc_error_to_psa_status(ret);
             goto cleanup;
         }
-        ret = wc_CmacUpdate(&cmac, ctx->password, (word32)ctx->password_length);
+        ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
         if (ret != 0) {
             wc_CmacFree(&cmac);
             status = wc_error_to_psa_status(ret);
@@ -969,7 +984,7 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
 
         blocks = (output_length + WC_AES_BLOCK_SIZE - 1) / WC_AES_BLOCK_SIZE;
         for (i = 1; i <= blocks; i++) {
-            XMEMCPY(block_input, ctx->salt, ctx->salt_length);
+            XMEMCPY(block_input, salt, ctx->salt_length);
             block_input[ctx->salt_length + 0] = (uint8_t)((i >> 24) & 0xff);
             block_input[ctx->salt_length + 1] = (uint8_t)((i >> 16) & 0xff);
             block_input[ctx->salt_length + 2] = (uint8_t)((i >> 8) & 0xff);
