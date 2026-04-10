@@ -873,6 +873,7 @@ psa_status_t psa_aead_abort(psa_aead_operation_t *operation)
             wc_ForceZero(ctx->key, ctx->key_length);
             XFREE(ctx->key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
