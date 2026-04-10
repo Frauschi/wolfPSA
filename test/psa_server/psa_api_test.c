@@ -1029,6 +1029,156 @@ static int test_cipher_cbc_pkcs7_decrypt_update_small_output(void)
     return TEST_OK;
 }
 
+static int test_cipher_ccm_star_no_tag_multipart(void)
+{
+    static const uint8_t key[16] = {
+        0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,
+        0xc8,0xc9,0xca,0xcb,0xcc,0xcd,0xce,0xcf
+    };
+    static const uint8_t nonce[13] = {
+        0x00,0x00,0x00,0x03,0x02,0x01,0x00,0xa0,
+        0xa1,0xa2,0xa3,0xa4,0xa5
+    };
+    static const uint8_t plaintext[32] = {
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27
+    };
+    uint8_t single[sizeof(plaintext)];
+    uint8_t multi[sizeof(plaintext)];
+    uint8_t decrypted[sizeof(plaintext)];
+    size_t single_len = 0;
+    size_t multi_len = 0;
+    size_t part_len = 0;
+    size_t finish_len = 0;
+    size_t decrypted_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CCM_STAR_NO_TAG);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES CCM* no tag)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CCM_STAR_NO_TAG);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        result = TEST_SKIPPED;
+        goto cleanup;
+    }
+    if (check_status(st, "psa_cipher_encrypt_setup(CCM* no tag single)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_cipher_set_iv(CCM* no tag single)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext),
+                           single, sizeof(single), &single_len);
+    if (check_status(st, "psa_cipher_update(CCM* no tag single)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_finish(&op, single + single_len, sizeof(single) - single_len,
+                           &finish_len);
+    if (check_status(st, "psa_cipher_finish(CCM* no tag single)") != TEST_OK) {
+        goto cleanup;
+    }
+    single_len += finish_len;
+    (void)psa_cipher_abort(&op);
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "psa_cipher_encrypt_setup(CCM* no tag multi)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_cipher_set_iv(CCM* no tag multi)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, plaintext, 16, multi, sizeof(multi), &part_len);
+    if (check_status(st, "psa_cipher_update(CCM* no tag first chunk)") != TEST_OK) {
+        goto cleanup;
+    }
+    multi_len += part_len;
+    st = psa_cipher_update(&op, plaintext + 16, sizeof(plaintext) - 16,
+                           multi + multi_len, sizeof(multi) - multi_len, &part_len);
+    if (check_status(st, "psa_cipher_update(CCM* no tag second chunk)") != TEST_OK) {
+        goto cleanup;
+    }
+    multi_len += part_len;
+    st = psa_cipher_finish(&op, multi + multi_len, sizeof(multi) - multi_len,
+                           &finish_len);
+    if (check_status(st, "psa_cipher_finish(CCM* no tag multi)") != TEST_OK) {
+        goto cleanup;
+    }
+    multi_len += finish_len;
+    (void)psa_cipher_abort(&op);
+
+    if (check_true(single_len == sizeof(plaintext), "psa_cipher_update(CCM* no tag single) length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(multi_len == single_len, "psa_cipher_update(CCM* no tag multi) length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_cipher_update(CCM* no tag split matches single)",
+                     multi, single, single_len) != TEST_OK) {
+        goto cleanup;
+    }
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "psa_cipher_decrypt_setup(CCM* no tag multi)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_cipher_set_iv(CCM* no tag dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, multi, 16, decrypted, sizeof(decrypted), &part_len);
+    if (check_status(st, "psa_cipher_update(CCM* no tag dec first chunk)") != TEST_OK) {
+        goto cleanup;
+    }
+    decrypted_len += part_len;
+    st = psa_cipher_update(&op, multi + 16, sizeof(multi) - 16,
+                           decrypted + decrypted_len, sizeof(decrypted) - decrypted_len,
+                           &part_len);
+    if (check_status(st, "psa_cipher_update(CCM* no tag dec second chunk)") != TEST_OK) {
+        goto cleanup;
+    }
+    decrypted_len += part_len;
+    st = psa_cipher_finish(&op, decrypted + decrypted_len,
+                           sizeof(decrypted) - decrypted_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(CCM* no tag dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    decrypted_len += finish_len;
+
+    if (check_true(decrypted_len == sizeof(plaintext), "psa_cipher_decrypt(CCM* no tag multi) length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_cipher_decrypt(CCM* no tag multi)",
+                     decrypted, plaintext, sizeof(plaintext)) != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
 static int test_aead_gcm(void)
 {
     static const uint8_t key[16] = {
@@ -2395,6 +2545,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_small_output") == 0) {
         if (run_named_test("cipher_cbc_pkcs7_small_output",
                            test_cipher_cbc_pkcs7_decrypt_update_small_output) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_ccm_star_no_tag_multipart") == 0) {
+        if (run_named_test("cipher_ccm_star_no_tag_multipart",
+                           test_cipher_ccm_star_no_tag_multipart) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

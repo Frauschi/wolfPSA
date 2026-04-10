@@ -980,9 +980,6 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (!ctx->iv_set) {
             return PSA_ERROR_BAD_STATE;
         }
-        if (ctx->partial_len != 0) {
-            return PSA_ERROR_BAD_STATE;
-        }
         if (output_size < input_length) {
             return PSA_ERROR_BUFFER_TOO_SMALL;
         }
@@ -994,7 +991,6 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
-        ctx->partial_len = 1;
         *output_length = input_length;
         return PSA_SUCCESS;
     }
