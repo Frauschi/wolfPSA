@@ -18,3 +18,4 @@ wolfcrypt-benchmark/wolfcrypt-psa-benchmark
 wolfcrypt-psa-benchmark
 .store/
 *.log
+.codex

@@ -25,7 +25,8 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13)
+#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13) && \
+    defined(HAVE_HKDF) && !defined(NO_HMAC)
 
 #include <psa/crypto.h>
 #include "psa_size.h"

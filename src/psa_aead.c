@@ -213,6 +213,21 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     if (!PSA_ALG_IS_AEAD(alg) || PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM_STAR_NO_TAG)) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+#ifndef HAVE_AESGCM
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
+#ifndef HAVE_AESCCM
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
+#if !defined(HAVE_CHACHA) || !defined(HAVE_POLY1305)
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CHACHA20_POLY1305)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
 
     status = wolfpsa_aead_check_key(key, usage, alg, &attributes,
                                     &key_data, &key_data_length);
@@ -238,12 +253,14 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     ctx->direction = (usage == PSA_KEY_USAGE_ENCRYPT) ? 1 : 0;
+#ifdef HAVE_AESCCM
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM) &&
         wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+#endif
 
     ctx->key = (uint8_t *)XMALLOC(key_data_length, NULL,
                                   DYNAMIC_TYPE_TMP_BUFFER);
@@ -471,7 +488,9 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
                                                size_t *tag_length)
 {
     int ret;
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     size_t chacha_ciphertext_size = 0;
+#endif
     const uint8_t *input;
     const uint8_t *aad;
 
@@ -490,12 +509,14 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
         if (ctx->input_length > SIZE_MAX - ctx->tag_length) {
             return PSA_ERROR_BUFFER_TOO_SMALL;
         }
         chacha_ciphertext_size = ctx->input_length + ctx->tag_length;
     }
+#endif
 
     if (ciphertext_size < ctx->input_length) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
@@ -514,6 +535,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
+#ifdef HAVE_AESGCM
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
         if (ret == 0) {
@@ -531,8 +553,12 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
+#ifdef HAVE_AESCCM
         Aes aes;
         if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
             return PSA_ERROR_NOT_SUPPORTED;
@@ -553,8 +579,12 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
         size_t out_len = 0;
         uint8_t *tmp = (uint8_t *)XMALLOC(chacha_ciphertext_size, NULL,
                                           DYNAMIC_TYPE_TMP_BUFFER);
@@ -581,6 +611,9 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         XMEMCPY(tag, tmp + ctx->input_length, ctx->tag_length);
         wc_ForceZero(tmp, chacha_ciphertext_size);
         XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else {
         return PSA_ERROR_NOT_SUPPORTED;
@@ -639,6 +672,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
+#ifdef HAVE_AESGCM
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
         if (ret == 0) {
@@ -659,8 +693,12 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
+#ifdef HAVE_AESCCM
         Aes aes;
         if (wc_AesCcmCheckTagSize((int)tag_length) != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
@@ -684,8 +722,12 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
         size_t out_len = 0;
         uint8_t *ciphertext = ctx->input;
         size_t ciphertext_len;
@@ -713,6 +755,9 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         }
         *plaintext_length = out_len;
         return PSA_SUCCESS;
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else {
         return PSA_ERROR_NOT_SUPPORTED;
