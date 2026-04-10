@@ -1490,6 +1490,175 @@ static int test_kdf_null_capacity(void)
     return TEST_OK;
 }
 
+static int test_kdf_input_key_policy(void)
+{
+    static const uint8_t secret[] = {
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    static const uint8_t info[] = "kdf-input-key";
+    uint8_t output[16];
+    size_t output_len = 0;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t derive_key = 0;
+    psa_key_id_t no_usage_key = 0;
+    psa_key_id_t raw_key = 0;
+    psa_key_id_t password_key = 0;
+    psa_key_id_t wrong_pbkdf2_key = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &derive_key);
+    if (check_status(st, "psa_import_key(KDF derive key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF input key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET, derive_key);
+    if (check_status(st, "psa_key_derivation_input_key(HKDF derive key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO input key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(input key)") != TEST_OK) {
+        goto cleanup;
+    }
+    output_len = sizeof(output);
+    if (check_true(output_len == sizeof(output),
+                   "psa_key_derivation_output_bytes(input key) length") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF input key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &no_usage_key);
+    if (check_status(st, "psa_import_key(KDF no usage key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF no usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET, no_usage_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_input_key rejects missing DERIVE usage") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF no usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &raw_key);
+    if (check_status(st, "psa_import_key(KDF raw key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF raw key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET, raw_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_input_key rejects non-DERIVE secret key type") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF raw key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_PASSWORD);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &password_key);
+    if (check_status(st, "psa_import_key(PBKDF2 password key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 password)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD, password_key);
+    if (check_status(st, "psa_key_derivation_input_key(PBKDF2 password)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(PBKDF2 password)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &wrong_pbkdf2_key);
+    if (check_status(st, "psa_import_key(PBKDF2 wrong type key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 wrong type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                      wrong_pbkdf2_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_input_key rejects non-PASSWORD PBKDF2 key type") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    if (wrong_pbkdf2_key != 0) {
+        (void)psa_destroy_key(wrong_pbkdf2_key);
+    }
+    if (password_key != 0) {
+        (void)psa_destroy_key(password_key);
+    }
+    if (raw_key != 0) {
+        (void)psa_destroy_key(raw_key);
+    }
+    if (no_usage_key != 0) {
+        (void)psa_destroy_key(no_usage_key);
+    }
+    if (derive_key != 0) {
+        (void)psa_destroy_key(derive_key);
+    }
+    psa_reset_key_attributes(&attrs);
+    return ret;
+}
+
 static int test_kdf_tls12_psk_to_ms_rfc4279_order(void)
 {
     static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
@@ -1984,6 +2153,11 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
         if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "kdf_input_key_policy") == 0) {
+        if (run_named_test("kdf_input_key_policy", test_kdf_input_key_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "kdf_tls12_psk_to_ms") == 0) {
         if (run_named_test("kdf_tls12_psk_to_ms",
