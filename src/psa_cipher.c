@@ -176,7 +176,7 @@ static psa_status_t wolfpsa_cipher_check_key(
     }
 
     key_alg = psa_get_key_algorithm(attributes);
-    if (key_alg != PSA_ALG_NONE && key_alg != alg) {
+    if (key_alg == PSA_ALG_NONE || key_alg != alg) {
         wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;

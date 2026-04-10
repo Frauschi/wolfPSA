@@ -615,18 +615,21 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     }
 
     key_alg = psa_get_key_algorithm(&attributes);
-    if (key_alg != PSA_ALG_NONE) {
-        if (ctx->is_key_agreement) {
-            if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
-                PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
-                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-                return PSA_ERROR_NOT_PERMITTED;
-            }
-        }
-        else if (key_alg != ctx->alg) {
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    if (ctx->is_key_agreement) {
+        if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
+            PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_PERMITTED;
         }
+    }
+    else if (key_alg != ctx->alg) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
     }
 
     status = psa_key_derivation_input_bytes(operation, step,

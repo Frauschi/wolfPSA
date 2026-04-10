@@ -170,6 +170,145 @@ static int test_hmac(void)
     return TEST_OK;
 }
 
+static int test_algorithm_none_rejects_key_usage(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t hmac_key[16] = {
+        0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,
+        0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    };
+    static const uint8_t hash[WC_SHA256_DIGEST_SIZE] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
+    };
+    uint8_t sig[80];
+    size_t sig_len = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t cipher_op = psa_cipher_operation_init();
+    psa_aead_operation_t aead_op = psa_aead_operation_init();
+    psa_mac_operation_t mac_op = psa_mac_operation_init();
+    psa_key_derivation_operation_t kdf_op = psa_key_derivation_operation_init();
+    psa_key_id_t key_id = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(AES alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_cipher_encrypt_setup(&cipher_op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_cipher_encrypt_setup rejects PSA_ALG_NONE policy") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES cipher alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(AES AEAD alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&aead_op, key_id, PSA_ALG_GCM);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_aead_encrypt_setup rejects PSA_ALG_NONE policy") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES AEAD alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, sizeof(hmac_key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    st = psa_import_key(&attrs, hmac_key, sizeof(hmac_key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_mac_sign_setup(&mac_op, key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_mac_sign_setup rejects PSA_ALG_NONE policy") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HMAC alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_HASH);
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_status(st, "psa_generate_key(ECDSA alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_sign_hash rejects PSA_ALG_NONE policy") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ECDSA alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, sizeof(hmac_key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    st = psa_import_key(&attrs, hmac_key, sizeof(hmac_key), &key_id);
+    if (check_status(st, "psa_import_key(DERIVE alg none)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&kdf_op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF alg none)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&kdf_op, PSA_KEY_DERIVATION_INPUT_SECRET, key_id);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_input_key rejects PSA_ALG_NONE policy") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    (void)psa_cipher_abort(&cipher_op);
+    (void)psa_aead_abort(&aead_op);
+    (void)psa_mac_abort(&mac_op);
+    (void)psa_key_derivation_abort(&kdf_op);
+    return ret;
+}
+
 static int test_cipher_cbc(void)
 {
     static const uint8_t key[16] = {
@@ -1708,6 +1847,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "hmac") == 0) {
         if (run_named_test("hmac", test_hmac) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "alg_none_policy") == 0) {
+        if (run_named_test("alg_none_policy",
+                           test_algorithm_none_rejects_key_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
         if (run_named_test("cipher_cbc", test_cipher_cbc) == TEST_FAIL) return TEST_FAIL;

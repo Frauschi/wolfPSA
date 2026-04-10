@@ -134,7 +134,14 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
     }
 
     key_alg = psa_get_key_algorithm(attributes);
-    if (key_alg != PSA_ALG_NONE) {
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    {
         psa_algorithm_t key_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_alg);
         psa_algorithm_t req_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(alg);
         key_tag_len = wolfpsa_aead_tag_length(key_alg);
