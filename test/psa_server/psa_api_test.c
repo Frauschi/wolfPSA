@@ -277,6 +277,282 @@ static int test_export_key_requires_usage_flag(void)
     return TEST_OK;
 }
 
+static void setup_aes_key_attrs(psa_key_attributes_t* attrs, psa_key_usage_t usage,
+                                psa_algorithm_t alg, psa_key_lifetime_t lifetime)
+{
+    *attrs = psa_key_attributes_init();
+    psa_set_key_type(attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(attrs, 128);
+    psa_set_key_usage_flags(attrs, usage);
+    psa_set_key_algorithm(attrs, alg);
+    psa_set_key_lifetime(attrs, lifetime);
+}
+
+static int test_copy_key_copies_material_and_attributes(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t exported[sizeof(key)];
+    size_t exported_len = 0;
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = 0;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_key_attributes_t got_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT |
+                        PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES copy source)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_status(st, "psa_copy_key(success)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(copy_key != src_key, "psa_copy_key returns a new key id") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_export_key(copy_key, exported, sizeof(exported), &exported_len);
+    if (check_status(st, "psa_export_key(copied AES)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == sizeof(key), "psa_export_key(copied AES) length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_export_key(copied AES)", exported, key, sizeof(key)) != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_get_key_attributes(copy_key, &got_attrs);
+    if (check_status(st, "psa_get_key_attributes(copied AES)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_type(&got_attrs) == PSA_KEY_TYPE_AES,
+                   "psa_copy_key preserves type") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_bits(&got_attrs) == 128,
+                   "psa_copy_key preserves bits") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_algorithm(&got_attrs) == PSA_ALG_CBC_NO_PADDING,
+                   "psa_copy_key preserves algorithm") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_lifetime(&got_attrs) == PSA_KEY_LIFETIME_VOLATILE,
+                   "psa_copy_key preserves lifetime") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_usage_flags(&got_attrs) ==
+                   (PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT),
+                   "psa_copy_key intersects usage flags") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&got_attrs);
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != 0) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
+static int test_copy_key_requires_copy_usage_flag(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES no copy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_copy_key requires PSA_KEY_USAGE_COPY for volatile keys") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
+static int test_copy_key_rejects_attribute_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT |
+                        PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES copy mismatch source)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    psa_set_key_type(&dst_attrs, PSA_KEY_TYPE_DES);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_copy_key rejects type mismatch") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    psa_set_key_bits(&dst_attrs, 192);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_copy_key rejects bit-size mismatch") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_ECB_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_copy_key rejects algorithm mismatch") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_copy_key rejects lifetime mismatch") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
+static int test_copy_key_requires_copy_usage_flag_persistent(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = PSA_KEY_ID_NULL;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 2405u;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&src_attrs, persistent_id);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES persistent no copy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    setup_aes_key_attrs(&dst_attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_copy_key requires PSA_KEY_USAGE_COPY for persistent keys") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
 static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
 {
     static const uint8_t key[16] = {
@@ -1369,6 +1645,30 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "export_requires_usage") == 0) {
         if (run_named_test("export_requires_usage",
                            test_export_key_requires_usage_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_success") == 0) {
+        if (run_named_test("copy_key_success",
+                           test_copy_key_copies_material_and_attributes) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_requires_usage") == 0) {
+        if (run_named_test("copy_key_requires_usage",
+                           test_copy_key_requires_copy_usage_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_attribute_mismatch") == 0) {
+        if (run_named_test("copy_key_attribute_mismatch",
+                           test_copy_key_rejects_attribute_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_persistent_requires_usage") == 0) {
+        if (run_named_test("copy_key_persistent_requires_usage",
+                           test_copy_key_requires_copy_usage_flag_persistent) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
