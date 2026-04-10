@@ -75,6 +75,15 @@ static wolfpsa_cipher_ctx_t *wolfpsa_cipher_get_ctx(
     return (wolfpsa_cipher_ctx_t *)(uintptr_t)operation->opaque;
 }
 
+psa_status_t psa_cipher_abort(psa_cipher_operation_t *operation);
+
+static psa_status_t wolfpsa_cipher_fail(psa_cipher_operation_t *operation,
+                                        psa_status_t status)
+{
+    (void)psa_cipher_abort(operation);
+    return status;
+}
+
 static psa_status_t wolfpsa_cipher_check_alg(psa_algorithm_t alg)
 {
     if (!PSA_ALG_IS_CIPHER(alg)) {
@@ -659,20 +668,20 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
     size_t output_len = 0;
 
     if (output_length == NULL) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
     *output_length = 0;
     if (ctx == NULL) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
     }
     if (input == NULL && input_length > 0) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
     if (output == NULL && output_size > 0) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     if (input_length == 0) {
@@ -681,7 +690,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
     if (ctx->alg == PSA_ALG_CBC_NO_PADDING) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         {
             size_t block_size = ctx->block_size;
@@ -693,7 +702,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
             output_len = full_len;
             if (output_size < output_len) {
-                return PSA_ERROR_BUFFER_TOO_SMALL;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
             }
 
             if (blocks == 0) {
@@ -722,7 +731,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    return PSA_ERROR_NOT_SUPPORTED;
+                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
 #endif
                 }
                 else {
@@ -736,7 +745,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     }
                 }
                 if (ret != 0) {
-                    return wc_error_to_psa_status(ret);
+                    return wolfpsa_cipher_fail(operation,
+                                               wc_error_to_psa_status(ret));
                 }
                 output_offset += block_size;
                 input_offset += needed;
@@ -763,7 +773,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     (word32)full_blocks);
                         }
 #else
-                        return PSA_ERROR_NOT_SUPPORTED;
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
 #endif
                     }
                     else {
@@ -781,7 +792,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         }
                     }
                     if (ret != 0) {
-                        return wc_error_to_psa_status(ret);
+                        return wolfpsa_cipher_fail(operation,
+                                                   wc_error_to_psa_status(ret));
                     }
                     output_offset += full_blocks;
                     input_offset += full_blocks;
@@ -799,7 +811,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
     }
     else if (ctx->alg == PSA_ALG_CBC_PKCS7) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         {
             size_t block_size = ctx->block_size;
@@ -812,7 +824,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 size_t full_len = full_blocks * block_size;
 
                 if (output_size < full_len) {
-                    return PSA_ERROR_BUFFER_TOO_SMALL;
+                    return wolfpsa_cipher_fail(operation,
+                                               PSA_ERROR_BUFFER_TOO_SMALL);
                 }
 
                 if (full_blocks == 0) {
@@ -835,7 +848,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        return PSA_ERROR_NOT_SUPPORTED;
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
 #endif
                     }
                     else {
@@ -843,7 +857,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                (word32)block_size);
                     }
                     if (ret != 0) {
-                        return wc_error_to_psa_status(ret);
+                        return wolfpsa_cipher_fail(operation,
+                                                   wc_error_to_psa_status(ret));
                     }
                     output_offset += block_size;
                     input_offset += needed;
@@ -862,7 +877,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     input + input_offset,
                                                     (word32)full_blocks_len);
 #else
-                            return PSA_ERROR_NOT_SUPPORTED;
+                            return wolfpsa_cipher_fail(operation,
+                                                       PSA_ERROR_NOT_SUPPORTED);
 #endif
                         }
                         else {
@@ -872,7 +888,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                    (word32)full_blocks_len);
                         }
                         if (ret != 0) {
-                            return wc_error_to_psa_status(ret);
+                            return wolfpsa_cipher_fail(operation,
+                                                       wc_error_to_psa_status(ret));
                         }
                         output_offset += full_blocks_len;
                         input_offset += full_blocks_len;
@@ -908,7 +925,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 }
 
                 if (output_size < process_len) {
-                    return PSA_ERROR_BUFFER_TOO_SMALL;
+                    return wolfpsa_cipher_fail(operation,
+                                               PSA_ERROR_BUFFER_TOO_SMALL);
                 }
 
                 if (ctx->partial_len > 0) {
@@ -923,7 +941,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        return PSA_ERROR_NOT_SUPPORTED;
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
 #endif
                     }
                     else {
@@ -931,7 +950,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                (word32)block_size);
                     }
                     if (ret != 0) {
-                        return wc_error_to_psa_status(ret);
+                        return wolfpsa_cipher_fail(operation,
+                                                   wc_error_to_psa_status(ret));
                     }
                     output_offset += block_size;
                     input_offset += needed;
@@ -947,7 +967,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 input + input_offset,
                                                 (word32)full_blocks_len);
 #else
-                        return PSA_ERROR_NOT_SUPPORTED;
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
 #endif
                     }
                     else {
@@ -957,7 +978,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                (word32)full_blocks_len);
                     }
                     if (ret != 0) {
-                        return wc_error_to_psa_status(ret);
+                        return wolfpsa_cipher_fail(operation,
+                                                   wc_error_to_psa_status(ret));
                     }
                     output_offset += full_blocks_len;
                     input_offset += full_blocks_len;
@@ -980,10 +1002,10 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
     }
     else if (ctx->alg == PSA_ALG_CCM_STAR_NO_TAG) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (output_size < input_length) {
-            return PSA_ERROR_BUFFER_TOO_SMALL;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
         }
         if (input_length == 0) {
             return PSA_SUCCESS;
@@ -991,7 +1013,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         ret = wc_AesCtrEncrypt(&ctx->aes, output, input,
                                (word32)input_length);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
         *output_length = input_length;
         return PSA_SUCCESS;
@@ -1007,7 +1029,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
             output_len = full_len;
             if (output_size < output_len) {
-                return PSA_ERROR_BUFFER_TOO_SMALL;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
             }
 
             if (blocks == 0) {
@@ -1036,7 +1058,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    return PSA_ERROR_NOT_SUPPORTED;
+                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
 #endif
                 }
                 else {
@@ -1050,7 +1072,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     }
                 }
                 if (ret != 0) {
-                    return wc_error_to_psa_status(ret);
+                    return wolfpsa_cipher_fail(operation,
+                                               wc_error_to_psa_status(ret));
                 }
                 output_offset += block_size;
                 input_offset += needed;
@@ -1077,7 +1100,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                     (word32)full_blocks);
                         }
 #else
-                        return PSA_ERROR_NOT_SUPPORTED;
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
 #endif
                     }
                     else {
@@ -1095,7 +1119,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         }
                     }
                     if (ret != 0) {
-                        return wc_error_to_psa_status(ret);
+                        return wolfpsa_cipher_fail(operation,
+                                                   wc_error_to_psa_status(ret));
                     }
                     output_offset += full_blocks;
                     input_offset += full_blocks;
@@ -1113,23 +1138,23 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
     }
     else if (ctx->alg == PSA_ALG_CTR) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (output_size < input_length) {
-            return PSA_ERROR_BUFFER_TOO_SMALL;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
         }
         ret = wc_AesCtrEncrypt(&ctx->aes, output, input,
                                (word32)input_length);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
     }
     else if (ctx->alg == PSA_ALG_CFB) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (output_size < input_length) {
-            return PSA_ERROR_BUFFER_TOO_SMALL;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
         }
         if (ctx->direction == AES_ENCRYPTION) {
             ret = wc_AesCfbEncrypt(&ctx->aes, output, input,
@@ -1140,15 +1165,15 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                    (word32)input_length);
         }
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
     }
     else if (ctx->alg == PSA_ALG_OFB) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (output_size < input_length) {
-            return PSA_ERROR_BUFFER_TOO_SMALL;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
         }
         if (ctx->direction == AES_ENCRYPTION) {
             ret = wc_AesOfbEncrypt(&ctx->aes, output, input,
@@ -1159,24 +1184,24 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                    (word32)input_length);
         }
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
     }
     else if (ctx->alg == PSA_ALG_STREAM_CIPHER) {
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (output_size < input_length) {
-            return PSA_ERROR_BUFFER_TOO_SMALL;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
         }
         ret = wc_Chacha_Process(&ctx->chacha, output, input,
                                 (word32)input_length);
         if (ret != 0) {
-            return wc_error_to_psa_status(ret);
+            return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
     }
     else {
-        return PSA_ERROR_NOT_SUPPORTED;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
 
     *output_length = input_length;
@@ -1192,16 +1217,16 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
     int ret = 0;
 
     if (operation == NULL || output_length == NULL) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
     if (ctx == NULL) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     if (ctx->alg == PSA_ALG_CBC_PKCS7) {
         size_t block_size = ctx->block_size;
         if (!ctx->iv_set) {
-            return PSA_ERROR_BAD_STATE;
+            return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
         if (ctx->direction == AES_ENCRYPTION) {
             uint8_t block[AES_BLOCK_SIZE];
@@ -1211,7 +1236,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 pad_len = block_size;
             }
             if (output_size < block_size) {
-                return PSA_ERROR_BUFFER_TOO_SMALL;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
             }
             if (ctx->partial_len > 0) {
                 XMEMCPY(block, ctx->partial, ctx->partial_len);
@@ -1223,7 +1248,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                         (word32)block_size);
 #else
-                return PSA_ERROR_NOT_SUPPORTED;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
 #endif
             }
             else {
@@ -1231,7 +1256,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                                        (word32)block_size);
             }
             if (ret != 0) {
-                return wc_error_to_psa_status(ret);
+                return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
             }
             ctx->partial_len = 0;
             *output_length = block_size;
@@ -1245,7 +1270,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             psa_status_t status = PSA_SUCCESS;
 
             if (ctx->partial_len != block_size) {
-                return PSA_ERROR_INVALID_PADDING;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_PADDING);
             }
 
             if (ctx->is_des3) {
@@ -1253,7 +1278,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 ret = wc_Des3_CbcDecrypt(&ctx->des3, block, ctx->partial,
                                         (word32)block_size);
 #else
-                return PSA_ERROR_NOT_SUPPORTED;
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
 #endif
             }
             else {
@@ -1262,7 +1287,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
             }
             if (ret != 0) {
                 wc_ForceZero(block, sizeof(block));
-                return wc_error_to_psa_status(ret);
+                return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
             }
 
             pad_len = block[block_size - 1];
@@ -1291,6 +1316,9 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
 
 cbc_pkcs7_decrypt_done:
             wc_ForceZero(block, sizeof(block));
+            if (status != PSA_SUCCESS) {
+                return wolfpsa_cipher_fail(operation, status);
+            }
             return status;
         }
     }
@@ -1298,7 +1326,7 @@ cbc_pkcs7_decrypt_done:
     if ((ctx->alg == PSA_ALG_CBC_NO_PADDING ||
          ctx->alg == PSA_ALG_ECB_NO_PADDING) &&
         ctx->partial_len != 0) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     *output_length = 0;

@@ -67,6 +67,15 @@ static wolfpsa_mac_ctx_t* wolfpsa_mac_get_ctx(psa_mac_operation_t *operation)
     return (wolfpsa_mac_ctx_t *)(uintptr_t)operation->opaque;
 }
 
+psa_status_t psa_mac_abort(psa_mac_operation_t *operation);
+
+static psa_status_t wolfpsa_mac_fail(psa_mac_operation_t *operation,
+                                     psa_status_t status)
+{
+    (void)psa_mac_abort(operation);
+    return status;
+}
+
 static int wolfpsa_hash_type_from_alg(psa_algorithm_t alg)
 {
     psa_algorithm_t hash_alg = 0;
@@ -332,13 +341,13 @@ psa_status_t psa_mac_update(psa_mac_operation_t *operation,
     int ret;
 
     if (ctx == NULL) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_mac_fail(operation, PSA_ERROR_BAD_STATE);
     }
     if (input == NULL && input_length > 0) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_mac_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_mac_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     if (input_length == 0) {
@@ -352,11 +361,11 @@ psa_status_t psa_mac_update(psa_mac_operation_t *operation,
         ret = wc_CmacUpdate(&ctx->ctx.cmac, input, (word32)input_length);
     }
     else {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_mac_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     if (ret != 0) {
-        return wc_error_to_psa_status(ret);
+        return wolfpsa_mac_fail(operation, wc_error_to_psa_status(ret));
     }
 
     return PSA_SUCCESS;
@@ -429,12 +438,12 @@ psa_status_t psa_mac_sign_finish(psa_mac_operation_t *operation,
     psa_status_t status;
 
     if (ctx == NULL) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_mac_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     status = wolfpsa_mac_final(ctx, mac, mac_size, mac_length);
     if (status != PSA_SUCCESS) {
-        return status;
+        return wolfpsa_mac_fail(operation, status);
     }
 
     psa_mac_abort(operation);
