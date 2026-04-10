@@ -2317,6 +2317,231 @@ cleanup:
     return ret;
 }
 
+static int test_kdf_verify_key_policy(void)
+{
+    static const uint8_t hkdf_secret[] = {
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    static const uint8_t hkdf_info[] = "kdf-verify-key";
+    static const uint8_t pbkdf2_password[] = "password";
+    static const uint8_t pbkdf2_salt[] = "salt";
+    uint8_t hkdf_expected[16];
+    uint8_t pbkdf2_expected[16];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t hkdf_verify_key = 0;
+    psa_key_id_t hkdf_no_usage_key = 0;
+    psa_key_id_t pbkdf2_verify_key = 0;
+    psa_key_id_t pbkdf2_wrong_type_key = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_output_bytes(&op, hkdf_expected, sizeof(hkdf_expected));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, hkdf_expected, sizeof(hkdf_expected), &hkdf_verify_key);
+    if (check_status(st, "psa_import_key(HKDF verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_verify_key);
+    if (check_status(st, "psa_key_derivation_verify_key(HKDF verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    st = psa_import_key(&attrs, hkdf_expected, sizeof(hkdf_expected), &hkdf_no_usage_key);
+    if (check_status(st, "psa_import_key(HKDF no verify usage key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_no_usage_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_verify_key rejects missing VERIFY_DERIVATION usage") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                        pbkdf2_password, sizeof(pbkdf2_password) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(PASSWORD verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        pbkdf2_salt, sizeof(pbkdf2_salt) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST, 2);
+    if (check_status(st, "psa_key_derivation_input_integer(COST verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_output_bytes(&op, pbkdf2_expected, sizeof(pbkdf2_expected));
+    if (check_status(st, "psa_key_derivation_output_bytes(PBKDF2 verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(PBKDF2 verify expected)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_PASSWORD_HASH);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, pbkdf2_expected, sizeof(pbkdf2_expected), &pbkdf2_verify_key);
+    if (check_status(st, "psa_import_key(PBKDF2 verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                        pbkdf2_password, sizeof(pbkdf2_password) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(PASSWORD verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        pbkdf2_salt, sizeof(pbkdf2_salt) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST, 2);
+    if (check_status(st, "psa_key_derivation_input_integer(COST verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, pbkdf2_verify_key);
+    if (check_status(st, "psa_key_derivation_verify_key(PBKDF2 password hash)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(PBKDF2 verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, pbkdf2_expected, sizeof(pbkdf2_expected),
+                        &pbkdf2_wrong_type_key);
+    if (check_status(st, "psa_import_key(PBKDF2 wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                        pbkdf2_password, sizeof(pbkdf2_password) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(PASSWORD wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        pbkdf2_salt, sizeof(pbkdf2_salt) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST, 2);
+    if (check_status(st, "psa_key_derivation_input_integer(COST wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, pbkdf2_wrong_type_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_verify_key rejects non-PASSWORD_HASH PBKDF2 expected key") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    if (pbkdf2_wrong_type_key != 0) {
+        (void)psa_destroy_key(pbkdf2_wrong_type_key);
+    }
+    if (pbkdf2_verify_key != 0) {
+        (void)psa_destroy_key(pbkdf2_verify_key);
+    }
+    if (hkdf_no_usage_key != 0) {
+        (void)psa_destroy_key(hkdf_no_usage_key);
+    }
+    if (hkdf_verify_key != 0) {
+        (void)psa_destroy_key(hkdf_verify_key);
+    }
+    psa_reset_key_attributes(&attrs);
+    return ret;
+}
+
 static int test_kdf_key_agreement_policy(void)
 {
     uint8_t peer_pub[128];
@@ -3064,6 +3289,11 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_input_key_policy") == 0) {
         if (run_named_test("kdf_input_key_policy", test_kdf_input_key_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_verify_key_policy") == 0) {
+        if (run_named_test("kdf_verify_key_policy", test_kdf_verify_key_policy) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
