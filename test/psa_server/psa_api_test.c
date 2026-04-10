@@ -1751,6 +1751,128 @@ static int test_chacha20_import_rejects_invalid_key_size(void)
     return TEST_OK;
 }
 
+static int test_chacha20_poly1305_multipart_finish_split_buffers(void)
+{
+    static const uint8_t key[32] = {
+        0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,
+        0x88,0x89,0x8a,0x8b,0x8c,0x8d,0x8e,0x8f,
+        0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,
+        0x98,0x99,0x9a,0x9b,0x9c,0x9d,0x9e,0x9f
+    };
+    static const uint8_t nonce[12] = {
+        0x07,0x00,0x00,0x00,0x40,0x41,0x42,0x43,
+        0x44,0x45,0x46,0x47
+    };
+    static const uint8_t aad[12] = {
+        0x50,0x51,0x52,0x53,0xc0,0xc1,0xc2,0xc3,
+        0xc4,0xc5,0xc6,0xc7
+    };
+    static const uint8_t plaintext[16] = {
+        0x4c,0x61,0x64,0x69,0x65,0x73,0x20,0x61,
+        0x6e,0x64,0x20,0x47,0x65,0x6e,0x74,0x6c
+    };
+    uint8_t ciphertext[sizeof(plaintext)];
+    uint8_t tag[16];
+    uint8_t combined[sizeof(plaintext) + sizeof(tag)];
+    uint8_t update_out[sizeof(plaintext)];
+    size_t ciphertext_len = 0;
+    size_t tag_len = 0;
+    size_t combined_len = 0;
+    size_t update_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CHACHA20_POLY1305);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(ChaCha20 multipart)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_CHACHA20_POLY1305);
+    if (check_status(st, "psa_aead_encrypt_setup(ChaCha20 multipart)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(ChaCha20 multipart)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, sizeof(aad));
+    if (check_status(st, "psa_aead_update_ad(ChaCha20 multipart)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update(&op, plaintext, sizeof(plaintext),
+                         update_out, sizeof(update_out), &update_len);
+    if (check_status(st, "psa_aead_update(ChaCha20 multipart)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(update_len == 0,
+                   "psa_aead_update(ChaCha20 multipart) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_finish(&op, ciphertext, sizeof(ciphertext), &ciphertext_len,
+                         tag, sizeof(tag), &tag_len);
+    if (check_status(st, "psa_aead_finish(ChaCha20 split buffers)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(ciphertext_len == sizeof(ciphertext),
+                   "psa_aead_finish(ChaCha20 ciphertext length)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(tag_len == sizeof(tag),
+                   "psa_aead_finish(ChaCha20 tag length)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_CHACHA20_POLY1305,
+                          nonce, sizeof(nonce),
+                          aad, sizeof(aad),
+                          plaintext, sizeof(plaintext),
+                          combined, sizeof(combined), &combined_len);
+    if (check_status(st, "psa_aead_encrypt(ChaCha20 reference)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(combined_len == sizeof(combined),
+                   "psa_aead_encrypt(ChaCha20 reference length)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_finish(ChaCha20 ciphertext matches reference)",
+                     ciphertext, combined, sizeof(ciphertext)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_finish(ChaCha20 tag matches reference)",
+                     tag, combined + sizeof(ciphertext), sizeof(tag)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ChaCha20 multipart)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    return ret;
+}
+
 static int test_asym_ecc(void)
 {
     static const uint8_t msg[] = "psa ecc sign";
@@ -3273,6 +3395,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "chacha20_import_key_size") == 0) {
         if (run_named_test("chacha20_import_key_size",
                            test_chacha20_import_rejects_invalid_key_size) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "chacha20_multipart_split_buffers") == 0) {
+        if (run_named_test("chacha20_multipart_split_buffers",
+                           test_chacha20_poly1305_multipart_finish_split_buffers) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

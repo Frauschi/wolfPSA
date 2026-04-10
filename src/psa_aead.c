@@ -459,6 +459,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
                                                size_t *tag_length)
 {
     int ret;
+    size_t chacha_ciphertext_size = 0;
 
     if (ciphertext == NULL || ciphertext_length == NULL ||
         tag == NULL || tag_length == NULL) {
@@ -473,6 +474,13 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         (ctx->aad_length != ctx->ad_expected ||
          ctx->input_length != ctx->plaintext_expected)) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
+        if (ctx->input_length > SIZE_MAX - ctx->tag_length) {
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+        chacha_ciphertext_size = ctx->input_length + ctx->tag_length;
     }
 
     if (ciphertext_size < ctx->input_length) {
@@ -531,18 +539,31 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
         size_t out_len = 0;
+        uint8_t *tmp = (uint8_t *)XMALLOC(chacha_ciphertext_size, NULL,
+                                          DYNAMIC_TYPE_TMP_BUFFER);
+        if (tmp == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
         ret = psa_chacha20_poly1305_encrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
                                             ctx->aad, ctx->aad_length,
                                             ctx->input, ctx->input_length,
-                                            ciphertext, ciphertext_size, &out_len);
+                                            tmp, chacha_ciphertext_size,
+                                            &out_len);
         if (ret != 0) {
+            wc_ForceZero(tmp, chacha_ciphertext_size);
+            XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return (psa_status_t)ret;
         }
         if (out_len < ctx->tag_length) {
+            wc_ForceZero(tmp, chacha_ciphertext_size);
+            XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_GENERIC_ERROR;
         }
-        XMEMCPY(tag, ciphertext + ctx->input_length, ctx->tag_length);
+        XMEMCPY(ciphertext, tmp, ctx->input_length);
+        XMEMCPY(tag, tmp + ctx->input_length, ctx->tag_length);
+        wc_ForceZero(tmp, chacha_ciphertext_size);
+        XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
     else {
         return PSA_ERROR_NOT_SUPPORTED;
