@@ -776,6 +776,7 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)*key_data_length) {
+        wc_ForceZero(*key_data, *key_data_length);
         XFREE(*key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         *key_data = NULL;
         *key_data_length = 0;
