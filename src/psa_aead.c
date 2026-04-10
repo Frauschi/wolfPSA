@@ -78,6 +78,18 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
     return PSA_SUCCESS;
 }
 
+static const uint8_t* wolfpsa_aead_nonnull_data(const uint8_t *data,
+                                                size_t data_length)
+{
+    static const uint8_t empty = 0;
+
+    if (data == NULL && data_length == 0) {
+        return &empty;
+    }
+
+    return data;
+}
+
 static size_t wolfpsa_aead_tag_length(psa_algorithm_t alg)
 {
     return PSA_ALG_AEAD_GET_TAG_LENGTH(alg);
@@ -460,6 +472,8 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
 {
     int ret;
     size_t chacha_ciphertext_size = 0;
+    const uint8_t *input;
+    const uint8_t *aad;
 
     if (ciphertext == NULL || ciphertext_length == NULL ||
         tag == NULL || tag_length == NULL) {
@@ -496,6 +510,9 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    input = wolfpsa_aead_nonnull_data(ctx->input, ctx->input_length);
+    aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
+
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
@@ -503,11 +520,11 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmEncrypt(&aes, ciphertext, ctx->input,
+            ret = wc_AesGcmEncrypt(&aes, ciphertext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
@@ -525,11 +542,11 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmEncrypt(&aes, ciphertext, ctx->input,
+            ret = wc_AesCcmEncrypt(&aes, ciphertext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
@@ -546,8 +563,8 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         }
         ret = psa_chacha20_poly1305_encrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
-                                            ctx->aad, ctx->aad_length,
-                                            ctx->input, ctx->input_length,
+                                            aad, ctx->aad_length,
+                                            input, ctx->input_length,
                                             tmp, chacha_ciphertext_size,
                                             &out_len);
         if (ret != 0) {
@@ -582,6 +599,8 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
                                                size_t tag_length)
 {
     int ret;
+    const uint8_t *input;
+    const uint8_t *aad;
 
     if (plaintext == NULL || plaintext_length == NULL || tag == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -616,6 +635,9 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    input = wolfpsa_aead_nonnull_data(ctx->input, ctx->input_length);
+    aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
+
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
@@ -623,11 +645,11 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmDecrypt(&aes, plaintext, ctx->input,
+            ret = wc_AesGcmDecrypt(&aes, plaintext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
@@ -648,11 +670,11 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmDecrypt(&aes, plaintext, ctx->input,
+            ret = wc_AesCcmDecrypt(&aes, plaintext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
@@ -676,7 +698,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         XMEMCPY(tmp + ctx->input_length, tag, tag_length);
         ret = psa_chacha20_poly1305_decrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
-                                            ctx->aad, ctx->aad_length,
+                                            aad, ctx->aad_length,
                                             tmp, ciphertext_len,
                                             plaintext, plaintext_size, &out_len);
         XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);

@@ -1583,6 +1583,251 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+static int test_aead_gcm_multipart_zero_length_inputs(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t aad[12] = {
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b
+    };
+    static const uint8_t plaintext[16] = {
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f
+    };
+    uint8_t combined[sizeof(plaintext) + 16];
+    uint8_t ciphertext[sizeof(plaintext)];
+    uint8_t tag[16];
+    uint8_t decrypt_out[sizeof(plaintext)];
+    uint8_t update_out[sizeof(plaintext)];
+    uint8_t dummy[1] = { 0 };
+    size_t combined_len = 0;
+    size_t ciphertext_len = 0;
+    size_t plaintext_len = 0;
+    size_t tag_len = 0;
+    size_t update_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM zero-length multipart)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                          nonce, sizeof(nonce),
+                          aad, sizeof(aad),
+                          dummy, 0,
+                          combined, sizeof(combined), &combined_len);
+    if (check_status(st, "psa_aead_encrypt(GCM zero plaintext reference)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(combined_len == sizeof(tag),
+                   "psa_aead_encrypt(GCM zero plaintext reference length)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, sizeof(aad));
+    if (check_status(st, "psa_aead_update_ad(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update(&op, dummy, 0, update_out, sizeof(update_out), &update_len);
+    if (check_status(st, "psa_aead_update(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(update_len == 0, "psa_aead_update(GCM zero plaintext) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_finish(&op, dummy, sizeof(dummy), &ciphertext_len,
+                         tag, sizeof(tag), &tag_len);
+    if (check_status(st, "psa_aead_finish(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(ciphertext_len == 0, "psa_aead_finish(GCM zero plaintext) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(tag_len == sizeof(tag), "psa_aead_finish(GCM zero plaintext) tag length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_finish(GCM zero plaintext) tag matches reference)",
+                     tag, combined, sizeof(tag)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(GCM zero plaintext verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, sizeof(aad));
+    if (check_status(st, "psa_aead_update_ad(GCM zero plaintext verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update(&op, dummy, 0, update_out, sizeof(update_out), &update_len);
+    if (check_status(st, "psa_aead_update(GCM zero plaintext verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_verify(&op, dummy, sizeof(dummy), &plaintext_len, tag, tag_len);
+    if (check_status(st, "psa_aead_verify(GCM zero plaintext)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(plaintext_len == 0, "psa_aead_verify(GCM zero plaintext) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                          nonce, sizeof(nonce),
+                          aad, 0,
+                          plaintext, sizeof(plaintext),
+                          combined, sizeof(combined), &combined_len);
+    if (check_status(st, "psa_aead_encrypt(GCM zero aad reference)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(combined_len == sizeof(plaintext) + sizeof(tag),
+                   "psa_aead_encrypt(GCM zero aad reference length)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, 0);
+    if (check_status(st, "psa_aead_update_ad(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update(&op, plaintext, sizeof(plaintext),
+                         update_out, sizeof(update_out), &update_len);
+    if (check_status(st, "psa_aead_update(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(update_len == 0, "psa_aead_update(GCM zero aad) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_finish(&op, ciphertext, sizeof(ciphertext), &ciphertext_len,
+                         tag, sizeof(tag), &tag_len);
+    if (check_status(st, "psa_aead_finish(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(ciphertext_len == sizeof(ciphertext), "psa_aead_finish(GCM zero aad) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(tag_len == sizeof(tag), "psa_aead_finish(GCM zero aad) tag length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_finish(GCM zero aad) ciphertext matches reference)",
+                     ciphertext, combined, sizeof(ciphertext)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_finish(GCM zero aad) tag matches reference)",
+                     tag, combined + sizeof(ciphertext), sizeof(tag)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_set_nonce(&op, nonce, sizeof(nonce));
+    if (check_status(st, "psa_aead_set_nonce(GCM zero aad verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, 0);
+    if (check_status(st, "psa_aead_update_ad(GCM zero aad verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_update(&op, ciphertext, ciphertext_len,
+                         update_out, sizeof(update_out), &update_len);
+    if (check_status(st, "psa_aead_update(GCM zero aad verify)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    st = psa_aead_verify(&op, decrypt_out, sizeof(decrypt_out), &plaintext_len, tag, tag_len);
+    if (check_status(st, "psa_aead_verify(GCM zero aad)") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_true(plaintext_len == sizeof(plaintext), "psa_aead_verify(GCM zero aad) length") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_aead_verify(GCM zero aad)", decrypt_out, plaintext, sizeof(plaintext)) != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    if (key_id != 0) {
+        st = psa_destroy_key(key_id);
+        if (check_status(st, "psa_destroy_key(GCM zero-length multipart)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+    }
+    return ret;
+}
+
 static int test_aead_multipart_length_overflow_rejected(void)
 {
     static const uint8_t key[16] = {
@@ -3665,6 +3910,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_gcm_multipart_zero_length") == 0) {
+        if (run_named_test("aead_gcm_multipart_zero_length",
+                           test_aead_gcm_multipart_zero_length_inputs) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "aead_multipart_length_overflow") == 0) {
         if (run_named_test("aead_multipart_length_overflow",
