@@ -1606,6 +1606,76 @@ static int test_kdf_hkdf_optional_info(void)
     return TEST_OK;
 }
 
+static int test_kdf_output_bytes_are_sequential(void)
+{
+    static const uint8_t secret[] = "hkdf sequential output secret";
+    static const uint8_t info[] = "hkdf sequential output info";
+    uint8_t expected[32];
+    uint8_t output_part1[16];
+    uint8_t output_part2[16];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF(WC_HASH_TYPE_SHA256,
+                  secret, (word32)(sizeof(secret) - 1u),
+                  NULL, 0,
+                  info, (word32)(sizeof(info) - 1u),
+                  expected, (word32)sizeof(expected));
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF(sequential output reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF sequential output)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF sequential output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF sequential output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_set_capacity(&op, sizeof(expected));
+    if (check_status(st, "psa_key_derivation_set_capacity(HKDF sequential output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output_part1, sizeof(output_part1));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF sequential output first)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output_part2, sizeof(output_part2));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF sequential output second)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF sequential output)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF sequential output first)",
+                     output_part1, expected, sizeof(output_part1)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF sequential output second)",
+                     output_part2, expected + sizeof(output_part1),
+                     sizeof(output_part2)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int run_named_test(const char* name, test_fn_t fn)
 {
     int ret;
@@ -1751,6 +1821,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_hkdf_optional_info") == 0) {
         if (run_named_test("kdf_hkdf_optional_info",
                            test_kdf_hkdf_optional_info) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_output_bytes_are_sequential") == 0) {
+        if (run_named_test("kdf_output_bytes_are_sequential",
+                           test_kdf_output_bytes_are_sequential) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

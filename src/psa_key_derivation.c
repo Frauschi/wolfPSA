@@ -48,6 +48,7 @@ typedef struct wolfpsa_kdf_ctx {
     psa_algorithm_t alg;
     psa_algorithm_t ka_alg;
     size_t capacity;
+    size_t output_offset;
     uint32_t steps_set;
     uint8_t *secret;
     size_t secret_length;
@@ -1037,11 +1038,37 @@ cleanup:
     return PSA_ERROR_NOT_SUPPORTED;
 }
 
+static psa_status_t wolfpsa_kdf_compute_output(wolfpsa_kdf_ctx_t *ctx,
+                                               uint8_t *output,
+                                               size_t output_length)
+{
+    if (ctx->is_raw_kdf) {
+        XMEMCPY(output, ctx->secret, output_length);
+        return PSA_SUCCESS;
+    }
+
+    if (PSA_ALG_IS_ANY_HKDF(ctx->alg)) {
+        return wolfpsa_kdf_hkdf(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_TLS12_PRF(ctx->alg)) {
+        return wolfpsa_kdf_tls12_prf(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_TLS12_PSK_TO_MS(ctx->alg)) {
+        return wolfpsa_kdf_tls12_psk_to_ms(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
+        return wolfpsa_kdf_pbkdf2(ctx, output, output_length);
+    }
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
 psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *operation,
                                              uint8_t *output,
                                              size_t output_length)
 {
     wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    size_t total_output_length;
     psa_status_t status;
 
     if (ctx == NULL || output == NULL) {
@@ -1050,7 +1077,8 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
 
     if (ctx->is_raw_kdf) {
         if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-            output_length > ctx->secret_length) {
+            ctx->output_offset > ctx->secret_length ||
+            output_length > ctx->secret_length - ctx->output_offset) {
             return PSA_ERROR_INSUFFICIENT_DATA;
         }
     }
@@ -1101,26 +1129,34 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     }
 
     ctx->output_started = 1;
-
-    if (ctx->is_raw_kdf) {
-        XMEMCPY(output, ctx->secret, output_length);
-        return PSA_SUCCESS;
+    total_output_length = ctx->output_offset + output_length;
+    if (total_output_length < ctx->output_offset) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    if (PSA_ALG_IS_ANY_HKDF(ctx->alg)) {
-        return wolfpsa_kdf_hkdf(ctx, output, output_length);
+    if (ctx->output_offset == 0) {
+        status = wolfpsa_kdf_compute_output(ctx, output, output_length);
     }
-    if (PSA_ALG_IS_TLS12_PRF(ctx->alg)) {
-        return wolfpsa_kdf_tls12_prf(ctx, output, output_length);
-    }
-    if (PSA_ALG_IS_TLS12_PSK_TO_MS(ctx->alg)) {
-        return wolfpsa_kdf_tls12_psk_to_ms(ctx, output, output_length);
-    }
-    if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
-        return wolfpsa_kdf_pbkdf2(ctx, output, output_length);
-    }
+    else {
+        uint8_t *full_output;
 
-    return PSA_ERROR_NOT_SUPPORTED;
+        full_output = (uint8_t *)XMALLOC(total_output_length, NULL,
+                                         DYNAMIC_TYPE_TMP_BUFFER);
+        if (full_output == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = wolfpsa_kdf_compute_output(ctx, full_output, total_output_length);
+        if (status == PSA_SUCCESS) {
+            XMEMCPY(output, full_output + ctx->output_offset, output_length);
+        }
+        wc_ForceZero(full_output, total_output_length);
+        XFREE(full_output, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+    if (status == PSA_SUCCESS) {
+        ctx->output_offset += output_length;
+    }
+    return status;
 }
 
 psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *attributes,
