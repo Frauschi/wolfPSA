@@ -369,6 +369,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
@@ -510,6 +511,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
         else if (!ctx->is_chacha) {
             wc_AesFree(&ctx->aes);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
