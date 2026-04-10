@@ -2274,6 +2274,62 @@ static int test_kdf_hkdf_extract_optional_salt(void)
     return TEST_OK;
 }
 
+static int test_kdf_hkdf_extract_prefix_output(void)
+{
+    static const uint8_t secret[] = "hkdf extract secret";
+    uint8_t expected[WC_SHA256_DIGEST_SIZE];
+    uint8_t output[16];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret;
+
+    ret = wc_HKDF_Extract(WC_HASH_TYPE_SHA256,
+                          NULL, 0,
+                          secret, (word32)(sizeof(secret) - 1u),
+                          expected);
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Extract(HKDF_EXTRACT prefix output reference) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXTRACT prefix output)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, NULL, 0);
+    if (check_status(st, "psa_key_derivation_input_bytes(SALT HKDF_EXTRACT prefix output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF_EXTRACT prefix output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_set_capacity(&op, sizeof(expected));
+    if (check_status(st, "psa_key_derivation_set_capacity(HKDF_EXTRACT prefix output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF_EXTRACT prefix output)") != TEST_OK) {
+        (void)psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF_EXTRACT prefix output)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    if (check_buf_eq("psa_key_derivation_output_bytes(HKDF_EXTRACT prefix output)",
+                     output, expected, sizeof(output)) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_kdf_hkdf_expand_optional_info(void)
 {
     static const uint8_t prk[WC_SHA256_DIGEST_SIZE] = {
@@ -2626,6 +2682,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_hkdf_extract_optional_salt") == 0) {
         if (run_named_test("kdf_hkdf_extract_optional_salt",
                            test_kdf_hkdf_extract_optional_salt) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_extract_prefix_output") == 0) {
+        if (run_named_test("kdf_hkdf_extract_prefix_output",
+                           test_kdf_hkdf_extract_prefix_output) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

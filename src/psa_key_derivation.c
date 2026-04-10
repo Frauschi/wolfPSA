@@ -719,21 +719,29 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
 
     if (PSA_ALG_IS_HKDF_EXTRACT(ctx->alg)) {
         int hash_len = wc_HashGetDigestSize(hash_type);
+        uint8_t prk[WC_MAX_DIGEST_SIZE];
         if (hash_len <= 0) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if ((size_t)hash_len > sizeof(prk)) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
         if ((wolfpsa_check_word32_length(ctx->salt_length) != PSA_SUCCESS) ||
             (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS)) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        if (output_length != (size_t)hash_len) {
-            return PSA_ERROR_INVALID_ARGUMENT;
-        }
         ret = wc_HKDF_Extract(hash_type,
                               ctx->salt, (word32)ctx->salt_length,
                               ctx->secret, (word32)ctx->secret_length,
-                              output);
-        return ret == 0 ? PSA_SUCCESS : wc_error_to_psa_status(ret);
+                              prk);
+        if (ret != 0) {
+            wc_ForceZero(prk, (size_t)hash_len);
+            return wc_error_to_psa_status(ret);
+        }
+
+        XMEMCPY(output, prk, output_length);
+        wc_ForceZero(prk, (size_t)hash_len);
+        return PSA_SUCCESS;
     }
 
     if (PSA_ALG_IS_HKDF_EXPAND(ctx->alg)) {
