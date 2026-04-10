@@ -244,6 +244,39 @@ static int test_cipher_cbc(void)
     return TEST_OK;
 }
 
+static int test_export_key_requires_usage_flag(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t exported[sizeof(key)];
+    size_t exported_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES no export)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_export_key(key_id, exported, sizeof(exported), &exported_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_export_key requires PSA_KEY_USAGE_EXPORT") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES no export)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
 {
     static const uint8_t key[16] = {
@@ -1332,6 +1365,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
         if (run_named_test("cipher_cbc", test_cipher_cbc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "export_requires_usage") == 0) {
+        if (run_named_test("export_requires_usage",
+                           test_export_key_requires_usage_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_multipart") == 0) {
         if (run_named_test("cipher_cbc_pkcs7_multipart",
