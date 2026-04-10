@@ -688,6 +688,7 @@ psa_status_t psa_hash_abort(psa_hash_operation_t *operation)
     }
 
     psa_hash_cleanup_ctx(ctx);
+    wc_ForceZero(ctx, sizeof(*ctx));
     XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     operation->opaque = (uintptr_t)NULL;
 
