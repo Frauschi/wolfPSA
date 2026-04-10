@@ -71,6 +71,8 @@
 #include <wolfssl/wolfcrypt/ripemd.h>
 #endif
 
+extern int wolfPSA_CryptoIsInitialized(void);
+
 typedef struct psa_hash_operation_ctx {
     psa_algorithm_t alg;           /* Hash algorithm */
     int initialized;               /* Whether operation is initialized */
@@ -322,6 +324,10 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
     }
 
     wolfpsa_trace("psa_hash_setup(alg=0x%08x)", (unsigned)alg);
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
 
     if (!PSA_ALG_IS_HASH(alg)) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -832,6 +838,10 @@ psa_status_t psa_hash_compute(psa_algorithm_t alg,
 {
     psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     psa_status_t status;
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
     
     /* Set up the operation */
     status = psa_hash_setup(&operation, alg);
@@ -867,6 +877,10 @@ psa_status_t psa_hash_compare(psa_algorithm_t alg,
     uint8_t computed_hash[PSA_HASH_MAX_SIZE];
     size_t computed_hash_length;
     size_t expected_hash_size;
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
     
     /* Check if the reference hash length is valid */
     if (!PSA_ALG_IS_HASH(alg)) {
