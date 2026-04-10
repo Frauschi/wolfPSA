@@ -1659,6 +1659,146 @@ cleanup:
     return ret;
 }
 
+static int test_kdf_key_agreement_policy(void)
+{
+    uint8_t peer_pub[128];
+    size_t peer_pub_len = 0;
+    uint8_t good_pub[128];
+    size_t good_pub_len = 0;
+    uint8_t expected_secret[128];
+    size_t expected_secret_len = 0;
+    uint8_t derived_secret[128];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t good_key = 0;
+    psa_key_id_t peer_key = 0;
+    psa_key_id_t no_usage_key = 0;
+    psa_key_id_t public_key = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &good_key);
+    if (check_status(st, "psa_generate_key(KDF ECDH derive key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_generate_key(&attrs, &peer_key);
+    if (check_status(st, "psa_generate_key(KDF ECDH peer key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_export_public_key(peer_key, peer_pub, sizeof(peer_pub), &peer_pub_len);
+    if (check_status(st, "psa_export_public_key(KDF ECDH peer key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_export_public_key(good_key, good_pub, sizeof(good_pub), &good_pub_len);
+    if (check_status(st, "psa_export_public_key(KDF ECDH derive key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, good_key, peer_pub, peer_pub_len,
+                               expected_secret, sizeof(expected_secret),
+                               &expected_secret_len);
+    if (check_status(st, "psa_raw_key_agreement(KDF ECDH expected secret)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_ECDH);
+    if (check_status(st, "psa_key_derivation_setup(raw ECDH)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          good_key, peer_pub, peer_pub_len);
+    if (check_status(st, "psa_key_derivation_key_agreement(derive key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_output_bytes(&op, derived_secret, expected_secret_len);
+    if (check_status(st, "psa_key_derivation_output_bytes(raw ECDH)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_key_derivation_key_agreement matches raw ECDH",
+                     derived_secret, expected_secret, expected_secret_len) != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(raw ECDH success)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &no_usage_key);
+    if (check_status(st, "psa_generate_key(KDF ECDH no usage key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_ECDH);
+    if (check_status(st, "psa_key_derivation_setup(raw ECDH no usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          no_usage_key, peer_pub, peer_pub_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_key_agreement rejects missing DERIVE usage") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(raw ECDH no usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_import_key(&attrs, good_pub, good_pub_len, &public_key);
+    if (check_status(st, "psa_import_key(KDF ECDH public key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_ECDH);
+    if (check_status(st, "psa_key_derivation_setup(raw ECDH public key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          public_key, peer_pub, peer_pub_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_key_agreement rejects public key input") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    if (public_key != 0) {
+        (void)psa_destroy_key(public_key);
+    }
+    if (no_usage_key != 0) {
+        (void)psa_destroy_key(no_usage_key);
+    }
+    if (peer_key != 0) {
+        (void)psa_destroy_key(peer_key);
+    }
+    if (good_key != 0) {
+        (void)psa_destroy_key(good_key);
+    }
+    psa_reset_key_attributes(&attrs);
+    return ret;
+}
+
 static int test_kdf_tls12_psk_to_ms_rfc4279_order(void)
 {
     static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
@@ -2156,6 +2296,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_input_key_policy") == 0) {
         if (run_named_test("kdf_input_key_policy", test_kdf_input_key_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_key_agreement_policy") == 0) {
+        if (run_named_test("kdf_key_agreement_policy",
+                           test_kdf_key_agreement_policy) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
