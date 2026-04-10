@@ -39,6 +39,10 @@ jobs:
             modifiers: "-WOLFSSL_AES_CFB"
           - name: aes-ofb
             modifiers: "-WOLFSSL_AES_OFB"
+          - name: aes-ecb
+            modifiers: "-HAVE_AES_ECB"
+          - name: des-ecb
+            modifiers: "-WOLFSSL_DES_ECB"
           - name: cmac
             modifiers: "-WOLFSSL_CMAC"
           - name: chacha20-poly1305

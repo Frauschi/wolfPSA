@@ -95,8 +95,11 @@ static psa_status_t wolfpsa_cipher_check_alg(psa_algorithm_t alg)
     switch (alg) {
         case PSA_ALG_CBC_NO_PADDING:
         case PSA_ALG_CBC_PKCS7:
+            return PSA_SUCCESS;
+#if defined(HAVE_AES_ECB) || defined(WOLFSSL_DES_ECB)
         case PSA_ALG_ECB_NO_PADDING:
             return PSA_SUCCESS;
+#endif
 #ifdef WOLFSSL_AES_COUNTER
         case PSA_ALG_CTR:
         case PSA_ALG_CCM_STAR_NO_TAG:
@@ -1059,6 +1062,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 #endif
     }
     else if (ctx->alg == PSA_ALG_ECB_NO_PADDING) {
+#if defined(HAVE_AES_ECB) || defined(WOLFSSL_DES_ECB)
         {
             size_t block_size = ctx->block_size;
             size_t total = ctx->partial_len + input_length;
@@ -1088,7 +1092,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 XMEMCPY(block + ctx->partial_len, input, needed);
 
                 if (ctx->is_des3) {
-#ifndef NO_DES3
+#if !defined(NO_DES3) && defined(WOLFSSL_DES_ECB)
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_Des3_EcbEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
@@ -1102,6 +1106,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 #endif
                 }
                 else {
+#ifdef HAVE_AES_ECB
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_AesEcbEncrypt(&ctx->aes, output, block,
                                                (word32)block_size);
@@ -1110,6 +1115,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_AesEcbDecrypt(&ctx->aes, output, block,
                                                (word32)block_size);
                     }
+#else
+                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
                 }
                 if (ret != 0) {
                     return wolfpsa_cipher_fail(operation,
@@ -1126,7 +1134,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
                 if (full_blocks > 0) {
                     if (ctx->is_des3) {
-#ifndef NO_DES3
+#if !defined(NO_DES3) && defined(WOLFSSL_DES_ECB)
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_Des3_EcbEncrypt(&ctx->des3,
                                                     output + output_offset,
@@ -1145,6 +1153,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 #endif
                     }
                     else {
+#ifdef HAVE_AES_ECB
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_AesEcbEncrypt(&ctx->aes,
                                                    output + output_offset,
@@ -1157,6 +1166,10 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                    input + input_offset,
                                                    (word32)full_blocks);
                         }
+#else
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
+#endif
                     }
                     if (ret != 0) {
                         return wolfpsa_cipher_fail(operation,
@@ -1175,6 +1188,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
             *output_length = output_offset;
             return PSA_SUCCESS;
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_CTR) {
 #ifdef WOLFSSL_AES_COUNTER
