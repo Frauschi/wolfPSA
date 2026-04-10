@@ -277,6 +277,7 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     if (ctx->mac_length == 0 || ctx->full_length == 0 ||
         ctx->mac_length > ctx->full_length) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -285,11 +286,13 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
         size_t trunc_len = PSA_MAC_TRUNCATED_LENGTH(alg);
         if (trunc_len > ctx->full_length) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            wc_ForceZero(ctx, sizeof(*ctx));
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         if (trunc_len < 4u) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            wc_ForceZero(ctx, sizeof(*ctx));
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_NOT_SUPPORTED;
         }
@@ -298,6 +301,7 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
 
     if (ret != 0) {
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
