@@ -1841,6 +1841,28 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_generate_key_rejects_public_key_type(void)
+{
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_generate_key rejects ECC public key type") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_generate_key leaves key id null on public key type") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_asym_rsa_oaep_usage_policy(void)
 {
     static const uint8_t plaintext[] = "psa rsa oaep";
@@ -3256,6 +3278,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "generate_key_rejects_public_key_type") == 0) {
+        if (run_named_test("generate_key_rejects_public_key_type",
+                           test_generate_key_rejects_public_key_type) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "asym_rsa_oaep_policy") == 0) {
         if (run_named_test("asym_rsa_oaep_policy",
