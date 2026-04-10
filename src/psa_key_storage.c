@@ -824,6 +824,16 @@ psa_status_t psa_import_key(
             return status;
         }
     }
+    if (attr.type == PSA_KEY_TYPE_CHACHA20) {
+        if (attr.bits != 256) {
+            wolfpsa_debug_import_reason("invalid ChaCha20 key bits", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("ChaCha20 bits/length mismatch", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
 
     if (attr.type == PSA_KEY_TYPE_AES) {
         if (attr.bits != 128 && attr.bits != 192 &&

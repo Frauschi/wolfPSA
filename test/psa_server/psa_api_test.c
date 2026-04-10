@@ -1536,6 +1536,35 @@ static int test_chacha20_poly1305_rejects_aes_key(void)
     return TEST_OK;
 }
 
+static int test_chacha20_import_rejects_invalid_key_size(void)
+{
+    static const uint8_t key[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+    };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = 0;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_STREAM_CIPHER);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    psa_reset_key_attributes(&attrs);
+
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key rejects invalid ChaCha20 key size") != TEST_OK) {
+        if (key_id != 0) {
+            (void)psa_destroy_key(key_id);
+        }
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_asym_ecc(void)
 {
     static const uint8_t msg[] = "psa ecc sign";
@@ -2672,6 +2701,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "chacha20_aes_reject") == 0) {
         if (run_named_test("chacha20_aes_reject",
                            test_chacha20_poly1305_rejects_aes_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "chacha20_import_key_size") == 0) {
+        if (run_named_test("chacha20_import_key_size",
+                           test_chacha20_import_rejects_invalid_key_size) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
