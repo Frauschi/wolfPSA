@@ -1841,6 +1841,121 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+static int test_asym_rsa_oaep_usage_policy(void)
+{
+    static const uint8_t plaintext[] = "psa rsa oaep";
+    uint8_t exported_pub[256];
+    uint8_t ciphertext[256];
+    uint8_t decrypted[sizeof(plaintext)];
+    size_t exported_pub_len = 0;
+    size_t ciphertext_len = 0;
+    size_t decrypted_len = 0;
+    psa_key_id_t decrypt_key = 0;
+    psa_key_id_t encrypt_pub_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_KEY_PAIR);
+    psa_set_key_bits(&attrs, 1024);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DECRYPT | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &decrypt_key);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(RSA OAEP decrypt)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_export_public_key(decrypt_key, exported_pub, sizeof(exported_pub),
+                               &exported_pub_len);
+    if (check_status(st, "psa_export_public_key(RSA OAEP)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_PUBLIC_KEY);
+    psa_set_key_bits(&attrs, 1024);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, exported_pub, exported_pub_len, &encrypt_pub_key);
+    if (check_status(st, "psa_import_key(RSA OAEP public)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_asymmetric_encrypt(encrypt_pub_key, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256),
+                                plaintext, sizeof(plaintext) - 1,
+                                NULL, 0, ciphertext, sizeof(ciphertext), NULL);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_asymmetric_encrypt rejects NULL output_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_asymmetric_encrypt(decrypt_key, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256),
+                                plaintext, sizeof(plaintext) - 1,
+                                NULL, 0, ciphertext, sizeof(ciphertext),
+                                &ciphertext_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_asymmetric_encrypt enforces ENCRYPT usage") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_asymmetric_encrypt(encrypt_pub_key, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256),
+                                plaintext, sizeof(plaintext) - 1,
+                                NULL, 0, ciphertext, sizeof(ciphertext),
+                                &ciphertext_len);
+    if (check_status(st, "psa_asymmetric_encrypt(RSA OAEP)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_asymmetric_decrypt(decrypt_key, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256),
+                                ciphertext, ciphertext_len,
+                                NULL, 0, decrypted, sizeof(decrypted), NULL);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_asymmetric_decrypt rejects NULL output_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_asymmetric_decrypt(decrypt_key, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_256),
+                                ciphertext, ciphertext_len,
+                                NULL, 0, decrypted, sizeof(decrypted),
+                                &decrypted_len);
+    if (check_status(st, "psa_asymmetric_decrypt(RSA OAEP)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(decrypted_len == sizeof(plaintext) - 1,
+                   "psa_asymmetric_decrypt(RSA OAEP) length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("psa_asymmetric_encrypt/decrypt(RSA OAEP)",
+                     decrypted, plaintext, sizeof(plaintext) - 1) != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (encrypt_pub_key != 0) {
+        psa_status_t destroy_st = psa_destroy_key(encrypt_pub_key);
+        if (result == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(RSA OAEP public)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+    if (decrypt_key != 0) {
+        psa_status_t destroy_st = psa_destroy_key(decrypt_key);
+        if (result == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(RSA OAEP decrypt)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+
+    return result;
+}
+
 static int test_ed25519_signature_length(void)
 {
     static const uint8_t hash[64] = {
@@ -2916,6 +3031,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "asym_rsa_oaep_policy") == 0) {
+        if (run_named_test("asym_rsa_oaep_policy",
+                           test_asym_rsa_oaep_usage_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
         if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) == TEST_FAIL) {
