@@ -96,10 +96,10 @@ static psa_status_t wolfpsa_cipher_check_alg(psa_algorithm_t alg)
         case PSA_ALG_CBC_NO_PADDING:
         case PSA_ALG_CBC_PKCS7:
         case PSA_ALG_ECB_NO_PADDING:
-        case PSA_ALG_CCM_STAR_NO_TAG:
             return PSA_SUCCESS;
 #ifdef WOLFSSL_AES_COUNTER
         case PSA_ALG_CTR:
+        case PSA_ALG_CCM_STAR_NO_TAG:
             return PSA_SUCCESS;
 #endif
 #ifdef WOLFSSL_AES_CFB
