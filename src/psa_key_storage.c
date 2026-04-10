@@ -568,6 +568,16 @@ void psa_key_storage_cleanup(void)
     g_key_storage_initialized = 0;
 }
 
+psa_key_id_t wolfpsa_test_get_next_key_id(void)
+{
+    return g_next_key_id;
+}
+
+void wolfpsa_test_set_next_key_id(psa_key_id_t key_id)
+{
+    g_next_key_id = key_id;
+}
+
 /* Check if the key storage is initialized */
 static psa_status_t psa_key_storage_check_init(void)
 {
@@ -873,6 +883,9 @@ psa_status_t psa_import_key(
             *key_id = attr_id;
         }
         else {
+            if (g_next_key_id == PSA_KEY_ID_NULL) {
+                return PSA_ERROR_INSUFFICIENT_STORAGE;
+            }
             *key_id = g_next_key_id++;
         }
     }

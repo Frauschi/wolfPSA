@@ -89,6 +89,8 @@ WOLFPSA_1.0 {
         psa_verify_message;
         wolfpsa_free_key_data;
         wolfpsa_get_key_data;
+        wolfpsa_test_get_next_key_id;
+        wolfpsa_test_set_next_key_id;
     local:
         *;
 };

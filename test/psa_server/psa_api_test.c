@@ -38,6 +38,9 @@ typedef int (*test_fn_t)(void);
 static int tests_passed = 0;
 static int tests_skipped = 0;
 
+extern psa_key_id_t wolfpsa_test_get_next_key_id(void);
+extern void wolfpsa_test_set_next_key_id(psa_key_id_t key_id);
+
 static int check_status(psa_status_t st, const char* what)
 {
     if (st != PSA_SUCCESS) {
@@ -1985,6 +1988,57 @@ static int test_generate_key_rejects_public_key_type(void)
     return TEST_OK;
 }
 
+static int test_import_key_rejects_wrapped_volatile_key_id(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+    };
+    const psa_key_id_t original_next_key_id = wolfpsa_test_get_next_key_id();
+    const psa_key_id_t max_key_id = (psa_key_id_t)~(psa_key_id_t)0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t first_key_id = PSA_KEY_ID_NULL;
+    psa_key_id_t second_key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CTR);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    wolfpsa_test_set_next_key_id(max_key_id);
+
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &first_key_id);
+    if (check_status(st, "psa_import_key(max volatile key id)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(first_key_id == max_key_id,
+                   "psa_import_key uses max volatile key id before wrap") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &second_key_id);
+    if (check_true(st == PSA_ERROR_INSUFFICIENT_STORAGE,
+                   "psa_import_key rejects wrapped volatile key id") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(second_key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null on volatile key id wrap") != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (first_key_id != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(first_key_id);
+    }
+    wolfpsa_test_set_next_key_id(original_next_key_id);
+    return result;
+}
+
 static int test_asym_rsa_oaep_usage_policy(void)
 {
     static const uint8_t plaintext[] = "psa rsa oaep";
@@ -3410,6 +3464,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "generate_key_rejects_public_key_type") == 0) {
         if (run_named_test("generate_key_rejects_public_key_type",
                            test_generate_key_rejects_public_key_type) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_volatile_key_id_wrap") == 0) {
+        if (run_named_test("import_key_volatile_key_id_wrap",
+                           test_import_key_rejects_wrapped_volatile_key_id) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
