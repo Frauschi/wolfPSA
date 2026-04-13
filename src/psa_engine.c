@@ -271,8 +271,13 @@ psa_status_t psa_check_key_size_valid(psa_key_type_t type, size_t bits)
 
         case PSA_KEY_TYPE_HMAC:
         case PSA_KEY_TYPE_RAW_DATA:
-        case PSA_KEY_TYPE_CHACHA20:
             if (bits > 0) {
+                return PSA_SUCCESS;
+            }
+            return PSA_ERROR_INVALID_ARGUMENT;
+
+        case PSA_KEY_TYPE_CHACHA20:
+            if (bits == 256) {
                 return PSA_SUCCESS;
             }
             return PSA_ERROR_INVALID_ARGUMENT;

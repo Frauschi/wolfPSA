@@ -48,6 +48,7 @@ typedef struct wolfpsa_kdf_ctx {
     psa_algorithm_t alg;
     psa_algorithm_t ka_alg;
     size_t capacity;
+    size_t output_offset;
     uint32_t steps_set;
     uint8_t *secret;
     size_t secret_length;
@@ -67,6 +68,8 @@ typedef struct wolfpsa_kdf_ctx {
     int is_key_agreement;
     int is_raw_kdf;
     int output_started;
+    uint8_t *output_cache;
+    size_t output_cache_length;
 } wolfpsa_kdf_ctx_t;
 
 #define WOLFPSA_KDF_STEP_SECRET        (1u << 0)
@@ -134,6 +137,17 @@ static psa_status_t wolfpsa_kdf_append(uint8_t **buf, size_t *len,
     *len += data_length;
 
     return PSA_SUCCESS;
+}
+
+static const uint8_t* wolfpsa_kdf_input_ptr(const uint8_t *buf, size_t len)
+{
+    static const uint8_t empty[1] = { 0 };
+
+    if (buf == NULL && len == 0) {
+        return empty;
+    }
+
+    return buf;
 }
 
 static int wolfpsa_hash_type_from_alg(psa_algorithm_t alg)
@@ -415,6 +429,12 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
         wolfpsa_kdf_free_buf(&ctx->label, &ctx->label_length);
         wolfpsa_kdf_free_buf(&ctx->seed, &ctx->seed_length);
         wolfpsa_kdf_free_buf(&ctx->password, &ctx->password_length);
+        if (ctx->output_cache != NULL) {
+            wc_ForceZero(ctx->output_cache, ctx->output_cache_length);
+            XFREE(ctx->output_cache, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            ctx->output_cache = NULL;
+            ctx->output_cache_length = 0;
+        }
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }
@@ -553,6 +573,10 @@ psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *op
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    if (value == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     if (value > 0xFFFFFFFFu) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -614,18 +638,21 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     }
 
     key_alg = psa_get_key_algorithm(&attributes);
-    if (key_alg != PSA_ALG_NONE) {
-        if (ctx->is_key_agreement) {
-            if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
-                PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
-                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-                return PSA_ERROR_NOT_PERMITTED;
-            }
-        }
-        else if (key_alg != ctx->alg) {
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    if (ctx->is_key_agreement) {
+        if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
+            PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_NOT_PERMITTED;
         }
+    }
+    else if (key_alg != ctx->alg) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
     }
 
     status = psa_key_derivation_input_bytes(operation, step,
@@ -715,21 +742,32 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
 
     if (PSA_ALG_IS_HKDF_EXTRACT(ctx->alg)) {
         int hash_len = wc_HashGetDigestSize(hash_type);
+        uint8_t prk[WC_MAX_DIGEST_SIZE];
         if (hash_len <= 0) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if ((size_t)hash_len > sizeof(prk)) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
         if ((wolfpsa_check_word32_length(ctx->salt_length) != PSA_SUCCESS) ||
             (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS)) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        if (output_length != (size_t)hash_len) {
+        if (output_length > (size_t)hash_len) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         ret = wc_HKDF_Extract(hash_type,
                               ctx->salt, (word32)ctx->salt_length,
                               ctx->secret, (word32)ctx->secret_length,
-                              output);
-        return ret == 0 ? PSA_SUCCESS : wc_error_to_psa_status(ret);
+                              prk);
+        if (ret != 0) {
+            wc_ForceZero(prk, (size_t)hash_len);
+            return wc_error_to_psa_status(ret);
+        }
+
+        XMEMCPY(output, prk, output_length);
+        wc_ForceZero(prk, (size_t)hash_len);
+        return PSA_SUCCESS;
     }
 
     if (PSA_ALG_IS_HKDF_EXPAND(ctx->alg)) {
@@ -881,6 +919,10 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
                                        uint8_t *output,
                                        size_t output_length)
 {
+    const uint8_t *password = wolfpsa_kdf_input_ptr(ctx->password,
+                                                    ctx->password_length);
+    const uint8_t *salt = wolfpsa_kdf_input_ptr(ctx->salt, ctx->salt_length);
+
     if (PSA_ALG_IS_PBKDF2_HMAC(ctx->alg)) {
         int hash_type = wolfpsa_hash_type_from_alg(ctx->alg);
         int ret;
@@ -888,8 +930,8 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         if (hash_type == WC_HASH_TYPE_NONE) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_PBKDF2(output, ctx->password, (int)ctx->password_length,
-                        ctx->salt, (int)ctx->salt_length,
+        ret = wc_PBKDF2(output, password, (int)ctx->password_length,
+                        salt, (int)ctx->salt_length,
                         (int)ctx->cost, (int)output_length, hash_type);
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
@@ -925,7 +967,7 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             status = wc_error_to_psa_status(ret);
             goto cleanup;
         }
-        ret = wc_CmacUpdate(&cmac, ctx->password, (word32)ctx->password_length);
+        ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
         if (ret != 0) {
             wc_CmacFree(&cmac);
             status = wc_error_to_psa_status(ret);
@@ -953,7 +995,7 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
 
         blocks = (output_length + WC_AES_BLOCK_SIZE - 1) / WC_AES_BLOCK_SIZE;
         for (i = 1; i <= blocks; i++) {
-            XMEMCPY(block_input, ctx->salt, ctx->salt_length);
+            XMEMCPY(block_input, salt, ctx->salt_length);
             block_input[ctx->salt_length + 0] = (uint8_t)((i >> 24) & 0xff);
             block_input[ctx->salt_length + 1] = (uint8_t)((i >> 16) & 0xff);
             block_input[ctx->salt_length + 2] = (uint8_t)((i >> 8) & 0xff);
@@ -1037,11 +1079,37 @@ cleanup:
     return PSA_ERROR_NOT_SUPPORTED;
 }
 
+static psa_status_t wolfpsa_kdf_compute_output(wolfpsa_kdf_ctx_t *ctx,
+                                               uint8_t *output,
+                                               size_t output_length)
+{
+    if (ctx->is_raw_kdf) {
+        XMEMCPY(output, ctx->secret, output_length);
+        return PSA_SUCCESS;
+    }
+
+    if (PSA_ALG_IS_ANY_HKDF(ctx->alg)) {
+        return wolfpsa_kdf_hkdf(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_TLS12_PRF(ctx->alg)) {
+        return wolfpsa_kdf_tls12_prf(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_TLS12_PSK_TO_MS(ctx->alg)) {
+        return wolfpsa_kdf_tls12_psk_to_ms(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
+        return wolfpsa_kdf_pbkdf2(ctx, output, output_length);
+    }
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
 psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *operation,
                                              uint8_t *output,
                                              size_t output_length)
 {
     wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    size_t total_output_length;
     psa_status_t status;
 
     if (ctx == NULL || output == NULL) {
@@ -1050,7 +1118,8 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
 
     if (ctx->is_raw_kdf) {
         if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
-            output_length > ctx->secret_length) {
+            ctx->output_offset > ctx->secret_length ||
+            output_length > ctx->secret_length - ctx->output_offset) {
             return PSA_ERROR_INSUFFICIENT_DATA;
         }
     }
@@ -1101,26 +1170,66 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     }
 
     ctx->output_started = 1;
-
-    if (ctx->is_raw_kdf) {
-        XMEMCPY(output, ctx->secret, output_length);
-        return PSA_SUCCESS;
+    total_output_length = ctx->output_offset + output_length;
+    if (total_output_length < ctx->output_offset) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    if (PSA_ALG_IS_ANY_HKDF(ctx->alg)) {
-        return wolfpsa_kdf_hkdf(ctx, output, output_length);
-    }
-    if (PSA_ALG_IS_TLS12_PRF(ctx->alg)) {
-        return wolfpsa_kdf_tls12_prf(ctx, output, output_length);
-    }
-    if (PSA_ALG_IS_TLS12_PSK_TO_MS(ctx->alg)) {
-        return wolfpsa_kdf_tls12_psk_to_ms(ctx, output, output_length);
-    }
-    if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
-        return wolfpsa_kdf_pbkdf2(ctx, output, output_length);
+    if (ctx->output_cache == NULL
+        && !ctx->is_raw_kdf
+        && ctx->capacity != PSA_KEY_DERIVATION_UNLIMITED_CAPACITY
+        && ctx->output_offset == 0) {
+        /* First output_bytes() call with a bounded capacity: compute the
+         * full derivation once and cache it. Subsequent calls serve slices
+         * from the cache, avoiding O(n^2) recomputation. */
+        size_t cache_length = output_length + ctx->capacity;
+
+        ctx->output_cache = (uint8_t *)XMALLOC(cache_length, NULL,
+                                               DYNAMIC_TYPE_TMP_BUFFER);
+        if (ctx->output_cache == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        status = wolfpsa_kdf_compute_output(ctx, ctx->output_cache,
+                                            cache_length);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(ctx->output_cache, cache_length);
+            XFREE(ctx->output_cache, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            ctx->output_cache = NULL;
+            return status;
+        }
+        ctx->output_cache_length = cache_length;
     }
 
-    return PSA_ERROR_NOT_SUPPORTED;
+    if (ctx->output_cache != NULL) {
+        if (total_output_length > ctx->output_cache_length) {
+            return PSA_ERROR_INSUFFICIENT_DATA;
+        }
+        XMEMCPY(output, ctx->output_cache + ctx->output_offset, output_length);
+        status = PSA_SUCCESS;
+    }
+    else if (ctx->output_offset == 0) {
+        status = wolfpsa_kdf_compute_output(ctx, output, output_length);
+    }
+    else {
+        uint8_t *full_output;
+
+        full_output = (uint8_t *)XMALLOC(total_output_length, NULL,
+                                         DYNAMIC_TYPE_TMP_BUFFER);
+        if (full_output == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = wolfpsa_kdf_compute_output(ctx, full_output, total_output_length);
+        if (status == PSA_SUCCESS) {
+            XMEMCPY(output, full_output + ctx->output_offset, output_length);
+        }
+        wc_ForceZero(full_output, total_output_length);
+        XFREE(full_output, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    }
+    if (status == PSA_SUCCESS) {
+        ctx->output_offset += output_length;
+    }
+    return status;
 }
 
 psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *attributes,

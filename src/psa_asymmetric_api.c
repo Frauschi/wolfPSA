@@ -167,22 +167,27 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
     }
 
     key_alg = psa_get_key_algorithm(attributes);
-    if (key_alg != PSA_ALG_NONE) {
-        if (PSA_ALG_IS_KEY_AGREEMENT(alg) && PSA_ALG_IS_KEY_AGREEMENT(key_alg)) {
-            if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
-                PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {
-                wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-                *key_data = NULL;
-                *key_data_length = 0;
-                return PSA_ERROR_NOT_PERMITTED;
-            }
-        }
-        else if (key_alg != alg) {
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    if (PSA_ALG_IS_KEY_AGREEMENT(alg) && PSA_ALG_IS_KEY_AGREEMENT(key_alg)) {
+        if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
+            PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
         }
+    }
+    else if (key_alg != alg) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
     }
 
     return PSA_SUCCESS;

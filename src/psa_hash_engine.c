@@ -71,6 +71,8 @@
 #include <wolfssl/wolfcrypt/ripemd.h>
 #endif
 
+extern int wolfPSA_CryptoIsInitialized(void);
+
 typedef struct psa_hash_operation_ctx {
     psa_algorithm_t alg;           /* Hash algorithm */
     int initialized;               /* Whether operation is initialized */
@@ -113,6 +115,15 @@ static psa_hash_operation_ctx_t *psa_hash_get_ctx(psa_hash_operation_t *operatio
     }
 
     return (psa_hash_operation_ctx_t *)(uintptr_t)operation->opaque;
+}
+
+psa_status_t psa_hash_abort(psa_hash_operation_t *operation);
+
+static psa_status_t wolfpsa_hash_fail(psa_hash_operation_t *operation,
+                                      psa_status_t status)
+{
+    (void)psa_hash_abort(operation);
+    return status;
 }
 
 static const psa_hash_operation_ctx_t *psa_hash_get_ctx_const(
@@ -314,6 +325,10 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
 
     wolfpsa_trace("psa_hash_setup(alg=0x%08x)", (unsigned)alg);
 
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+
     if (!PSA_ALG_IS_HASH(alg)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -424,18 +439,18 @@ psa_status_t psa_hash_update(psa_hash_operation_t *operation,
     psa_hash_operation_ctx_t *ctx = psa_hash_get_ctx(operation);
 
     if (operation == NULL || (input == NULL && input_length > 0)) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     if (ctx == NULL || !ctx->initialized || !ctx->started) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     if (ctx->finalized) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_BAD_STATE);
     }
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     /* Update the hash context based on algorithm */
@@ -507,11 +522,11 @@ psa_status_t psa_hash_update(psa_hash_operation_t *operation,
             break;
 #endif
         default:
-            return PSA_ERROR_NOT_SUPPORTED;
+            return wolfpsa_hash_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
     
     if (ret != 0) {
-        return wc_error_to_psa_status(ret);
+        return wolfpsa_hash_fail(operation, wc_error_to_psa_status(ret));
     }
     
     return PSA_SUCCESS;
@@ -528,26 +543,26 @@ psa_status_t psa_hash_finish(psa_hash_operation_t *operation,
     psa_hash_operation_ctx_t *ctx = psa_hash_get_ctx(operation);
 
     if (operation == NULL || hash == NULL || hash_length == NULL) {
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
     if (ctx == NULL || !ctx->initialized || !ctx->started) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     if (ctx->finalized) {
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_BAD_STATE);
     }
 
     /* Get the expected hash size */
     expected_hash_size = psa_hash_get_size(ctx->alg);
     if (expected_hash_size == 0) {
-        return PSA_ERROR_NOT_SUPPORTED;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
     
     /* Check if the output buffer is large enough */
     if (hash_size < expected_hash_size) {
-        return PSA_ERROR_BUFFER_TOO_SMALL;
+        return wolfpsa_hash_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
     }
     
     /* Finalize the hash based on algorithm */
@@ -612,11 +627,11 @@ psa_status_t psa_hash_finish(psa_hash_operation_t *operation,
             break;
 #endif
         default:
-            return PSA_ERROR_NOT_SUPPORTED;
+            return wolfpsa_hash_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
     
     if (ret != 0) {
-        return wc_error_to_psa_status(ret);
+        return wolfpsa_hash_fail(operation, wc_error_to_psa_status(ret));
     }
     
     *hash_length = expected_hash_size;
@@ -679,6 +694,7 @@ psa_status_t psa_hash_abort(psa_hash_operation_t *operation)
     }
 
     psa_hash_cleanup_ctx(ctx);
+    wc_ForceZero(ctx, sizeof(*ctx));
     XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     operation->opaque = (uintptr_t)NULL;
 
@@ -822,6 +838,10 @@ psa_status_t psa_hash_compute(psa_algorithm_t alg,
 {
     psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     psa_status_t status;
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
     
     /* Set up the operation */
     status = psa_hash_setup(&operation, alg);
@@ -857,6 +877,10 @@ psa_status_t psa_hash_compare(psa_algorithm_t alg,
     uint8_t computed_hash[PSA_HASH_MAX_SIZE];
     size_t computed_hash_length;
     size_t expected_hash_size;
+
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
     
     /* Check if the reference hash length is valid */
     if (!PSA_ALG_IS_HASH(alg)) {

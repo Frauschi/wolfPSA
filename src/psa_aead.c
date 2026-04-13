@@ -78,6 +78,18 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
     return PSA_SUCCESS;
 }
 
+static const uint8_t* wolfpsa_aead_nonnull_data(const uint8_t *data,
+                                                size_t data_length)
+{
+    static const uint8_t empty = 0;
+
+    if (data == NULL && data_length == 0) {
+        return &empty;
+    }
+
+    return data;
+}
+
 static size_t wolfpsa_aead_tag_length(psa_algorithm_t alg)
 {
     return PSA_ALG_AEAD_GET_TAG_LENGTH(alg);
@@ -134,7 +146,14 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
     }
 
     key_alg = psa_get_key_algorithm(attributes);
-    if (key_alg != PSA_ALG_NONE) {
+    if (key_alg == PSA_ALG_NONE) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    {
         psa_algorithm_t key_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_alg);
         psa_algorithm_t req_base = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(alg);
         key_tag_len = wolfpsa_aead_tag_length(key_alg);
@@ -452,6 +471,9 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
                                                size_t *tag_length)
 {
     int ret;
+    size_t chacha_ciphertext_size = 0;
+    const uint8_t *input;
+    const uint8_t *aad;
 
     if (ciphertext == NULL || ciphertext_length == NULL ||
         tag == NULL || tag_length == NULL) {
@@ -468,6 +490,13 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
+        if (ctx->input_length > SIZE_MAX - ctx->tag_length) {
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+        chacha_ciphertext_size = ctx->input_length + ctx->tag_length;
+    }
+
     if (ciphertext_size < ctx->input_length) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
@@ -481,6 +510,9 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    input = wolfpsa_aead_nonnull_data(ctx->input, ctx->input_length);
+    aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
+
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
@@ -488,13 +520,14 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmEncrypt(&aes, ciphertext, ctx->input,
+            ret = wc_AesGcmEncrypt(&aes, ciphertext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -509,31 +542,45 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmEncrypt(&aes, ciphertext, ctx->input,
+            ret = wc_AesCcmEncrypt(&aes, ciphertext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
         size_t out_len = 0;
+        uint8_t *tmp = (uint8_t *)XMALLOC(chacha_ciphertext_size, NULL,
+                                          DYNAMIC_TYPE_TMP_BUFFER);
+        if (tmp == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
         ret = psa_chacha20_poly1305_encrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
-                                            ctx->aad, ctx->aad_length,
-                                            ctx->input, ctx->input_length,
-                                            ciphertext, ciphertext_size, &out_len);
+                                            aad, ctx->aad_length,
+                                            input, ctx->input_length,
+                                            tmp, chacha_ciphertext_size,
+                                            &out_len);
         if (ret != 0) {
+            wc_ForceZero(tmp, chacha_ciphertext_size);
+            XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return (psa_status_t)ret;
         }
         if (out_len < ctx->tag_length) {
+            wc_ForceZero(tmp, chacha_ciphertext_size);
+            XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_GENERIC_ERROR;
         }
-        XMEMCPY(tag, ciphertext + ctx->input_length, ctx->tag_length);
+        XMEMCPY(ciphertext, tmp, ctx->input_length);
+        XMEMCPY(tag, tmp + ctx->input_length, ctx->tag_length);
+        wc_ForceZero(tmp, chacha_ciphertext_size);
+        XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
     else {
         return PSA_ERROR_NOT_SUPPORTED;
@@ -552,6 +599,8 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
                                                size_t tag_length)
 {
     int ret;
+    const uint8_t *input;
+    const uint8_t *aad;
 
     if (plaintext == NULL || plaintext_length == NULL || tag == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -586,6 +635,9 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    input = wolfpsa_aead_nonnull_data(ctx->input, ctx->input_length);
+    aad = wolfpsa_aead_nonnull_data(ctx->aad, ctx->aad_length);
+
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
         Aes aes;
         ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
@@ -593,13 +645,14 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmDecrypt(&aes, plaintext, ctx->input,
+            ret = wc_AesGcmDecrypt(&aes, plaintext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_GCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
@@ -617,13 +670,14 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmDecrypt(&aes, plaintext, ctx->input,
+            ret = wc_AesCcmDecrypt(&aes, plaintext, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
-                                   ctx->aad, (word32)ctx->aad_length);
+                                   aad, (word32)ctx->aad_length);
         }
         wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_CCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
@@ -634,8 +688,13 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
         size_t out_len = 0;
         uint8_t *ciphertext = ctx->input;
-        size_t ciphertext_len = ctx->input_length + tag_length;
-        uint8_t *tmp = (uint8_t *)XMALLOC(ciphertext_len, NULL,
+        size_t ciphertext_len;
+        uint8_t *tmp;
+        if (ctx->input_length > SIZE_MAX - tag_length) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        ciphertext_len = ctx->input_length + tag_length;
+        tmp = (uint8_t *)XMALLOC(ciphertext_len, NULL,
                                           DYNAMIC_TYPE_TMP_BUFFER);
         if (tmp == NULL) {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
@@ -644,9 +703,10 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         XMEMCPY(tmp + ctx->input_length, tag, tag_length);
         ret = psa_chacha20_poly1305_decrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
-                                            ctx->aad, ctx->aad_length,
+                                            aad, ctx->aad_length,
                                             tmp, ciphertext_len,
                                             plaintext, plaintext_size, &out_len);
+        wc_ForceZero(tmp, ciphertext_len);
         XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (ret != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
@@ -862,6 +922,7 @@ psa_status_t psa_aead_abort(psa_aead_operation_t *operation)
             wc_ForceZero(ctx->key, ctx->key_length);
             XFREE(ctx->key, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         }
+        wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;
     }

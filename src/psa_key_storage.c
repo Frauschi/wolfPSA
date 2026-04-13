@@ -31,6 +31,7 @@
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
+#include "psa_size.h"
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
@@ -39,6 +40,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/misc.h>
+#include <limits.h>
 
 #ifdef WOLFPSA_DEBUG_IMPORT
 #include <stdio.h>
@@ -145,6 +147,15 @@ static psa_status_t psa_wc_error_to_psa_status(int ret)
     }
 
     return status;
+}
+
+static psa_status_t wolfpsa_validate_stored_key_data_length(size_t key_data_length)
+{
+    if (key_data_length == 0 || key_data_length > (size_t)INT_MAX) {
+        return PSA_ERROR_DATA_INVALID;
+    }
+
+    return PSA_SUCCESS;
 }
 
 static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
@@ -374,11 +385,18 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         psa_key_bits_t inferred_bits;
 
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr->type)) {
-            if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
-                return PSA_ERROR_INVALID_ARGUMENT;
+            if (family == PSA_ECC_FAMILY_MONTGOMERY ||
+                family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+                inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                             data_length);
             }
-            inferred_bits = wolfpsa_ecc_bits_from_length(family,
-                                                         (data_length - 1u) / 2u);
+            else {
+                if (data_length < 2u || ((data_length - 1u) & 1u) != 0u) {
+                    return PSA_ERROR_INVALID_ARGUMENT;
+                }
+                inferred_bits = wolfpsa_ecc_bits_from_length(family,
+                                                             (data_length - 1u) / 2u);
+            }
         }
         else {
             inferred_bits = wolfpsa_ecc_bits_from_length(family, data_length);
@@ -559,6 +577,16 @@ void psa_key_storage_cleanup(void)
     }
     g_volatile_keys = NULL;
     g_key_storage_initialized = 0;
+}
+
+psa_key_id_t wolfpsa_test_get_next_key_id(void)
+{
+    return g_next_key_id;
+}
+
+void wolfpsa_test_set_next_key_id(psa_key_id_t key_id)
+{
+    g_next_key_id = key_id;
 }
 
 /* Check if the key storage is initialized */
@@ -743,9 +771,10 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     }
 
     XMEMCPY(key_data_length, header + attr_length, sizeof(size_t));
-    if (*key_data_length == 0) {
+    status = wolfpsa_validate_stored_key_data_length(*key_data_length);
+    if (status != PSA_SUCCESS) {
         wolfPSA_Store_Close(store);
-        return PSA_ERROR_DATA_INVALID;
+        return status;
     }
 
     *key_data = (uint8_t*)XMALLOC(*key_data_length, NULL,
@@ -759,6 +788,7 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)*key_data_length) {
+        wc_ForceZero(*key_data, *key_data_length);
         XFREE(*key_data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         *key_data = NULL;
         *key_data_length = 0;
@@ -806,6 +836,12 @@ psa_status_t psa_import_key(
 
     attr = *attributes;
 
+    if (attr.policy.alg2 != PSA_ALG_NONE) {
+        wolfpsa_debug_import_reason("unsupported secondary algorithm", &attr,
+                                    data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
     if (attr.type == PSA_KEY_TYPE_NONE) {
         wolfpsa_debug_import_reason("unsupported key type", &attr, data_length);
         return PSA_ERROR_NOT_SUPPORTED;
@@ -815,6 +851,16 @@ psa_status_t psa_import_key(
         if (status != PSA_SUCCESS) {
             wolfpsa_debug_import_reason("missing key bits", &attr, data_length);
             return status;
+        }
+    }
+    if (attr.type == PSA_KEY_TYPE_CHACHA20) {
+        if (attr.bits != 256) {
+            wolfpsa_debug_import_reason("invalid ChaCha20 key bits", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("ChaCha20 bits/length mismatch", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
 
@@ -856,6 +902,9 @@ psa_status_t psa_import_key(
             *key_id = attr_id;
         }
         else {
+            if (g_next_key_id == PSA_KEY_ID_NULL) {
+                return PSA_ERROR_INSUFFICIENT_STORAGE;
+            }
             *key_id = g_next_key_id++;
         }
     }
@@ -1216,6 +1265,11 @@ psa_status_t psa_export_key(
 
     /* Get key data length */
     XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    status = wolfpsa_validate_stored_key_data_length(key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfPSA_Store_Close(store);
+        return status;
+    }
     
     /* Check if the output buffer is large enough */
     if (data_size < key_data_length) {
@@ -1312,6 +1366,11 @@ psa_status_t psa_export_public_key(
         }
 
         XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+        status = wolfpsa_validate_stored_key_data_length(key_data_length);
+        if (status != PSA_SUCCESS) {
+            wolfPSA_Store_Close(store);
+            return status;
+        }
         key_data = (uint8_t*)XMALLOC(key_data_length, NULL,
                                      DYNAMIC_TYPE_TMP_BUFFER);
         if (key_data == NULL) {
@@ -1689,6 +1748,11 @@ psa_status_t psa_copy_key(
                             psa_get_key_usage_flags(&dst_attr);
 
     XMEMCPY(&key_data_length, header + attr_length, sizeof(size_t));
+    status = wolfpsa_validate_stored_key_data_length(key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfPSA_Store_Close(store);
+        return status;
+    }
     buffer = (uint8_t*)XMALLOC(key_data_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (buffer == NULL) {
         wolfPSA_Store_Close(store);
