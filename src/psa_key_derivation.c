@@ -395,6 +395,11 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
         return PSA_ERROR_NOT_SUPPORTED;
     }
 #endif
+#if !defined(HAVE_PBKDF2) || defined(NO_HMAC)
+    if (PSA_ALG_IS_PBKDF2_HMAC(kdf_alg)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
 
     if (PSA_ALG_IS_ANY_HKDF(kdf_alg) || PSA_ALG_IS_TLS12_PRF(kdf_alg) ||
         PSA_ALG_IS_TLS12_PSK_TO_MS(kdf_alg) || PSA_ALG_IS_PBKDF2_HMAC(kdf_alg)) {
@@ -956,6 +961,11 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
     const uint8_t *salt = wolfpsa_kdf_input_ptr(ctx->salt, ctx->salt_length);
 
     if (PSA_ALG_IS_PBKDF2_HMAC(ctx->alg)) {
+#if !defined(HAVE_PBKDF2) || defined(NO_HMAC)
+        (void)output;
+        (void)output_length;
+        return PSA_ERROR_NOT_SUPPORTED;
+#else
         int hash_type = wolfpsa_hash_type_from_alg(ctx->alg);
         int ret;
 
@@ -969,6 +979,7 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             return wc_error_to_psa_status(ret);
         }
         return PSA_SUCCESS;
+#endif
     }
 
     if (ctx->alg == PSA_ALG_PBKDF2_AES_CMAC_PRF_128) {

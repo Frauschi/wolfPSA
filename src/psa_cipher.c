@@ -191,16 +191,14 @@ static psa_status_t wolfpsa_cipher_check_key(
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
         }
-#if !defined(NO_DES3)
         if (alg == PSA_ALG_ECB_NO_PADDING) {
-#ifndef WOLFSSL_DES_ECB
+#if defined(NO_DES3) || !defined(WOLFSSL_DES_ECB)
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
 #endif
         }
-#endif
     }
     else {
         if (attributes->type != PSA_KEY_TYPE_AES) {
@@ -407,6 +405,11 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         }
         else
 #endif
+        if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
+            ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
+                               ctx->iv, AES_ENCRYPTION);
+        }
+        else
         {
             ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                ctx->iv, AES_ENCRYPTION);
