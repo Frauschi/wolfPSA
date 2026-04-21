@@ -32,7 +32,9 @@
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/hmac.h>
+#ifdef WOLFSSL_CMAC
 #include <wolfssl/wolfcrypt/cmac.h>
+#endif
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/misc.h>
 #ifndef NO_INLINE
@@ -55,7 +57,9 @@ typedef struct wolfpsa_mac_ctx {
     wolfpsa_mac_type_t type;
     union {
         Hmac hmac;
+#ifdef WOLFSSL_CMAC
         Cmac cmac;
+#endif
     } ctx;
 } wolfpsa_mac_ctx_t;
 
@@ -139,6 +143,12 @@ static psa_status_t wolfpsa_mac_check_key(psa_key_id_t key,
         }
     }
     else if (PSA_ALG_IS_BLOCK_CIPHER_MAC(alg)) {
+#ifndef WOLFSSL_CMAC
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
         if (attributes->type != PSA_KEY_TYPE_AES) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
@@ -276,12 +286,14 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
                             (word32)key_data_length);
         ctx->type = WOLFPSA_MAC_HMAC;
     }
+#ifdef WOLFSSL_CMAC
     else if (PSA_ALG_IS_BLOCK_CIPHER_MAC(alg) &&
              PSA_ALG_FULL_LENGTH_MAC(alg) == PSA_ALG_CMAC) {
         ret = wc_InitCmac(&ctx->ctx.cmac, key_data, (word32)key_data_length,
                           WC_CMAC_AES, NULL);
         ctx->type = WOLFPSA_MAC_CMAC;
     }
+#endif
     else {
         ret = NOT_COMPILED_IN;
     }
@@ -360,9 +372,11 @@ psa_status_t psa_mac_update(psa_mac_operation_t *operation,
     if (ctx->type == WOLFPSA_MAC_HMAC) {
         ret = wc_HmacUpdate(&ctx->ctx.hmac, input, (word32)input_length);
     }
+#ifdef WOLFSSL_CMAC
     else if (ctx->type == WOLFPSA_MAC_CMAC) {
         ret = wc_CmacUpdate(&ctx->ctx.cmac, input, (word32)input_length);
     }
+#endif
     else {
         return wolfpsa_mac_fail(operation, PSA_ERROR_BAD_STATE);
     }
@@ -405,6 +419,7 @@ static psa_status_t wolfpsa_mac_final(wolfpsa_mac_ctx_t *ctx,
         }
         full_len = (word32)ctx->full_length;
     }
+#ifdef WOLFSSL_CMAC
     else if (ctx->type == WOLFPSA_MAC_CMAC) {
         full_len = (word32)ctx->full_length;
         ret = wc_CmacFinal(&ctx->ctx.cmac, full_mac, &full_len);
@@ -413,6 +428,7 @@ static psa_status_t wolfpsa_mac_final(wolfpsa_mac_ctx_t *ctx,
             goto cleanup;
         }
     }
+#endif
     else {
         status = PSA_ERROR_BAD_STATE;
         goto cleanup;
@@ -520,9 +536,11 @@ psa_status_t psa_mac_abort(psa_mac_operation_t *operation)
         if (ctx->type == WOLFPSA_MAC_HMAC) {
             wc_HmacFree(&ctx->ctx.hmac);
         }
+#ifdef WOLFSSL_CMAC
         if (ctx->type == WOLFPSA_MAC_CMAC) {
             wc_CmacFree(&ctx->ctx.cmac);
         }
+#endif
         wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         operation->opaque = (uintptr_t)NULL;

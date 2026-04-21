@@ -25,7 +25,8 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13)
+#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13) && \
+    defined(HAVE_HKDF) && !defined(NO_HMAC)
 
 #include <psa/crypto.h>
 #include "psa_size.h"
@@ -315,6 +316,93 @@ psa_status_t psa_tls13_hkdf_expand_label(
     }
     
     return PSA_SUCCESS;
+}
+
+#elif defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_TLS13)
+
+#include <psa/crypto.h>
+#include <wolfpsa/psa_tls_prf.h>
+
+psa_status_t psa_tls_prf_check_alg_supported(psa_algorithm_t alg)
+{
+    (void)alg;
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_tls13_prf(
+    psa_algorithm_t alg,
+    const uint8_t *secret, size_t secret_length,
+    const uint8_t *label, size_t label_length,
+    const uint8_t *context, size_t context_length,
+    uint8_t *output, size_t output_length)
+{
+    (void)alg;
+    (void)secret;
+    (void)secret_length;
+    (void)label;
+    (void)label_length;
+    (void)context;
+    (void)context_length;
+    (void)output;
+    (void)output_length;
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_tls13_hkdf_extract(
+    psa_algorithm_t alg,
+    const uint8_t *salt, size_t salt_length,
+    const uint8_t *ikm, size_t ikm_length,
+    uint8_t *output, size_t output_size, size_t *output_length)
+{
+    (void)alg;
+    (void)salt;
+    (void)salt_length;
+    (void)ikm;
+    (void)ikm_length;
+    (void)output;
+    (void)output_size;
+    (void)output_length;
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_tls13_hkdf_expand(
+    psa_algorithm_t alg,
+    const uint8_t *prk, size_t prk_length,
+    const uint8_t *info, size_t info_length,
+    uint8_t *output, size_t output_length)
+{
+    (void)alg;
+    (void)prk;
+    (void)prk_length;
+    (void)info;
+    (void)info_length;
+    (void)output;
+    (void)output_length;
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_tls13_hkdf_expand_label(
+    psa_algorithm_t alg,
+    const uint8_t *secret, size_t secret_length,
+    const uint8_t *label, size_t label_length,
+    const uint8_t *context, size_t context_length,
+    uint8_t *output, size_t output_length)
+{
+    (void)alg;
+    (void)secret;
+    (void)secret_length;
+    (void)label;
+    (void)label_length;
+    (void)context;
+    (void)context_length;
+    (void)output;
+    (void)output_length;
+
+    return PSA_ERROR_NOT_SUPPORTED;
 }
 
 #endif /* WOLFSSL_PSA_ENGINE && WOLFSSL_TLS13 */

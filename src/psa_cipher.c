@@ -63,7 +63,9 @@ typedef struct wolfpsa_cipher_ctx {
 #ifndef NO_DES3
     Des3 des3;
 #endif
+#ifdef HAVE_CHACHA
     ChaCha chacha;
+#endif
 } wolfpsa_cipher_ctx_t;
 
 static wolfpsa_cipher_ctx_t *wolfpsa_cipher_get_ctx(
@@ -93,13 +95,28 @@ static psa_status_t wolfpsa_cipher_check_alg(psa_algorithm_t alg)
     switch (alg) {
         case PSA_ALG_CBC_NO_PADDING:
         case PSA_ALG_CBC_PKCS7:
-        case PSA_ALG_CTR:
-        case PSA_ALG_CFB:
-        case PSA_ALG_OFB:
+            return PSA_SUCCESS;
+#if defined(HAVE_AES_ECB) || defined(WOLFSSL_DES_ECB)
         case PSA_ALG_ECB_NO_PADDING:
-        case PSA_ALG_STREAM_CIPHER:
+            return PSA_SUCCESS;
+#endif
+#ifdef WOLFSSL_AES_COUNTER
+        case PSA_ALG_CTR:
         case PSA_ALG_CCM_STAR_NO_TAG:
             return PSA_SUCCESS;
+#endif
+#ifdef WOLFSSL_AES_CFB
+        case PSA_ALG_CFB:
+            return PSA_SUCCESS;
+#endif
+#ifdef WOLFSSL_AES_OFB
+        case PSA_ALG_OFB:
+            return PSA_SUCCESS;
+#endif
+#ifdef HAVE_CHACHA
+        case PSA_ALG_STREAM_CIPHER:
+            return PSA_SUCCESS;
+#endif
         default:
             return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -151,6 +168,14 @@ static psa_status_t wolfpsa_cipher_check_key(
         return status;
     }
 
+#ifndef HAVE_CHACHA
+    if (alg == PSA_ALG_STREAM_CIPHER) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
     if (alg == PSA_ALG_STREAM_CIPHER) {
         if (attributes->type != PSA_KEY_TYPE_CHACHA20) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
@@ -166,6 +191,14 @@ static psa_status_t wolfpsa_cipher_check_key(
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
         }
+        if (alg == PSA_ALG_ECB_NO_PADDING) {
+#if defined(NO_DES3) || !defined(WOLFSSL_DES_ECB)
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+            *key_data = NULL;
+            *key_data_length = 0;
+            return PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
     }
     else {
         if (attributes->type != PSA_KEY_TYPE_AES) {
@@ -173,6 +206,14 @@ static psa_status_t wolfpsa_cipher_check_key(
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (alg == PSA_ALG_ECB_NO_PADDING) {
+#ifndef HAVE_AES_ECB
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+            *key_data = NULL;
+            *key_data_length = 0;
+            return PSA_ERROR_NOT_SUPPORTED;
+#endif
         }
     }
 
@@ -192,6 +233,7 @@ static psa_status_t wolfpsa_cipher_check_key(
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+#ifdef HAVE_CHACHA
     if (attributes->type == PSA_KEY_TYPE_CHACHA20) {
         if (*key_data_length != CHACHA_MAX_KEY_SZ) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
@@ -207,6 +249,7 @@ static psa_status_t wolfpsa_cipher_check_key(
         }
         return PSA_SUCCESS;
     }
+#endif
 
     if (attributes->type == PSA_KEY_TYPE_DES) {
         if (*key_data_length != 16 && *key_data_length != 24) {
@@ -312,11 +355,14 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+#ifdef HAVE_CHACHA
     if (ctx->is_chacha) {
         ret = wc_Chacha_SetKey(&ctx->chacha, key_data,
                                (word32)key_data_length);
     }
-    else if (ctx->is_des3) {
+    else
+#endif
+    if (ctx->is_des3) {
 #ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
@@ -352,15 +398,19 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
             return wc_error_to_psa_status(ret);
         }
 
+#ifdef WOLFSSL_AES_COUNTER
         if (alg == PSA_ALG_CTR || alg == PSA_ALG_CFB) {
             ret = wc_AesCtrSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                   ctx->iv, AES_ENCRYPTION);
         }
-        else if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
+        else
+#endif
+        if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
             ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                ctx->iv, AES_ENCRYPTION);
         }
-        else {
+        else
+        {
             ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                ctx->iv, AES_ENCRYPTION);
         }
@@ -454,11 +504,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+#ifdef HAVE_CHACHA
     if (ctx->is_chacha) {
         ret = wc_Chacha_SetKey(&ctx->chacha, key_data,
                                (word32)key_data_length);
     }
-    else if (ctx->is_des3) {
+    else
+#endif
+    if (ctx->is_des3) {
 #ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
@@ -494,11 +547,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
             return wc_error_to_psa_status(ret);
         }
 
+#ifdef WOLFSSL_AES_COUNTER
         if (alg == PSA_ALG_CTR || alg == PSA_ALG_CFB) {
             ret = wc_AesCtrSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                   ctx->iv, AES_ENCRYPTION);
         }
-        else if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
+        else
+#endif
+        if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
             ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                ctx->iv, AES_ENCRYPTION);
         }
@@ -558,6 +614,7 @@ psa_status_t psa_cipher_set_iv(psa_cipher_operation_t *operation,
     }
 
     if (ctx->alg == PSA_ALG_STREAM_CIPHER) {
+#ifdef HAVE_CHACHA
         if (iv_length != WOLFPSA_CHACHA20_IV_BYTES) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
@@ -565,6 +622,9 @@ psa_status_t psa_cipher_set_iv(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
+#else
+        return PSA_ERROR_NOT_SUPPORTED;
+#endif
     }
     else if (ctx->alg == PSA_ALG_CCM_STAR_NO_TAG) {
         uint8_t counter[AES_BLOCK_SIZE];
@@ -1001,6 +1061,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         }
     }
     else if (ctx->alg == PSA_ALG_CCM_STAR_NO_TAG) {
+#ifdef WOLFSSL_AES_COUNTER
         if (!ctx->iv_set) {
             return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
@@ -1017,8 +1078,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         }
         *output_length = input_length;
         return PSA_SUCCESS;
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_ECB_NO_PADDING) {
+#if defined(HAVE_AES_ECB) || defined(WOLFSSL_DES_ECB)
         {
             size_t block_size = ctx->block_size;
             size_t total = ctx->partial_len + input_length;
@@ -1048,7 +1113,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 XMEMCPY(block + ctx->partial_len, input, needed);
 
                 if (ctx->is_des3) {
-#ifndef NO_DES3
+#if !defined(NO_DES3) && defined(WOLFSSL_DES_ECB)
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_Des3_EcbEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
@@ -1062,6 +1127,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 #endif
                 }
                 else {
+#ifdef HAVE_AES_ECB
                     if (ctx->direction == AES_ENCRYPTION) {
                         ret = wc_AesEcbEncrypt(&ctx->aes, output, block,
                                                (word32)block_size);
@@ -1070,6 +1136,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_AesEcbDecrypt(&ctx->aes, output, block,
                                                (word32)block_size);
                     }
+#else
+                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
                 }
                 if (ret != 0) {
                     return wolfpsa_cipher_fail(operation,
@@ -1086,7 +1155,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 
                 if (full_blocks > 0) {
                     if (ctx->is_des3) {
-#ifndef NO_DES3
+#if !defined(NO_DES3) && defined(WOLFSSL_DES_ECB)
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_Des3_EcbEncrypt(&ctx->des3,
                                                     output + output_offset,
@@ -1105,6 +1174,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
 #endif
                     }
                     else {
+#ifdef HAVE_AES_ECB
                         if (ctx->direction == AES_ENCRYPTION) {
                             ret = wc_AesEcbEncrypt(&ctx->aes,
                                                    output + output_offset,
@@ -1117,6 +1187,10 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                    input + input_offset,
                                                    (word32)full_blocks);
                         }
+#else
+                        return wolfpsa_cipher_fail(operation,
+                                                   PSA_ERROR_NOT_SUPPORTED);
+#endif
                     }
                     if (ret != 0) {
                         return wolfpsa_cipher_fail(operation,
@@ -1135,8 +1209,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
             *output_length = output_offset;
             return PSA_SUCCESS;
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_CTR) {
+#ifdef WOLFSSL_AES_COUNTER
         if (!ctx->iv_set) {
             return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
@@ -1148,8 +1226,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_CFB) {
+#ifdef WOLFSSL_AES_CFB
         if (!ctx->iv_set) {
             return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
@@ -1167,8 +1249,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_OFB) {
+#ifdef WOLFSSL_AES_OFB
         if (!ctx->iv_set) {
             return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
@@ -1186,8 +1272,12 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else if (ctx->alg == PSA_ALG_STREAM_CIPHER) {
+#ifdef HAVE_CHACHA
         if (!ctx->iv_set) {
             return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
         }
@@ -1199,6 +1289,9 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         if (ret != 0) {
             return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
         }
+#else
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+#endif
     }
     else {
         return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
