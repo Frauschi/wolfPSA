@@ -174,6 +174,7 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+    /* Algorithm match checks */
     if (PSA_ALG_IS_KEY_AGREEMENT(alg) && PSA_ALG_IS_KEY_AGREEMENT(key_alg)) {
         if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
             PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {

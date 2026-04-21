@@ -643,6 +643,7 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
         return PSA_ERROR_NOT_PERMITTED;
     }
 
+    /* Algorithm match checks */
     if (ctx->is_key_agreement) {
         if (!PSA_ALG_IS_KEY_AGREEMENT(key_alg) ||
             PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) != ctx->alg) {
@@ -755,6 +756,18 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
         }
         if (output_length > (size_t)hash_len) {
             return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (output_length < (size_t)hash_len) {
+            uint8_t tmp[WC_MAX_DIGEST_SIZE];
+            ret = wc_HKDF_Extract(hash_type,
+                                  ctx->salt, (word32)ctx->salt_length,
+                                  ctx->secret, (word32)ctx->secret_length,
+                                  tmp);
+            if (ret == 0) {
+                XMEMCPY(output, tmp, output_length);
+            }
+            wc_ForceZero(tmp, sizeof(tmp));
+            return ret == 0 ? PSA_SUCCESS : wc_error_to_psa_status(ret);
         }
         ret = wc_HKDF_Extract(hash_type,
                               ctx->salt, (word32)ctx->salt_length,

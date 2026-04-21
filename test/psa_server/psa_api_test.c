@@ -2788,6 +2788,726 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_mac_alg_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import HMAC key bound to SHA-256 */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC-SHA256 key)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Attempt HMAC-SHA-512 with a SHA-256 key -- must be rejected */
+    st = psa_mac_sign_setup(&op, key_id, PSA_ALG_HMAC(PSA_ALG_SHA_512));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "mac_sign_setup rejects HMAC alg mismatch") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(mac mismatch)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_aead_alg_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b
+    };
+    static const uint8_t pt[] = "hello";
+    uint8_t ct[64];
+    size_t ct_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import AES key bound to GCM */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM key)") != TEST_OK) return TEST_FAIL;
+
+    /* Attempt CCM with a GCM key -- must be rejected */
+    st = psa_aead_encrypt(key_id, PSA_ALG_CCM,
+                          nonce, sizeof(nonce), NULL, 0,
+                          pt, sizeof(pt) - 1,
+                          ct, sizeof(ct), &ct_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "aead_encrypt rejects GCM key for CCM") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(aead mismatch)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_kdf_key_agreement_derive_check(void)
+{
+    psa_key_id_t key_with = 0, key_without = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
+    uint8_t pub[128];
+    size_t pub_len = 0;
+    psa_status_t st;
+
+    /* Generate ECC key WITH DERIVE */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &key_with);
+    if (check_status(st, "psa_generate_key(ECDH+DERIVE)") != TEST_OK)
+        return TEST_FAIL;
+
+    st = psa_export_public_key(key_with, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "export_pub(ECDH)") != TEST_OK) {
+        (void)psa_destroy_key(key_with);
+        return TEST_FAIL;
+    }
+
+    /* Test 1: key_agreement with DERIVE flag should succeed */
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "kdf_setup(ka)") != TEST_OK) goto fail;
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          key_with, pub, pub_len);
+    if (check_status(st, "kdf_key_agreement with DERIVE") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_with);
+
+    /* Generate ECC key WITHOUT DERIVE */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &key_without);
+    if (check_status(st, "psa_generate_key(ECDH no-DERIVE)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Test 2: key_agreement without DERIVE must fail */
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "kdf_setup(ka no-derive)") != TEST_OK) goto fail2;
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          key_without, pub, pub_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "kdf_key_agreement rejects key without DERIVE") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        goto fail2;
+    }
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_without);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_with);
+    return TEST_FAIL;
+fail2:
+    psa_key_derivation_abort(&op);
+    (void)psa_destroy_key(key_without);
+    return TEST_FAIL;
+}
+
+static int test_kdf_input_key_checks(void)
+{
+    static const uint8_t ikm[16] = {
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b
+    };
+    psa_key_id_t derive_key = 0;
+    psa_key_id_t no_derive_key = 0;
+    psa_key_id_t aes_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_status_t st;
+
+    /* Test 1: DERIVE key with correct usage -- should succeed */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &derive_key);
+    if (check_status(st, "psa_import_key(DERIVE)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(input_key test)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      derive_key);
+    if (check_status(st, "kdf_input_key(DERIVE key)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op);
+
+    /* Test 2: key lacking DERIVE usage -- must fail NOT_PERMITTED */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &no_derive_key);
+    if (check_status(st, "psa_import_key(no DERIVE)") != TEST_OK) goto fail;
+
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(no-derive)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt(no-derive)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      no_derive_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "kdf_input_key rejects key without DERIVE") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        goto fail;
+    }
+    psa_key_derivation_abort(&op);
+
+    /* Test 3: AES key for SECRET step -- must fail INVALID_ARGUMENT */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &aes_key);
+    if (check_status(st, "psa_import_key(AES for KDF)") != TEST_OK) goto fail;
+
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(aes)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        ikm, sizeof(ikm));
+    if (check_status(st, "kdf_input_salt(aes)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      aes_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "kdf_input_key rejects AES key for SECRET") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        goto fail;
+    }
+    psa_key_derivation_abort(&op);
+
+    (void)psa_destroy_key(derive_key);
+    (void)psa_destroy_key(no_derive_key);
+    (void)psa_destroy_key(aes_key);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op);
+    if (derive_key) (void)psa_destroy_key(derive_key);
+    if (no_derive_key) (void)psa_destroy_key(no_derive_key);
+    if (aes_key) (void)psa_destroy_key(aes_key);
+    return TEST_FAIL;
+}
+
+static int test_asymmetric_alg_mismatch(void)
+{
+    uint8_t hash[WC_SHA256_DIGEST_SIZE] = {0};
+    uint8_t sig[128];
+    size_t sig_len = 0;
+    uint8_t pub[128];
+    size_t pub_len = 0;
+    uint8_t dh_out[128];
+    size_t dh_out_len = 0;
+    psa_key_id_t ecdsa_key = 0;
+    psa_key_id_t ecdh_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Generate ECDSA key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &ecdsa_key);
+    if (check_status(st, "psa_generate_key(ECDSA)") != TEST_OK) return TEST_FAIL;
+
+    /* Get public key for use in raw_key_agreement */
+    st = psa_export_public_key(ecdsa_key, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "psa_export_public_key(ECDSA)") != TEST_OK) {
+        (void)psa_destroy_key(ecdsa_key);
+        return TEST_FAIL;
+    }
+
+    /* Attempt ECDH with ECDSA key -- must be rejected */
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, ecdsa_key,
+                               pub, pub_len,
+                               dh_out, sizeof(dh_out), &dh_out_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "raw_key_agreement rejects ECDSA key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(ecdsa_key);
+        return TEST_FAIL;
+    }
+
+    (void)psa_destroy_key(ecdsa_key);
+
+    /* Generate ECDH key */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_SIGN_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &ecdh_key);
+    if (check_status(st, "psa_generate_key(ECDH)") != TEST_OK) return TEST_FAIL;
+
+    /* Attempt sign_hash with ECDH key -- must be rejected */
+    st = psa_sign_hash(ecdh_key, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "sign_hash rejects ECDH key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(ecdh_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(ecdh_key);
+    if (check_status(st, "psa_destroy_key(ECDH)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_cipher_alg_mismatch(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+
+    /* Import AES key bound to CBC_NO_PADDING */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(CBC key)") != TEST_OK) return TEST_FAIL;
+
+    /* Attempt CTR with a CBC key -- must be rejected */
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CTR);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "cipher_encrypt_setup rejects alg mismatch") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(cipher mismatch)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_alg_none_not_permitted(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t cipher_op = psa_cipher_operation_init();
+    psa_mac_operation_t mac_op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import AES key with PSA_ALG_NONE (no algorithm set) */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT |
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
+    /* Deliberately do NOT call psa_set_key_algorithm => PSA_ALG_NONE */
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Cipher with ALG_NONE key must be rejected */
+    st = psa_cipher_encrypt_setup(&cipher_op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "cipher_encrypt_setup rejects ALG_NONE key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    /* AEAD with ALG_NONE key must be rejected */
+    {
+        uint8_t ct[32];
+        size_t ct_len = 0;
+        st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                              (const uint8_t *)"nonce123nonce", 12,
+                              NULL, 0,
+                              key, sizeof(key),
+                              ct, sizeof(ct), &ct_len);
+        if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                       "aead_encrypt rejects ALG_NONE key") != TEST_OK) {
+            printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+            (void)psa_destroy_key(key_id);
+            return TEST_FAIL;
+        }
+    }
+
+    (void)psa_destroy_key(key_id);
+
+    /* Import HMAC key with PSA_ALG_NONE */
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    /* No algorithm set => PSA_ALG_NONE */
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* MAC with ALG_NONE key must be rejected */
+    st = psa_mac_sign_setup(&mac_op, key_id,
+                            PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "mac_sign_setup rejects ALG_NONE key") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED, got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(alg_none)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_kdf_output_bytes_consecutive(void)
+{
+    /* Property: concat(output_bytes(16), output_bytes(16)) == output_bytes(32) */
+    static const uint8_t ikm[] = {
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,0x0b,
+        0x0b,0x0b,0x0b,0x0b,0x0b,0x0b
+    };
+    static const uint8_t salt[] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c
+    };
+    static const uint8_t info[] = {
+        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9
+    };
+    uint8_t split_a[16], split_b[16];
+    uint8_t whole[32];
+    psa_key_derivation_operation_t op1 = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_key_derivation_operation_t op2 = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import IKM as a DERIVE key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&attrs, 8 * sizeof(ikm));
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, ikm, sizeof(ikm), &key_id);
+    if (check_status(st, "psa_import_key(HKDF ikm)") != TEST_OK) return TEST_FAIL;
+
+    /* Operation 1: two split calls of 16 bytes each */
+    st = psa_key_derivation_setup(&op1, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op1, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt));
+    if (check_status(st, "kdf_input_salt(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op1, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      key_id);
+    if (check_status(st, "kdf_input_key(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op1, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info));
+    if (check_status(st, "kdf_input_info(split)") != TEST_OK) goto fail;
+    st = psa_key_derivation_set_capacity(&op1, 32);
+    if (check_status(st, "kdf_set_capacity(split)") != TEST_OK) goto fail;
+
+    st = psa_key_derivation_output_bytes(&op1, split_a, 16);
+    if (check_status(st, "kdf_output_bytes(split 1st 16)") != TEST_OK) goto fail;
+    st = psa_key_derivation_output_bytes(&op1, split_b, 16);
+    if (check_status(st, "kdf_output_bytes(split 2nd 16)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op1);
+
+    /* Operation 2: single call of 32 bytes */
+    st = psa_key_derivation_setup(&op2, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "kdf_setup(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op2, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt));
+    if (check_status(st, "kdf_input_salt(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_key(&op2, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                      key_id);
+    if (check_status(st, "kdf_input_key(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_input_bytes(&op2, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info));
+    if (check_status(st, "kdf_input_info(whole)") != TEST_OK) goto fail;
+    st = psa_key_derivation_set_capacity(&op2, 32);
+    if (check_status(st, "kdf_set_capacity(whole)") != TEST_OK) goto fail;
+
+    st = psa_key_derivation_output_bytes(&op2, whole, 32);
+    if (check_status(st, "kdf_output_bytes(whole 32)") != TEST_OK) goto fail;
+    psa_key_derivation_abort(&op2);
+
+    /* Verify: split_a || split_b == whole */
+    if (check_buf_eq("kdf consecutive first half", split_a, whole, 16) != TEST_OK) {
+        printf("  split first 16 bytes differ from whole\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_buf_eq("kdf consecutive second half", split_b, whole + 16, 16) != TEST_OK) {
+        printf("  split second 16 bytes differ from whole\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    (void)psa_destroy_key(key_id);
+    return TEST_OK;
+
+fail:
+    psa_key_derivation_abort(&op1);
+    psa_key_derivation_abort(&op2);
+    (void)psa_destroy_key(key_id);
+    return TEST_FAIL;
+}
+
+static int test_copy_key(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_id = 0, dst_id = 0;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_key_attributes_t got_attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* --- Test 1: copy with COPY flag succeeds --- */
+    psa_set_key_type(&src_attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&src_attrs, 128);
+    psa_set_key_usage_flags(&src_attrs,
+        PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&src_attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_id);
+    if (check_status(st, "psa_import_key(copy src)") != TEST_OK) return TEST_FAIL;
+
+    /* Destination attributes must match source type, algorithm, lifetime */
+    psa_set_key_type(&dst_attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&dst_attrs, 128);
+    psa_set_key_usage_flags(&dst_attrs,
+        PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&dst_attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_copy_key(src_id, &dst_attrs, &dst_id);
+    if (check_status(st, "psa_copy_key with COPY flag") != TEST_OK) {
+        (void)psa_destroy_key(src_id);
+        return TEST_FAIL;
+    }
+
+    /* --- Test 2: verify copied key attributes match source --- */
+    st = psa_get_key_attributes(dst_id, &got_attrs);
+    if (check_status(st, "psa_get_key_attributes(copied)") != TEST_OK) {
+        (void)psa_destroy_key(src_id);
+        (void)psa_destroy_key(dst_id);
+        return TEST_FAIL;
+    }
+    if (check_true(psa_get_key_type(&got_attrs) == PSA_KEY_TYPE_AES,
+                   "copied key type matches") != TEST_OK) {
+        (void)psa_destroy_key(src_id);
+        (void)psa_destroy_key(dst_id);
+        return TEST_FAIL;
+    }
+    if (check_true(psa_get_key_bits(&got_attrs) == 128,
+                   "copied key bits match") != TEST_OK) {
+        (void)psa_destroy_key(src_id);
+        (void)psa_destroy_key(dst_id);
+        return TEST_FAIL;
+    }
+
+    /* Verify copied key data matches original */
+    {
+        uint8_t export_buf[16];
+        size_t export_len = 0;
+        st = psa_export_key(dst_id, export_buf, sizeof(export_buf), &export_len);
+        if (check_status(st, "psa_export_key(copied)") != TEST_OK) {
+            (void)psa_destroy_key(src_id);
+            (void)psa_destroy_key(dst_id);
+            return TEST_FAIL;
+        }
+        if (check_true(export_len == sizeof(key),
+                       "exported copied key length") != TEST_OK) {
+            (void)psa_destroy_key(src_id);
+            (void)psa_destroy_key(dst_id);
+            return TEST_FAIL;
+        }
+        if (check_buf_eq("exported copied key data",
+                         export_buf, key, sizeof(key)) != TEST_OK) {
+            (void)psa_destroy_key(src_id);
+            (void)psa_destroy_key(dst_id);
+            return TEST_FAIL;
+        }
+    }
+
+    (void)psa_destroy_key(dst_id);
+    (void)psa_destroy_key(src_id);
+
+    /* --- Test 3: copy WITHOUT COPY flag must fail --- */
+    src_attrs = psa_key_attributes_init();
+    psa_set_key_type(&src_attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&src_attrs, 128);
+    psa_set_key_usage_flags(&src_attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&src_attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_id);
+    if (check_status(st, "psa_import_key(copy no-copy src)") != TEST_OK)
+        return TEST_FAIL;
+
+    dst_attrs = psa_key_attributes_init();
+    psa_set_key_type(&dst_attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&dst_attrs, 128);
+    psa_set_key_usage_flags(&dst_attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&dst_attrs, PSA_ALG_CBC_NO_PADDING);
+
+    dst_id = 0;
+    st = psa_copy_key(src_id, &dst_attrs, &dst_id);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_copy_key rejects key without COPY flag") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED (-133), got %d\n", (int)st);
+        (void)psa_destroy_key(src_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(src_id);
+    if (check_status(st, "psa_destroy_key(no-copy src)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_mac_setup_truncated_too_short(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    /* Import an HMAC key */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs,
+                          PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 2));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC trunc-short)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Truncation length 2 < 4: must be rejected after wc_HmacSetKey ran */
+    st = psa_mac_sign_setup(&op, key_id,
+                            PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 2));
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_mac_sign_setup rejects trunc < 4") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_SUPPORTED (-134), got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HMAC trunc-short)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+static int test_export_key_no_export_flag(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t export_buf[16];
+    size_t export_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    /* Import a volatile AES key with ENCRYPT only -- no EXPORT flag */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES no-export)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* psa_export_key must refuse because EXPORT usage is not set */
+    st = psa_export_key(key_id, export_buf, sizeof(export_buf), &export_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_export_key rejects key without EXPORT flag") != TEST_OK) {
+        printf("  expected PSA_ERROR_NOT_PERMITTED (-133), got %d\n", (int)st);
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(no-export)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_kdf_null_capacity(void)
 {
     size_t capacity = 0;
@@ -3809,6 +4529,242 @@ static int run_named_test(const char* name, test_fn_t fn)
     return ret;
 }
 
+/* F-2422: CCM_STAR_NO_TAG multi-part cipher must allow multiple update calls.
+ * Before the fix, the second update call would return PSA_ERROR_BAD_STATE. */
+static int test_ccm_star_no_tag_multipart(void)
+{
+    psa_status_t st;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key = 0;
+    psa_cipher_operation_t op_single;
+    psa_cipher_operation_t op_multi;
+    /* 128-bit AES key */
+    const uint8_t key_data[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+    };
+    /* 13-byte nonce required for CCM_STAR_NO_TAG */
+    const uint8_t nonce[13] = {
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6,
+        0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC
+    };
+    /* 32-byte plaintext to split into two 16-byte parts */
+    const uint8_t plaintext[32] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    uint8_t ct_single[32];
+    uint8_t ct_multi[32];
+    size_t out_len = 0;
+    size_t total_multi = 0;
+
+    /* Import AES-128 key for CCM_STAR_NO_TAG encrypt */
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_set_key_algorithm(&attr, PSA_ALG_CCM_STAR_NO_TAG);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+    st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
+    if (check_status(st, "import key for CCM_STAR_NO_TAG") != TEST_OK)
+        return TEST_FAIL;
+
+    /* --- Single-call: encrypt all 32 bytes at once --- */
+    memset(&op_single, 0, sizeof(op_single));
+    st = psa_cipher_encrypt_setup(&op_single, key, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "cipher encrypt setup (single)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_set_iv(&op_single, nonce, sizeof(nonce));
+    if (check_status(st, "cipher set iv (single)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_update(&op_single, plaintext, 32, ct_single, sizeof(ct_single),
+                           &out_len);
+    if (check_status(st, "cipher update (single 32B)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 32, "single update produced 32 bytes") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_abort(&op_single);
+    if (check_status(st, "cipher abort (single)") != TEST_OK)
+        goto cleanup;
+
+    /* --- Multi-call: encrypt as two 16-byte updates --- */
+    memset(&op_multi, 0, sizeof(op_multi));
+    st = psa_cipher_encrypt_setup(&op_multi, key, PSA_ALG_CCM_STAR_NO_TAG);
+    if (check_status(st, "cipher encrypt setup (multi)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_cipher_set_iv(&op_multi, nonce, sizeof(nonce));
+    if (check_status(st, "cipher set iv (multi)") != TEST_OK)
+        goto cleanup;
+
+    /* First 16 bytes */
+    st = psa_cipher_update(&op_multi, plaintext, 16, ct_multi, sizeof(ct_multi),
+                           &out_len);
+    if (check_status(st, "cipher update (multi part 1)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 16, "multi update part 1 produced 16 bytes") != TEST_OK)
+        goto cleanup;
+    total_multi += out_len;
+
+    /* Second 16 bytes - this is the call that would fail before the fix */
+    st = psa_cipher_update(&op_multi, plaintext + 16, 16,
+                           ct_multi + total_multi,
+                           sizeof(ct_multi) - total_multi, &out_len);
+    if (check_status(st, "cipher update (multi part 2)") != TEST_OK)
+        goto cleanup;
+    if (check_true(out_len == 16, "multi update part 2 produced 16 bytes") != TEST_OK)
+        goto cleanup;
+    total_multi += out_len;
+
+    st = psa_cipher_abort(&op_multi);
+    if (check_status(st, "cipher abort (multi)") != TEST_OK)
+        goto cleanup;
+
+    /* Verify: single-call and multi-call must produce identical ciphertext */
+    if (check_true(total_multi == 32,
+                   "multi total output is 32 bytes") != TEST_OK)
+        goto cleanup;
+    if (check_true(memcmp(ct_single, ct_multi, 32) == 0,
+                   "single-call and multi-call ciphertext match") != TEST_OK)
+        goto cleanup;
+
+    psa_destroy_key(key);
+    return TEST_OK;
+
+cleanup:
+    psa_cipher_abort(&op_single);
+    psa_cipher_abort(&op_multi);
+    psa_destroy_key(key);
+    return TEST_FAIL;
+}
+
+/* F-2416: Cipher setup error paths must ForceZero ctx before freeing.
+ * This test exercises the cipher abort path and a setup-then-abort
+ * sequence to verify no crash occurs from the cleanup code. It also
+ * verifies that a double-abort is safe (returns SUCCESS, not crash). */
+static int test_cipher_setup_cleanup(void)
+{
+    psa_status_t st;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key = 0;
+    psa_cipher_operation_t op;
+    const uint8_t key_data[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+    };
+
+    /* Import AES-128 key */
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_set_key_algorithm(&attr, PSA_ALG_CBC_NO_PADDING);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+    st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
+    if (check_status(st, "import key for cipher cleanup test") != TEST_OK)
+        return TEST_FAIL;
+
+    /* Test 1: encrypt setup + immediate abort (exercises cleanup path) */
+    memset(&op, 0, sizeof(op));
+    st = psa_cipher_encrypt_setup(&op, key, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "cipher encrypt setup for abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher abort after encrypt setup") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    /* Test 2: decrypt setup + immediate abort */
+    memset(&op, 0, sizeof(op));
+    st = psa_cipher_decrypt_setup(&op, key, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "cipher decrypt setup for abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher abort after decrypt setup") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    /* Test 3: double abort must not crash */
+    st = psa_cipher_abort(&op);
+    if (check_status(st, "cipher double abort") != TEST_OK) {
+        psa_destroy_key(key);
+        return TEST_FAIL;
+    }
+
+    psa_destroy_key(key);
+    return TEST_OK;
+}
+
+/* F-2423: HKDF-Extract must accept output_bytes smaller than hash digest.
+ * Before the fix, requesting fewer bytes than the digest returned
+ * PSA_ERROR_INVALID_ARGUMENT because of a strict equality check. */
+static int test_hkdf_extract_truncated_output(void)
+{
+    static const uint8_t secret[] = "hkdf extract truncation test";
+    static const uint8_t salt[] = "some salt";
+    uint8_t full[WC_SHA256_DIGEST_SIZE];
+    uint8_t truncated[16]; /* half the digest */
+    psa_key_derivation_operation_t op;
+    psa_status_t st;
+    int ret;
+
+    /* Compute the full extract as reference using wolfCrypt directly */
+    ret = wc_HKDF_Extract(WC_HASH_TYPE_SHA256,
+                          salt, (word32)(sizeof(salt) - 1u),
+                          secret, (word32)(sizeof(secret) - 1u),
+                          full);
+    if (ret != 0) {
+        printf("FAIL: wc_HKDF_Extract reference (%d)\n", ret);
+        return TEST_FAIL;
+    }
+
+    /* Now request only 16 bytes through PSA API */
+    memset(&op, 0, sizeof(op));
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "setup(HKDF_EXTRACT truncated)") != TEST_OK)
+        return TEST_FAIL;
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt) - 1u);
+    if (check_status(st, "input salt(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "input secret(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_output_bytes(&op, truncated, sizeof(truncated));
+    if (check_status(st, "output_bytes 16(HKDF_EXTRACT truncated)") != TEST_OK) {
+        psa_key_derivation_abort(&op);
+        return TEST_FAIL;
+    }
+
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "abort(HKDF_EXTRACT truncated)") != TEST_OK)
+        return TEST_FAIL;
+
+    /* The first 16 bytes must match the full extract */
+    if (check_buf_eq("HKDF_EXTRACT truncated output matches prefix",
+                     truncated, full, sizeof(truncated)) != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 int main(int argc, char** argv)
 {
     psa_status_t st;
@@ -4037,6 +4993,71 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
+    if (only == NULL || strcmp(only, "export_key_no_export_flag") == 0) {
+        if (run_named_test("export_key_no_export_flag",
+                           test_export_key_no_export_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_setup_truncated_too_short") == 0) {
+        if (run_named_test("mac_setup_truncated_too_short",
+                           test_mac_setup_truncated_too_short) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key") == 0) {
+        if (run_named_test("copy_key", test_copy_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_output_bytes_consecutive") == 0) {
+        if (run_named_test("kdf_output_bytes_consecutive",
+                           test_kdf_output_bytes_consecutive) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "alg_none_not_permitted") == 0) {
+        if (run_named_test("alg_none_not_permitted",
+                           test_alg_none_not_permitted) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_alg_mismatch") == 0) {
+        if (run_named_test("mac_alg_mismatch",
+                           test_mac_alg_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_alg_mismatch") == 0) {
+        if (run_named_test("aead_alg_mismatch",
+                           test_aead_alg_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_key_agreement_derive_check") == 0) {
+        if (run_named_test("kdf_key_agreement_derive_check",
+                           test_kdf_key_agreement_derive_check) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_input_key_checks") == 0) {
+        if (run_named_test("kdf_input_key_checks",
+                           test_kdf_input_key_checks) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "asymmetric_alg_mismatch") == 0) {
+        if (run_named_test("asymmetric_alg_mismatch",
+                           test_asymmetric_alg_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_alg_mismatch") == 0) {
+        if (run_named_test("cipher_alg_mismatch",
+                           test_cipher_alg_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "kdf_tls12_psk_to_ms") == 0) {
         if (run_named_test("kdf_tls12_psk_to_ms",
                            test_kdf_tls12_psk_to_ms_rfc4279_order) == TEST_FAIL) {
@@ -4074,6 +5095,24 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_output_bytes_are_sequential") == 0) {
         if (run_named_test("kdf_output_bytes_are_sequential",
                            test_kdf_output_bytes_are_sequential) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ccm_star_no_tag_multipart") == 0) {
+        if (run_named_test("ccm_star_no_tag_multipart",
+                           test_ccm_star_no_tag_multipart) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "hkdf_extract_truncated_output") == 0) {
+        if (run_named_test("hkdf_extract_truncated_output",
+                           test_hkdf_extract_truncated_output) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_setup_cleanup") == 0) {
+        if (run_named_test("cipher_setup_cleanup",
+                           test_cipher_setup_cleanup) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
