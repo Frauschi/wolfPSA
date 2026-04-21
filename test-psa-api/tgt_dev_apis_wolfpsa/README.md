@@ -14,6 +14,6 @@ against the wolfPSA implementation on a Linux host.
 
 ## License
 
-wolfPSA is Copyright (c) 2025 wolfSSL Inc. and it's distributed under GPLv3 License.
+wolfPSA is Copyright (c) 2026 wolfSSL Inc. and it's distributed under GPLv3 License.
 
 Arm PSA test suite components remain under the Apache 2.0 License.
