@@ -349,7 +349,7 @@ psa_status_t psa_aead_set_nonce(psa_aead_operation_t *operation,
     }
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
-        if (nonce_length != 12) {
+        if (nonce_length < 12 || nonce_length > PSA_AEAD_NONCE_MAX_SIZE) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
