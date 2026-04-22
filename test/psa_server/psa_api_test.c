@@ -157,9 +157,11 @@ static int test_hmac(void)
     static const uint8_t msg[] = "hmac message";
     uint8_t expected[WC_SHA256_DIGEST_SIZE];
     uint8_t out[WC_SHA256_DIGEST_SIZE];
+    uint8_t bad_mac[WC_SHA256_DIGEST_SIZE];
     size_t out_len = 0;
     psa_key_id_t key_id = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
     psa_status_t st;
     Hmac hmac;
     int ret;
@@ -192,6 +194,30 @@ static int test_hmac(void)
     if (check_status(st, "psa_mac_compute") != TEST_OK) return TEST_FAIL;
     if (check_true(out_len == sizeof(expected), "psa_mac_compute length") != TEST_OK) return TEST_FAIL;
     if (check_buf_eq("psa_mac_compute", out, expected, sizeof(expected)) != TEST_OK) return TEST_FAIL;
+
+    st = psa_mac_verify(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                        msg, sizeof(msg) - 1, out, out_len);
+    if (check_status(st, "psa_mac_verify") != TEST_OK) return TEST_FAIL;
+
+    memcpy(bad_mac, out, out_len);
+    bad_mac[0] ^= 0x01u;
+    st = psa_mac_verify(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                        msg, sizeof(msg) - 1, bad_mac, out_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_mac_verify rejects bad MAC") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_mac_verify_setup(&op, key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_mac_verify_setup") != TEST_OK) return TEST_FAIL;
+    st = psa_mac_update(&op, msg, sizeof(msg) - 1);
+    if (check_status(st, "psa_mac_update(verify)") != TEST_OK) return TEST_FAIL;
+    st = psa_mac_verify_finish(&op, out, out_len - 1);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_mac_verify_finish rejects short MAC") != TEST_OK) {
+        (void)psa_mac_abort(&op);
+        return TEST_FAIL;
+    }
 
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(HMAC)") != TEST_OK) return TEST_FAIL;
