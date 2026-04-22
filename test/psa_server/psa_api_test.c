@@ -2668,6 +2668,31 @@ cleanup:
     return result;
 }
 
+static int test_import_key_reports_volatile_store_invalid_argument(void)
+{
+    static const uint8_t key_data[1] = { 0 };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, 8);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, key_data, 0, &key_id);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key reports volatile-store invalid argument") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null on volatile-store failure") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_asym_rsa_oaep_usage_policy(void)
 {
     static const uint8_t plaintext[] = "psa rsa oaep";
@@ -5281,6 +5306,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "import_key_volatile_key_id_wrap") == 0) {
         if (run_named_test("import_key_volatile_key_id_wrap",
                            test_import_key_rejects_wrapped_volatile_key_id) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_volatile_store_invalid_argument") == 0) {
+        if (run_named_test("import_key_volatile_store_invalid_argument",
+                           test_import_key_reports_volatile_store_invalid_argument) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

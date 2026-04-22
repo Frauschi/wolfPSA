@@ -821,7 +821,7 @@ psa_status_t psa_import_key(
     uint8_t* buffer = NULL;
     size_t buffer_size;
     size_t attr_length;
-    int ret;
+    int ret = 0;
     void* store = NULL;
     psa_key_attributes_t attr;
     
@@ -934,9 +934,9 @@ psa_status_t psa_import_key(
     
     if (PSA_KEY_LIFETIME_IS_VOLATILE(attr.lifetime)) {
         status = wolfpsa_volatile_store(*key_id, &attr, data, data_length);
-        ret = status == PSA_SUCCESS
-            ? (int)(attr_length + sizeof(size_t) + data_length)
-            : -1;
+        if (status == PSA_SUCCESS) {
+            ret = (int)(attr_length + sizeof(size_t) + data_length);
+        }
     }
     else {
         /* Open and write key to persistent storage */
@@ -952,6 +952,11 @@ psa_status_t psa_import_key(
     
     wc_ForceZero(buffer, buffer_size);
     XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+
+    if (status != PSA_SUCCESS) {
+        *key_id = PSA_KEY_ID_NULL;
+        return status;
+    }
     
     if (ret < 0 || (size_t)ret != (attr_length + sizeof(size_t) + data_length)) {
         *key_id = PSA_KEY_ID_NULL;
