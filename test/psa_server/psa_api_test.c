@@ -2321,6 +2321,47 @@ cleanup_at_least:
     return ret;
 }
 
+static int test_aead_gcm_rejects_short_tags(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs,
+                          PSA_ALG_AEAD_WITH_AT_LEAST_THIS_LENGTH_TAG(
+                              PSA_ALG_GCM, 1));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM short tag policy)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id,
+                                PSA_ALG_AEAD_WITH_SHORTENED_TAG(
+                                    PSA_ALG_GCM, 1));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_encrypt_setup rejects 1-byte GCM tag") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM short tag policy)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -5370,6 +5411,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_policy_mismatch") == 0) {
         if (run_named_test("aead_policy_mismatch",
                            test_aead_policy_mismatch_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_gcm_short_tag") == 0) {
+        if (run_named_test("aead_gcm_short_tag",
+                           test_aead_gcm_rejects_short_tags) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

@@ -95,6 +95,12 @@ static size_t wolfpsa_aead_tag_length(psa_algorithm_t alg)
     return PSA_ALG_AEAD_GET_TAG_LENGTH(alg);
 }
 
+static int wolfpsa_aead_gcm_check_tag_size(size_t tag_length)
+{
+    return tag_length == 4 || tag_length == 8 ||
+           (tag_length >= 12 && tag_length <= WC_AES_BLOCK_SIZE);
+}
+
 static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
                                            psa_key_usage_t usage,
                                            psa_algorithm_t alg,
@@ -257,6 +263,14 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
 #ifdef HAVE_AESCCM
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM) &&
         wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+#endif
+#ifdef HAVE_AESGCM
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM) &&
+        !wolfpsa_aead_gcm_check_tag_size(ctx->tag_length)) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
