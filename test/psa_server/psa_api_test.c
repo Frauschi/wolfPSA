@@ -2802,6 +2802,121 @@ static int test_asym_ecc(void)
     return TEST_OK;
 }
 
+/* F-3176: exercise high-level psa_key_agreement validation and dispatch. */
+static int test_psa_key_agreement(void)
+{
+    uint8_t peer_pub[128];
+    uint8_t exported[32];
+    size_t peer_pub_len = 0;
+    size_t exported_len = 0;
+    psa_key_id_t private_key = PSA_KEY_ID_NULL;
+    psa_key_id_t peer_key = PSA_KEY_ID_NULL;
+    psa_key_id_t agreed_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_attributes_t out_attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attrs, &private_key);
+    if (check_status(st, "psa_generate_key(psa_key_agreement private)") != TEST_OK)
+        return TEST_FAIL;
+    st = psa_generate_key(&attrs, &peer_key);
+    if (check_status(st, "psa_generate_key(psa_key_agreement peer)") != TEST_OK)
+        goto cleanup;
+
+    st = psa_export_public_key(peer_key, peer_pub, sizeof(peer_pub), &peer_pub_len);
+    if (check_status(st, "psa_export_public_key(psa_key_agreement peer)") != TEST_OK)
+        goto cleanup;
+
+    psa_set_key_type(&out_attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&out_attrs, 256);
+    psa_set_key_usage_flags(&out_attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&out_attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+
+    st = psa_key_agreement(private_key, peer_pub, peer_pub_len, PSA_ALG_ECDH,
+                           &out_attrs, &agreed_key);
+    if (check_status(st, "psa_key_agreement raw ECDH to DERIVE key") != TEST_OK)
+        goto cleanup;
+    st = psa_destroy_key(agreed_key);
+    if (check_status(st, "psa_destroy_key(raw agreement output)") != TEST_OK)
+        goto cleanup;
+    agreed_key = PSA_KEY_ID_NULL;
+
+    psa_reset_key_attributes(&out_attrs);
+    psa_set_key_type(&out_attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&out_attrs, 256);
+    psa_set_key_usage_flags(&out_attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&out_attrs, PSA_ALG_CTR);
+
+    st = psa_key_agreement(private_key, peer_pub, peer_pub_len, PSA_ALG_ECDH,
+                           &out_attrs, &agreed_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_agreement rejects raw ECDH to AES key") != TEST_OK)
+        goto cleanup;
+    if (check_true(agreed_key == PSA_KEY_ID_NULL,
+                   "psa_key_agreement leaves key null for AES output") != TEST_OK)
+        goto cleanup;
+
+    st = psa_key_agreement(private_key, peer_pub, peer_pub_len, PSA_ALG_SHA_256,
+                           &out_attrs, &agreed_key);
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_key_agreement rejects non-key-agreement algorithm") != TEST_OK)
+        goto cleanup;
+    if (check_true(agreed_key == PSA_KEY_ID_NULL,
+                   "psa_key_agreement leaves key null for non-KA algorithm") != TEST_OK)
+        goto cleanup;
+
+    psa_reset_key_attributes(&out_attrs);
+    psa_set_key_type(&out_attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&out_attrs, 128);
+    psa_set_key_usage_flags(&out_attrs, PSA_KEY_USAGE_EXPORT);
+
+    st = psa_key_agreement(private_key, peer_pub, peer_pub_len,
+                           PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH,
+                                                 PSA_ALG_HKDF(PSA_ALG_SHA_256)),
+                           &out_attrs, &agreed_key);
+    if (check_status(st, "psa_key_agreement ECDH+HKDF to RAW_DATA key") != TEST_OK)
+        goto cleanup;
+
+    st = psa_export_key(agreed_key, exported, sizeof(exported), &exported_len);
+    if (check_status(st, "psa_export_key(ECDH+HKDF output)") != TEST_OK)
+        goto cleanup;
+    if (check_true(exported_len == 16,
+                   "psa_key_agreement ECDH+HKDF output length") != TEST_OK)
+        goto cleanup;
+
+    st = psa_destroy_key(agreed_key);
+    if (check_status(st, "psa_destroy_key(KDF agreement output)") != TEST_OK)
+        goto cleanup;
+    agreed_key = PSA_KEY_ID_NULL;
+
+    st = psa_destroy_key(peer_key);
+    if (check_status(st, "psa_destroy_key(psa_key_agreement peer)") != TEST_OK)
+        goto cleanup;
+    peer_key = PSA_KEY_ID_NULL;
+    st = psa_destroy_key(private_key);
+    if (check_status(st, "psa_destroy_key(psa_key_agreement private)") != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+
+cleanup:
+    if (agreed_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(agreed_key);
+    }
+    if (peer_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(peer_key);
+    }
+    if (private_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(private_key);
+    }
+    return TEST_FAIL;
+}
+
 static int test_asym_algorithm_mismatch_policy(void)
 {
     static const uint8_t msg[] = "wolfpsa asym mismatch";
@@ -5711,6 +5826,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "asym_ecc") == 0) {
         if (run_named_test("asym_ecc", test_asym_ecc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "psa_key_agreement") == 0) {
+        if (run_named_test("psa_key_agreement",
+                           test_psa_key_agreement) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "asym_algorithm_mismatch_policy") == 0) {
         if (run_named_test("asym_algorithm_mismatch_policy",

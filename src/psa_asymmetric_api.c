@@ -782,7 +782,8 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    status = psa_raw_key_agreement(alg, private_key, peer_key, peer_key_length,
+    status = psa_raw_key_agreement(PSA_ALG_KEY_AGREEMENT_GET_BASE(alg),
+                                   private_key, peer_key, peer_key_length,
                                    secret, secret_len, &output_len);
     if (status != PSA_SUCCESS) {
         wc_ForceZero(secret, secret_len);
@@ -813,6 +814,18 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
         return status;
     }
 
+    if (PSA_ALG_IS_HKDF(kdf_alg) || PSA_ALG_IS_HKDF_EXTRACT(kdf_alg)) {
+        status = psa_key_derivation_input_bytes(&kdf_op,
+                                                PSA_KEY_DERIVATION_INPUT_SALT,
+                                                NULL, 0);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(secret, secret_len);
+            XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            psa_key_derivation_abort(&kdf_op);
+            return status;
+        }
+    }
+
     status = psa_key_derivation_input_bytes(&kdf_op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                             secret, output_len);
     wc_ForceZero(secret, secret_len);
@@ -820,6 +833,16 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
     if (status != PSA_SUCCESS) {
         psa_key_derivation_abort(&kdf_op);
         return status;
+    }
+
+    if (PSA_ALG_IS_HKDF(kdf_alg) || PSA_ALG_IS_HKDF_EXPAND(kdf_alg)) {
+        status = psa_key_derivation_input_bytes(&kdf_op,
+                                                PSA_KEY_DERIVATION_INPUT_INFO,
+                                                NULL, 0);
+        if (status != PSA_SUCCESS) {
+            psa_key_derivation_abort(&kdf_op);
+            return status;
+        }
     }
 
     status = psa_key_derivation_output_key(attributes, &kdf_op, key);
