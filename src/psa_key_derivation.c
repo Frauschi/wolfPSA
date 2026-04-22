@@ -1360,6 +1360,9 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
     if (expected == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if (expected_length > INT_MAX) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     buffer = (uint8_t *)XMALLOC(expected_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (buffer == NULL) {
@@ -1371,12 +1374,6 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
         wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
-    }
-
-    if (expected_length > INT_MAX) {
-        wc_ForceZero(buffer, expected_length);
-        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (ConstantCompare(buffer, expected, (int)expected_length) != 0) {
