@@ -932,6 +932,137 @@ cleanup:
     return ret;
 }
 
+static int test_copy_key_inherits_unspecified_type(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_key_attributes_t got_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT |
+                        PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_VOLATILE);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES copy inherit source)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    psa_set_key_usage_flags(&dst_attrs,
+                            PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&dst_attrs, PSA_ALG_CBC_NO_PADDING);
+    psa_set_key_lifetime(&dst_attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_status(st, "psa_copy_key inherits unspecified type") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_get_key_attributes(copy_key, &got_attrs);
+    if (check_status(st, "psa_get_key_attributes(inherited type copy)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_type(&got_attrs) == PSA_KEY_TYPE_AES,
+                   "psa_copy_key inherited type") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_bits(&got_attrs) == 128,
+                   "psa_copy_key inherited bits") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&got_attrs);
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    return ret;
+}
+
+static int test_copy_key_persistent_inherits_unspecified_type(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t src_key = 0;
+    psa_key_id_t copy_key = PSA_KEY_ID_NULL;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 2812u;
+    psa_key_attributes_t src_attrs = psa_key_attributes_init();
+    psa_key_attributes_t dst_attrs = psa_key_attributes_init();
+    psa_key_attributes_t got_attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    setup_aes_key_attrs(&src_attrs,
+                        PSA_KEY_USAGE_COPY | PSA_KEY_USAGE_EXPORT |
+                        PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&src_attrs, persistent_id);
+    st = psa_import_key(&src_attrs, key, sizeof(key), &src_key);
+    if (check_status(st, "psa_import_key(AES persistent copy inherit source)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    psa_set_key_usage_flags(&dst_attrs,
+                            PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&dst_attrs, PSA_ALG_CBC_NO_PADDING);
+    psa_set_key_lifetime(&dst_attrs, PSA_KEY_LIFETIME_PERSISTENT);
+
+    st = psa_copy_key(src_key, &dst_attrs, &copy_key);
+    if (check_status(st, "psa_copy_key persistent inherits unspecified type") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_get_key_attributes(copy_key, &got_attrs);
+    if (check_status(st, "psa_get_key_attributes(persistent inherited type copy)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_type(&got_attrs) == PSA_KEY_TYPE_AES,
+                   "psa_copy_key persistent inherited type") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(psa_get_key_bits(&got_attrs) == 128,
+                   "psa_copy_key persistent inherited bits") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&got_attrs);
+    psa_reset_key_attributes(&dst_attrs);
+    psa_reset_key_attributes(&src_attrs);
+    if (copy_key != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(copy_key);
+    }
+    if (src_key != 0) {
+        (void)psa_destroy_key(src_key);
+    }
+    else {
+        (void)psa_destroy_key(persistent_id);
+    }
+    return ret;
+}
+
 static int test_copy_key_rejects_attribute_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -5036,6 +5167,18 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "copy_key_requires_usage") == 0) {
         if (run_named_test("copy_key_requires_usage",
                            test_copy_key_requires_copy_usage_flag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_inherits_unspecified_type") == 0) {
+        if (run_named_test("copy_key_inherits_unspecified_type",
+                           test_copy_key_inherits_unspecified_type) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "copy_key_persistent_inherits_unspecified_type") == 0) {
+        if (run_named_test("copy_key_persistent_inherits_unspecified_type",
+                           test_copy_key_persistent_inherits_unspecified_type) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

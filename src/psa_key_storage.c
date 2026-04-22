@@ -1661,7 +1661,7 @@ psa_status_t psa_copy_key(
                 return PSA_ERROR_NOT_PERMITTED;
             }
 
-            if (attributes->type != vol_attr.type) {
+            if (attributes->type != 0 && attributes->type != vol_attr.type) {
                 wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
@@ -1681,6 +1681,7 @@ psa_status_t psa_copy_key(
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
+            dst_attr.type = (dst_attr.type == 0) ? vol_attr.type : dst_attr.type;
             dst_attr.bits = (dst_attr.bits == 0) ? vol_attr.bits : dst_attr.bits;
             dst_attr.policy.usage = psa_get_key_usage_flags(&vol_attr) &
                                     psa_get_key_usage_flags(&dst_attr);
@@ -1722,7 +1723,7 @@ psa_status_t psa_copy_key(
         return PSA_ERROR_NOT_PERMITTED;
     }
 
-    if (attributes->type != src_attr.type) {
+    if (attributes->type != 0 && attributes->type != src_attr.type) {
         wolfPSA_Store_Close(store);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
@@ -1743,6 +1744,7 @@ psa_status_t psa_copy_key(
     }
 
     dst_attr = *attributes;
+    dst_attr.type = (dst_attr.type == 0) ? src_attr.type : dst_attr.type;
     dst_attr.bits = (dst_attr.bits == 0) ? src_attr.bits : dst_attr.bits;
     dst_attr.policy.usage = psa_get_key_usage_flags(&src_attr) &
                             psa_get_key_usage_flags(&dst_attr);
