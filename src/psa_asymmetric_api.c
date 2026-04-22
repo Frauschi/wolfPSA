@@ -37,6 +37,29 @@
 
 extern int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits);
 
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_SHARED_SECRET)
+psa_status_t psa_asymmetric_key_agreement_x25519(
+    const uint8_t *private_key,
+    size_t private_key_length,
+    const uint8_t *peer_key,
+    size_t peer_key_length,
+    uint8_t *output,
+    size_t output_size,
+    size_t *output_length);
+#endif
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_SHARED_SECRET)
+psa_status_t psa_asymmetric_key_agreement_x448(
+    const uint8_t *private_key,
+    size_t private_key_length,
+    const uint8_t *peer_key,
+    size_t peer_key_length,
+    uint8_t *output,
+    size_t output_size,
+    size_t *output_length);
+#endif
+
 psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                                     size_t key_bits,
                                     const uint8_t *key_buffer,
@@ -664,6 +687,35 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attributes.type)) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (PSA_KEY_TYPE_ECC_GET_FAMILY(attributes.type) ==
+        PSA_ECC_FAMILY_MONTGOMERY) {
+        if (attributes.bits == 255) {
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_SHARED_SECRET)
+            status = psa_asymmetric_key_agreement_x25519(
+                key_data, key_data_length, peer_key, peer_key_length, output,
+                output_size, output_length);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
+        else if (attributes.bits == 448) {
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_SHARED_SECRET)
+            status = psa_asymmetric_key_agreement_x448(
+                key_data, key_data_length, peer_key, peer_key_length, output,
+                output_size, output_length);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
+        else {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return status;
     }
 
     curve_id = wc_psa_get_ecc_curve_id(attributes.type, attributes.bits);

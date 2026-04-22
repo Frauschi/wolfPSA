@@ -115,6 +115,42 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
                                                    size_t output_size,
                                                    size_t *output_length);
 #endif
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_KEY_EXPORT)
+psa_status_t psa_asymmetric_generate_key_x25519(psa_key_type_t key_type,
+                                                size_t key_bits,
+                                                uint8_t *private_key,
+                                                size_t private_key_size,
+                                                size_t *private_key_length,
+                                                uint8_t *public_key,
+                                                size_t public_key_size,
+                                                size_t *public_key_length);
+psa_status_t psa_asymmetric_export_public_key_x25519(psa_key_type_t key_type,
+                                                     size_t key_bits,
+                                                     const uint8_t *key_buffer,
+                                                     size_t key_buffer_size,
+                                                     uint8_t *output,
+                                                     size_t output_size,
+                                                     size_t *output_length);
+#endif
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_KEY_EXPORT)
+psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
+                                              size_t key_bits,
+                                              uint8_t *private_key,
+                                              size_t private_key_size,
+                                              size_t *private_key_length,
+                                              uint8_t *public_key,
+                                              size_t public_key_size,
+                                              size_t *public_key_length);
+psa_status_t psa_asymmetric_export_public_key_x448(psa_key_type_t key_type,
+                                                   size_t key_bits,
+                                                   const uint8_t *key_buffer,
+                                                   size_t key_buffer_size,
+                                                   uint8_t *output,
+                                                   size_t output_size,
+                                                   size_t *output_length);
+#endif
 
 static psa_status_t psa_wc_error_to_psa_status(int ret)
 {
@@ -1091,6 +1127,12 @@ psa_status_t psa_generate_key(
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
         }
+        else if (family == PSA_ECC_FAMILY_MONTGOMERY) {
+            if (key_bits != 255 && key_bits != 448) {
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            pub_buf_size = PSA_BITS_TO_BYTES(key_bits);
+        }
 
         key_data = (uint8_t *)XMALLOC(priv_buf_size, NULL,
                                       DYNAMIC_TYPE_TMP_BUFFER);
@@ -1124,6 +1166,31 @@ psa_status_t psa_generate_key(
                                                            &priv_len,
                                                            pub_buf, pub_buf_size,
                                                            &pub_len);
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+            }
+            else {
+                status = PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        else if (family == PSA_ECC_FAMILY_MONTGOMERY) {
+            if (key_bits == 255) {
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_KEY_EXPORT)
+                status = psa_asymmetric_generate_key_x25519(
+                    key_type, key_bits, key_data, priv_buf_size, &priv_len,
+                    pub_buf, pub_buf_size, &pub_len);
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+            }
+            else if (key_bits == 448) {
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_KEY_EXPORT)
+                status = psa_asymmetric_generate_key_x448(
+                    key_type, key_bits, key_data, priv_buf_size, &priv_len,
+                    pub_buf, pub_buf_size, &pub_len);
 #else
                 status = PSA_ERROR_NOT_SUPPORTED;
 #endif
@@ -1514,6 +1581,30 @@ psa_status_t psa_export_public_key(
             #ifdef HAVE_ED448
                 if (attributes.bits == 448) {
                     status = psa_asymmetric_export_public_key_ed448(
+                        attributes.type, attributes.bits, key_data,
+                        key_data_length, data, data_size, data_length);
+                }
+                else
+            #endif
+                {
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                }
+            }
+            else if (family == PSA_ECC_FAMILY_MONTGOMERY) {
+            #if defined(HAVE_CURVE25519) && \
+                defined(HAVE_CURVE25519_KEY_IMPORT) && \
+                defined(HAVE_CURVE25519_KEY_EXPORT)
+                if (attributes.bits == 255) {
+                    status = psa_asymmetric_export_public_key_x25519(
+                        attributes.type, attributes.bits, key_data,
+                        key_data_length, data, data_size, data_length);
+                }
+                else
+            #endif
+            #if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+                defined(HAVE_CURVE448_KEY_EXPORT)
+                if (attributes.bits == 448) {
+                    status = psa_asymmetric_export_public_key_x448(
                         attributes.type, attributes.bits, key_data,
                         key_data_length, data, data_size, data_length);
                 }

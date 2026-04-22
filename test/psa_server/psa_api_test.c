@@ -58,6 +58,7 @@
 #define TEST_SKIPPED 2
 #define ED25519_PUBLIC_KEY_BYTES 32u
 #define ED448_PUBLIC_KEY_BYTES   57u
+#define X25519_KEY_BYTES         32u
 
 typedef int (*test_fn_t)(void);
 
@@ -3349,6 +3350,144 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_x25519_key_usability(void)
+{
+    static const uint8_t alice_priv[X25519_KEY_BYTES] = {
+        0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
+        0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
+        0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a,
+        0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a
+    };
+    static const uint8_t bob_priv[X25519_KEY_BYTES] = {
+        0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b,
+        0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80, 0x0e, 0xe6,
+        0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd,
+        0x1c, 0x2f, 0x8b, 0x27, 0xff, 0x88, 0xe0, 0xeb
+    };
+    uint8_t alice_pub[X25519_KEY_BYTES];
+    uint8_t bob_pub[X25519_KEY_BYTES];
+    uint8_t alice_secret[X25519_KEY_BYTES];
+    uint8_t bob_secret[X25519_KEY_BYTES];
+    uint8_t generated_pub[X25519_KEY_BYTES];
+    size_t alice_pub_len = 0;
+    size_t bob_pub_len = 0;
+    size_t alice_secret_len = 0;
+    size_t bob_secret_len = 0;
+    size_t generated_pub_len = 0;
+    psa_key_id_t alice_key = 0;
+    psa_key_id_t bob_key = 0;
+    psa_key_id_t generated_key = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs,
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY));
+    psa_set_key_bits(&attrs, 255);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDH);
+
+    st = psa_import_key(&attrs, alice_priv, sizeof(alice_priv), &alice_key);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_import_key(X25519 alice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_import_key(&attrs, bob_priv, sizeof(bob_priv), &bob_key);
+    if (check_status(st, "psa_import_key(X25519 bob)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_export_public_key(alice_key, alice_pub, sizeof(alice_pub),
+                               &alice_pub_len);
+    if (check_status(st, "psa_export_public_key(X25519 alice)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    st = psa_export_public_key(bob_key, bob_pub, sizeof(bob_pub), &bob_pub_len);
+    if (check_status(st, "psa_export_public_key(X25519 bob)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    if (check_true(alice_pub_len == X25519_KEY_BYTES &&
+                   bob_pub_len == X25519_KEY_BYTES,
+                   "psa_export_public_key(X25519) length") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, alice_key, bob_pub, bob_pub_len,
+                               alice_secret, sizeof(alice_secret),
+                               &alice_secret_len);
+    if (check_status(st, "psa_raw_key_agreement(X25519 alice)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, bob_key, alice_pub, alice_pub_len,
+                               bob_secret, sizeof(bob_secret),
+                               &bob_secret_len);
+    if (check_status(st, "psa_raw_key_agreement(X25519 bob)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    if (check_true(alice_secret_len == X25519_KEY_BYTES &&
+                   bob_secret_len == X25519_KEY_BYTES,
+                   "psa_raw_key_agreement(X25519) length") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    if (check_buf_eq("psa_raw_key_agreement(X25519)", alice_secret,
+                     bob_secret, X25519_KEY_BYTES) != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_generate_key(&attrs, &generated_key);
+    if (check_status(st, "psa_generate_key(X25519)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        return TEST_FAIL;
+    }
+    st = psa_export_public_key(generated_key, generated_pub,
+                               sizeof(generated_pub), &generated_pub_len);
+    if (check_status(st, "psa_export_public_key(generated X25519)") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        (void)psa_destroy_key(generated_key);
+        return TEST_FAIL;
+    }
+    if (check_true(generated_pub_len == X25519_KEY_BYTES,
+                   "psa_export_public_key(generated X25519) length") != TEST_OK) {
+        (void)psa_destroy_key(alice_key);
+        (void)psa_destroy_key(bob_key);
+        (void)psa_destroy_key(generated_key);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(alice_key);
+    if (check_status(st, "psa_destroy_key(X25519 alice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_destroy_key(bob_key);
+    if (check_status(st, "psa_destroy_key(X25519 bob)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_destroy_key(generated_key);
+    if (check_status(st, "psa_destroy_key(X25519 generated)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_hash_verify_rejects_bad_signature(psa_key_type_t type,
                                                   size_t bits,
                                                   psa_algorithm_t alg,
@@ -5875,6 +6014,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed448_export_pub") == 0) {
         if (run_named_test("ed448_export_pub", test_ed448_export_public_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "x25519_key_usability") == 0) {
+        if (run_named_test("x25519_key_usability",
+                           test_x25519_key_usability) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
