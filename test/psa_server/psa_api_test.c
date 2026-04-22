@@ -1153,6 +1153,10 @@ static int test_import_key_short_write_preserves_persistent_key(void)
         goto cleanup;
     }
     old_sigxfsz = signal(SIGXFSZ, SIG_IGN);
+    if (old_sigxfsz == SIG_ERR) {
+        ret = TEST_SKIPPED;
+        goto cleanup;
+    }
     short_limit.rlim_cur = 1;
     short_limit.rlim_max = old_limit.rlim_max;
     if (setrlimit(RLIMIT_FSIZE, &short_limit) != 0) {
