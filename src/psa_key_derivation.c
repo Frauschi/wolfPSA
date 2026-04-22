@@ -359,7 +359,7 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
 {
     wolfpsa_kdf_ctx_t *ctx;
     psa_algorithm_t kdf_alg = alg;
-    int hash_type;
+    int hash_type = WC_HASH_TYPE_NONE;
 
     if (operation == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -424,6 +424,20 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
         }
     }
     ctx->capacity = PSA_KEY_DERIVATION_UNLIMITED_CAPACITY;
+    if (PSA_ALG_IS_ANY_HKDF(kdf_alg)) {
+        int hash_len = wc_HashGetDigestSize(hash_type);
+
+        if (hash_len <= 0) {
+            XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (PSA_ALG_IS_HKDF_EXTRACT(kdf_alg)) {
+            ctx->capacity = (size_t)hash_len;
+        }
+        else {
+            ctx->capacity = 255u * (size_t)hash_len;
+        }
+    }
 
     operation->opaque = (uintptr_t)ctx;
     return PSA_SUCCESS;
@@ -481,6 +495,9 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *ope
         else if (capacity > (size_t)(255u * (size_t)hash_len)) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
+    }
+    if (capacity > ctx->capacity) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     ctx->capacity = capacity;
@@ -985,6 +1002,12 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         if (hash_type == WC_HASH_TYPE_NONE) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
+        if (ctx->password_length > (size_t)INT_MAX ||
+            ctx->salt_length > (size_t)INT_MAX ||
+            ctx->cost > (uint32_t)INT_MAX ||
+            output_length > (size_t)INT_MAX) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         ret = wc_PBKDF2(output, password, (int)ctx->password_length,
                         salt, (int)ctx->salt_length,
                         (int)ctx->cost, (int)output_length, hash_type);
@@ -1332,10 +1355,17 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
                                              size_t expected_length)
 {
     uint8_t *buffer;
+    uint8_t dummy = 0;
     psa_status_t status;
 
     if (expected == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (expected_length > INT_MAX) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (expected_length == 0) {
+        return psa_key_derivation_output_bytes(operation, &dummy, 0);
     }
 
     buffer = (uint8_t *)XMALLOC(expected_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -1348,12 +1378,6 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
         wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
-    }
-
-    if (expected_length > INT_MAX) {
-        wc_ForceZero(buffer, expected_length);
-        XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
-        return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (ConstantCompare(buffer, expected, (int)expected_length) != 0) {

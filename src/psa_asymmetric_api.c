@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
@@ -36,6 +37,29 @@
 #include <wolfssl/wolfcrypt/ecc.h>
 
 extern int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits);
+
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_SHARED_SECRET)
+psa_status_t psa_asymmetric_key_agreement_x25519(
+    const uint8_t *private_key,
+    size_t private_key_length,
+    const uint8_t *peer_key,
+    size_t peer_key_length,
+    uint8_t *output,
+    size_t output_size,
+    size_t *output_length);
+#endif
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_SHARED_SECRET)
+psa_status_t psa_asymmetric_key_agreement_x448(
+    const uint8_t *private_key,
+    size_t private_key_length,
+    const uint8_t *peer_key,
+    size_t peer_key_length,
+    uint8_t *output,
+    size_t output_size,
+    size_t *output_length);
+#endif
 
 psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                                     size_t key_bits,
@@ -665,6 +689,41 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(peer_key_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (PSA_KEY_TYPE_ECC_GET_FAMILY(attributes.type) ==
+        PSA_ECC_FAMILY_MONTGOMERY) {
+        if (attributes.bits == 255) {
+#if defined(HAVE_CURVE25519) && defined(HAVE_CURVE25519_KEY_IMPORT) && \
+    defined(HAVE_CURVE25519_SHARED_SECRET)
+            status = psa_asymmetric_key_agreement_x25519(
+                key_data, key_data_length, peer_key, peer_key_length, output,
+                output_size, output_length);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
+        else if (attributes.bits == 448) {
+#if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
+    defined(HAVE_CURVE448_SHARED_SECRET)
+            status = psa_asymmetric_key_agreement_x448(
+                key_data, key_data_length, peer_key, peer_key_length, output,
+                output_size, output_length);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
+        }
+        else {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return status;
+    }
 
     curve_id = wc_psa_get_ecc_curve_id(attributes.type, attributes.bits);
     if (curve_id == ECC_CURVE_INVALID) {
@@ -782,7 +841,8 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    status = psa_raw_key_agreement(alg, private_key, peer_key, peer_key_length,
+    status = psa_raw_key_agreement(PSA_ALG_KEY_AGREEMENT_GET_BASE(alg),
+                                   private_key, peer_key, peer_key_length,
                                    secret, secret_len, &output_len);
     if (status != PSA_SUCCESS) {
         wc_ForceZero(secret, secret_len);
@@ -813,6 +873,18 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
         return status;
     }
 
+    if (PSA_ALG_IS_HKDF(kdf_alg) || PSA_ALG_IS_HKDF_EXTRACT(kdf_alg)) {
+        status = psa_key_derivation_input_bytes(&kdf_op,
+                                                PSA_KEY_DERIVATION_INPUT_SALT,
+                                                NULL, 0);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(secret, secret_len);
+            XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            psa_key_derivation_abort(&kdf_op);
+            return status;
+        }
+    }
+
     status = psa_key_derivation_input_bytes(&kdf_op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                             secret, output_len);
     wc_ForceZero(secret, secret_len);
@@ -820,6 +892,16 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
     if (status != PSA_SUCCESS) {
         psa_key_derivation_abort(&kdf_op);
         return status;
+    }
+
+    if (PSA_ALG_IS_HKDF(kdf_alg) || PSA_ALG_IS_HKDF_EXPAND(kdf_alg)) {
+        status = psa_key_derivation_input_bytes(&kdf_op,
+                                                PSA_KEY_DERIVATION_INPUT_INFO,
+                                                NULL, 0);
+        if (status != PSA_SUCCESS) {
+            psa_key_derivation_abort(&kdf_op);
+            return status;
+        }
     }
 
     status = psa_key_derivation_output_key(attributes, &kdf_op, key);

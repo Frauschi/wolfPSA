@@ -252,7 +252,14 @@ static psa_status_t wolfpsa_cipher_check_key(
 #endif
 
     if (attributes->type == PSA_KEY_TYPE_DES) {
-        if (*key_data_length != 16 && *key_data_length != 24) {
+        if (*key_data_length == 16) {
+            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+            *key_data = NULL;
+            *key_data_length = 0;
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+
+        if (*key_data_length != 24) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
@@ -366,13 +373,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 #ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
-        if (key_data_length == 16) {
-            XMEMCPY(des_key, key_data, 16);
-            XMEMCPY(des_key + 16, key_data, 8);
-        }
-        else {
-            XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
-        }
+        XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {
@@ -515,13 +516,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 #ifndef NO_DES3
         byte des_key[DES3_KEY_SIZE];
 
-        if (key_data_length == 16) {
-            XMEMCPY(des_key, key_data, 16);
-            XMEMCPY(des_key + 16, key_data, 8);
-        }
-        else {
-            XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
-        }
+        XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
 
         ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
         if (ret != 0) {

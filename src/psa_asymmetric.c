@@ -718,6 +718,26 @@ int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits)
                 default:
                     return ECC_CURVE_INVALID;
             }
+
+        case PSA_ECC_FAMILY_MONTGOMERY:
+            switch (bits) {
+                case 255:
+                #ifdef HAVE_CURVE25519
+                    return ECC_X25519;
+                #else
+                    return ECC_CURVE_INVALID;
+                #endif
+
+                case 448:
+                #ifdef HAVE_CURVE448
+                    return ECC_X448;
+                #else
+                    return ECC_CURVE_INVALID;
+                #endif
+
+                default:
+                    return ECC_CURVE_INVALID;
+            }
         
         default:
             return ECC_CURVE_INVALID;

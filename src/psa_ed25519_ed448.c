@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE) && (defined(HAVE_ED25519) || defined(HAVE_ED448))
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -68,6 +69,11 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     /* Check if key type is ED25519 key pair */
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
         key_bits != 255) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -127,6 +133,11 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) &&
          key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) ||
         key_bits != 255) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
@@ -191,6 +202,10 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     /* Check if key type is ED25519 key pair */
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
         key_bits != 255) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -261,6 +276,10 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
         key_bits != 255) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize ED25519 key */
     ret = wc_ed25519_init(&ed_key);
@@ -328,6 +347,11 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
         key_bits != 448) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize ED448 key */
     ret = wc_ed448_init(&ed_key);
@@ -385,6 +409,11 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) &&
          key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) ||
         key_bits != 448) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(hash_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
@@ -448,6 +477,10 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     /* Check if key type is ED448 key pair */
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) || 
         key_bits != 448) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
@@ -516,6 +549,10 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) && 
          key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS)) || 
         key_bits != 448) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_buffer_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     

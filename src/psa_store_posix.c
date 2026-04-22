@@ -56,6 +56,7 @@ typedef struct WOLFPSA_FileStoreCtx {
     XFILE file;
     int   is_write;
     int   has_temp;
+    int   write_failed;
     char  final_name[WOLFPSA_STORE_MAX_PATH];
     char  temp_name[WOLFPSA_STORE_MAX_PATH];
 } WOLFPSA_FileStoreCtx;
@@ -435,7 +436,7 @@ void wolfPSA_Store_Close(void* store)
             ctx->file = XBADFILE;
         }
 
-        if (ctx->is_write && ctx->has_temp) {
+        if (ctx->is_write && ctx->has_temp && ctx->write_failed == 0) {
             commitRet = wolfPSA_StoreCommitTemp(ctx);
             if (commitRet != 0) {
                 wolfPSA_StoreAbortTemp(ctx);
@@ -470,7 +471,13 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
     if (ctx != NULL && ctx->file != XBADFILE && ctx->file != NULL) {
         ret = (int)XFWRITE(buffer, 1, len, ctx->file);
         if (ret == len) {
-            (void)XFFLUSH(ctx->file);
+            if (XFFLUSH(ctx->file) != 0) {
+                ctx->write_failed = 1;
+                ret = WOLFPSA_STORE_IO_ERROR;
+            }
+        }
+        else {
+            ctx->write_failed = 1;
         }
     }
 

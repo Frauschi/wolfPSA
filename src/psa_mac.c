@@ -477,6 +477,7 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
     uint8_t computed[PSA_MAC_MAX_SIZE];
     size_t computed_length = 0;
     size_t min_length;
+    size_t compare_length;
     psa_status_t status = PSA_ERROR_BAD_STATE;
 
     if (ctx == NULL) {
@@ -500,8 +501,13 @@ psa_status_t psa_mac_verify_finish(psa_mac_operation_t *operation,
         }
     }
 
+    compare_length = ctx->mac_length;
+    if ((ctx->alg & PSA_ALG_MAC_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
+        ctx->mac_length = ctx->full_length;
+    }
     status = wolfpsa_mac_final(ctx, computed, sizeof(computed),
                                &computed_length);
+    ctx->mac_length = compare_length;
     psa_mac_abort(operation);
     if (status != PSA_SUCCESS) {
         goto cleanup;
