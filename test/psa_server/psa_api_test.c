@@ -613,6 +613,44 @@ cleanup:
     return ret;
 }
 
+static int test_cipher_requires_decrypt_usage(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES encrypt-only)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_cipher_decrypt_setup requires decrypt usage") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    (void)psa_cipher_abort(&op);
+    return ret;
+}
+
 static int test_mac_rejects_algorithm_mismatch(void)
 {
     static const uint8_t hmac_key[16] = {
@@ -673,6 +711,52 @@ cleanup:
         (void)psa_destroy_key(key_id);
     }
     (void)psa_mac_abort(&op);
+    return ret;
+}
+
+static int test_mac_requires_verify_usage(void)
+{
+    static const uint8_t hmac_key[16] = {
+        0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,
+        0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    };
+    static const uint8_t msg[] = "hmac message";
+    uint8_t mac[WC_SHA256_DIGEST_SIZE];
+    size_t mac_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, sizeof(hmac_key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+
+    st = psa_import_key(&attrs, hmac_key, sizeof(hmac_key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC sign-only)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_mac_compute(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                         msg, sizeof(msg) - 1, mac, sizeof(mac), &mac_len);
+    if (check_status(st, "psa_mac_compute(sign-only)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_mac_verify(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                        msg, sizeof(msg) - 1, mac, mac_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_mac_verify requires verify usage") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
     return ret;
 }
 
@@ -2347,6 +2431,44 @@ cleanup_at_least:
     return ret;
 }
 
+static int test_aead_requires_decrypt_usage(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM encrypt-only)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_aead_decrypt_setup requires decrypt usage") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_aead_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_aead_gcm_rejects_short_tags(void)
 {
     static const uint8_t key[16] = {
@@ -3240,6 +3362,60 @@ static int test_asym_verify_rejects_bad_signatures(void)
     }
 
     return TEST_OK;
+}
+
+static int test_asym_requires_verify_usage(void)
+{
+    static const uint8_t hash[WC_SHA256_DIGEST_SIZE] = {
+        0x9f,0x86,0xd0,0x81,0x88,0x4c,0x7d,0x65,
+        0x9a,0x2f,0xea,0xa0,0xc5,0x5a,0xd0,0x15,
+        0xa3,0xbf,0x4f,0x1b,0x2b,0x0b,0x82,0x2c,
+        0x15,0xd6,0xa4,0x4f,0x00,0x5e,0x4b,0x49
+    };
+    uint8_t sig[128];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(ECDSA sign-only)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(sign-only)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                         hash, sizeof(hash), sig, sig_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_verify_hash requires verify usage") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        psa_status_t destroy_st = psa_destroy_key(key_id);
+        if (ret == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(ECDSA sign-only)") != TEST_OK) {
+            ret = TEST_FAIL;
+        }
+    }
+    return ret;
 }
 
 static int test_ml_dsa_verify_rejects_bad_signature(void)
@@ -5503,6 +5679,12 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
+    if (only == NULL || strcmp(only, "aead_requires_decrypt_usage") == 0) {
+        if (run_named_test("aead_requires_decrypt_usage",
+                           test_aead_requires_decrypt_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "aead_gcm_short_tag") == 0) {
         if (run_named_test("aead_gcm_short_tag",
                            test_aead_gcm_rejects_short_tags) == TEST_FAIL) {
@@ -5578,6 +5760,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_verify_bad_signature") == 0) {
         if (run_named_test("asym_verify_bad_signature",
                            test_asym_verify_rejects_bad_signatures) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "asym_requires_verify_usage") == 0) {
+        if (run_named_test("asym_requires_verify_usage",
+                           test_asym_requires_verify_usage) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -5680,6 +5868,18 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_alg_mismatch") == 0) {
         if (run_named_test("cipher_alg_mismatch",
                            test_cipher_alg_mismatch) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_requires_decrypt_usage") == 0) {
+        if (run_named_test("cipher_requires_decrypt_usage",
+                           test_cipher_requires_decrypt_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "mac_requires_verify_usage") == 0) {
+        if (run_named_test("mac_requires_verify_usage",
+                           test_mac_requires_verify_usage) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
