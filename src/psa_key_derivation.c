@@ -359,7 +359,7 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
 {
     wolfpsa_kdf_ctx_t *ctx;
     psa_algorithm_t kdf_alg = alg;
-    int hash_type;
+    int hash_type = WC_HASH_TYPE_NONE;
 
     if (operation == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -424,6 +424,20 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
         }
     }
     ctx->capacity = PSA_KEY_DERIVATION_UNLIMITED_CAPACITY;
+    if (PSA_ALG_IS_ANY_HKDF(kdf_alg)) {
+        int hash_len = wc_HashGetDigestSize(hash_type);
+
+        if (hash_len <= 0) {
+            XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (PSA_ALG_IS_HKDF_EXTRACT(kdf_alg)) {
+            ctx->capacity = (size_t)hash_len;
+        }
+        else {
+            ctx->capacity = 255u * (size_t)hash_len;
+        }
+    }
 
     operation->opaque = (uintptr_t)ctx;
     return PSA_SUCCESS;

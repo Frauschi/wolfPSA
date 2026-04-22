@@ -4010,6 +4010,69 @@ static int test_kdf_null_capacity(void)
     return TEST_OK;
 }
 
+static int test_kdf_hkdf_default_capacity(void)
+{
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    size_t capacity = 0;
+    psa_status_t st;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF default capacity)") != TEST_OK) {
+        goto fail;
+    }
+    st = psa_key_derivation_get_capacity(&op, &capacity);
+    if (check_status(st, "psa_key_derivation_get_capacity(HKDF)") != TEST_OK) {
+        goto fail;
+    }
+    if (check_true(capacity == 255u * WC_SHA256_DIGEST_SIZE,
+                   "HKDF default capacity is 255 * hash length") != TEST_OK) {
+        printf("  expected %u, got %lu\n",
+               255u * WC_SHA256_DIGEST_SIZE, (unsigned long)capacity);
+        goto fail;
+    }
+    (void)psa_key_derivation_abort(&op);
+
+    op = psa_key_derivation_operation_init();
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXTRACT default capacity)") != TEST_OK) {
+        goto fail;
+    }
+    st = psa_key_derivation_get_capacity(&op, &capacity);
+    if (check_status(st, "psa_key_derivation_get_capacity(HKDF_EXTRACT)") != TEST_OK) {
+        goto fail;
+    }
+    if (check_true(capacity == WC_SHA256_DIGEST_SIZE,
+                   "HKDF_EXTRACT default capacity is hash length") != TEST_OK) {
+        printf("  expected %u, got %lu\n",
+               WC_SHA256_DIGEST_SIZE, (unsigned long)capacity);
+        goto fail;
+    }
+    (void)psa_key_derivation_abort(&op);
+
+    op = psa_key_derivation_operation_init();
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF_EXPAND(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF_EXPAND default capacity)") != TEST_OK) {
+        goto fail;
+    }
+    st = psa_key_derivation_get_capacity(&op, &capacity);
+    if (check_status(st, "psa_key_derivation_get_capacity(HKDF_EXPAND)") != TEST_OK) {
+        goto fail;
+    }
+    if (check_true(capacity == 255u * WC_SHA256_DIGEST_SIZE,
+                   "HKDF_EXPAND default capacity is 255 * hash length") != TEST_OK) {
+        printf("  expected %u, got %lu\n",
+               255u * WC_SHA256_DIGEST_SIZE, (unsigned long)capacity);
+        goto fail;
+    }
+    (void)psa_key_derivation_abort(&op);
+
+    return TEST_OK;
+
+fail:
+    (void)psa_key_derivation_abort(&op);
+    return TEST_FAIL;
+}
+
 static int test_kdf_pbkdf2_zero_cost_rejected(void)
 {
     static const uint8_t password[] = "pbkdf2-password";
@@ -5500,6 +5563,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "kdf_null_capacity") == 0) {
         if (run_named_test("kdf_null_capacity", test_kdf_null_capacity) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "kdf_hkdf_default_capacity") == 0) {
+        if (run_named_test("kdf_hkdf_default_capacity",
+                           test_kdf_hkdf_default_capacity) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "kdf_pbkdf2_zero_cost") == 0) {
         if (run_named_test("kdf_pbkdf2_zero_cost",
