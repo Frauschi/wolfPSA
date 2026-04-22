@@ -2997,6 +2997,60 @@ cleanup:
     return ret;
 }
 
+static int test_rsa_pkcs1v15_raw_sign_hash_roundtrip_large_input(void)
+{
+    uint8_t input[65];
+    uint8_t sig[512];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+    size_t i;
+
+    for (i = 0; i < sizeof(input); i++) {
+        input[i] = (uint8_t)(i + 1u);
+    }
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_KEY_PAIR);
+    psa_set_key_bits(&attrs, 2048);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_RSA_PKCS1V15_SIGN_RAW);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(RSA RAW roundtrip)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, PSA_ALG_RSA_PKCS1V15_SIGN_RAW,
+                       input, sizeof(input), sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(RSA RAW 65-byte input)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_RSA_PKCS1V15_SIGN_RAW,
+                         input, sizeof(input), sig, sig_len);
+    if (check_status(st, "psa_verify_hash(RSA RAW 65-byte input)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        psa_status_t destroy_st = psa_destroy_key(key_id);
+        if (result == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(RSA RAW roundtrip)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+    return result;
+}
+
 static int test_generate_key_rejects_public_key_type(void)
 {
     psa_key_id_t key_id = PSA_KEY_ID_NULL;
@@ -5975,6 +6029,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_algorithm_mismatch_policy") == 0) {
         if (run_named_test("asym_algorithm_mismatch_policy",
                            test_asym_algorithm_mismatch_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "rsa_pkcs1v15_raw_roundtrip_large_input") == 0) {
+        if (run_named_test("rsa_pkcs1v15_raw_roundtrip_large_input",
+                           test_rsa_pkcs1v15_raw_sign_hash_roundtrip_large_input) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

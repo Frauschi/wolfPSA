@@ -272,7 +272,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     
     /* Verify signature */
     if (padding == WC_RSA_PKCSV15_PAD) {
-        byte decoded[PSA_HASH_MAX_SIZE];
+        byte decoded[RSA_MAX_SIZE/8];
 
         if (alg == PSA_ALG_RSA_PKCS1V15_SIGN_RAW) {
             ret = wc_RsaSSL_Verify_ex(signature, (word32)signature_length,
