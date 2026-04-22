@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
@@ -685,6 +686,12 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     }
 
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attributes.type)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if ((wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(peer_key_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
