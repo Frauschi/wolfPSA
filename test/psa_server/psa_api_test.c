@@ -2609,6 +2609,68 @@ static int test_chacha20_poly1305_rejects_aes_key(void)
     return TEST_OK;
 }
 
+static int test_gcm_ccm_reject_non_aes_key_type(void)
+{
+    static const uint8_t key[32] = {
+        0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,
+        0x68,0x69,0x6a,0x6b,0x6c,0x6d,0x6e,0x6f,
+        0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,
+        0x78,0x79,0x7a,0x7b,0x7c,0x7d,0x7e,0x7f
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b
+    };
+    static const uint8_t plaintext[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    uint8_t out[sizeof(plaintext) + 16];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CHACHA20_POLY1305);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(ChaCha20 for GCM/CCM mismatch)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                          nonce, sizeof(nonce),
+                          NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          out, sizeof(out), &out_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_encrypt(ChaCha20 key with GCM) rejected") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_CCM,
+                          nonce, sizeof(nonce),
+                          NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          out, sizeof(out), &out_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_encrypt(ChaCha20 key with CCM) rejected") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_chacha20_import_rejects_invalid_key_size(void)
 {
     static const uint8_t key[16] = {
@@ -6148,6 +6210,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_gcm_short_nonce") == 0) {
         if (run_named_test("aead_gcm_short_nonce",
                            test_aead_gcm_rejects_short_nonce) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_gcm_ccm_non_aes_key") == 0) {
+        if (run_named_test("aead_gcm_ccm_non_aes_key",
+                           test_gcm_ccm_reject_non_aes_key_type) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
