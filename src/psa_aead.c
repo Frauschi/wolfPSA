@@ -95,11 +95,13 @@ static size_t wolfpsa_aead_tag_length(psa_algorithm_t alg)
     return PSA_ALG_AEAD_GET_TAG_LENGTH(alg);
 }
 
+#ifdef HAVE_AESGCM
 static int wolfpsa_aead_gcm_check_tag_size(size_t tag_length)
 {
     return tag_length == 4 || tag_length == 8 ||
            (tag_length >= 12 && tag_length <= WC_AES_BLOCK_SIZE);
 }
+#endif
 
 static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
                                            psa_key_usage_t usage,

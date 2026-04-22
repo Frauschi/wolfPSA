@@ -194,10 +194,10 @@ psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Sign message */
+    /* Sign message (ML-DSA pure, empty context per FIPS 204) */
     sigLen = (word32)signature_size;
-    ret = wc_dilithium_sign_msg(message, (word32)message_length, signature,
-                               &sigLen, &key, &rng);
+    ret = wc_dilithium_sign_ctx_msg(NULL, 0, message, (word32)message_length,
+                                    signature, &sigLen, &key, &rng);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_dilithium_free(&key);
@@ -254,9 +254,10 @@ psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Verify signature */
-    ret = wc_dilithium_verify_msg(signature, (word32)signature_length, message, 
-                                 (word32)message_length, &verify_res, &key);
+    /* Verify signature (ML-DSA pure, empty context per FIPS 204) */
+    ret = wc_dilithium_verify_ctx_msg(signature, (word32)signature_length,
+                                      NULL, 0, message, (word32)message_length,
+                                      &verify_res, &key);
     
     wc_dilithium_free(&key);
     
