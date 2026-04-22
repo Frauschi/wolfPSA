@@ -20,6 +20,9 @@
  */
 #ifndef PSA_CRYPTO_PQC_H
 #define PSA_CRYPTO_PQC_H
+
+#include "psa/crypto_types.h"
+
 typedef uint8_t psa_slh_dsa_family_t;
 typedef uint8_t psa_ml_dsa_parameter_t;
 

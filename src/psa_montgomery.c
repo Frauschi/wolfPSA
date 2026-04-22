@@ -29,6 +29,7 @@
     (defined(HAVE_CURVE25519) || defined(HAVE_CURVE448))
 
 #include <psa/crypto.h>
+#include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
@@ -57,8 +58,8 @@ psa_status_t psa_asymmetric_generate_key_x25519(psa_key_type_t key_type,
     int ret;
     curve25519_key key;
     WC_RNG rng;
-    word32 priv_len = (word32)private_key_size;
-    word32 pub_len = (word32)public_key_size;
+    word32 priv_len;
+    word32 pub_len;
 
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY) ||
         key_bits != 255) {
@@ -68,6 +69,12 @@ psa_status_t psa_asymmetric_generate_key_x25519(psa_key_type_t key_type,
         public_key == NULL || public_key_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    priv_len = (word32)private_key_size;
+    pub_len = (word32)public_key_size;
 
     ret = wc_curve25519_init(&key);
     if (ret != 0) {
@@ -168,7 +175,7 @@ psa_status_t psa_asymmetric_key_agreement_x25519(
     curve25519_key priv;
     curve25519_key pub;
     uint8_t peer[CURVE25519_KEYSIZE];
-    word32 out_len = (word32)output_size;
+    word32 out_len;
 #ifdef WOLFSSL_CURVE25519_BLINDING
     WC_RNG rng;
 #endif
@@ -184,6 +191,10 @@ psa_status_t psa_asymmetric_key_agreement_x25519(
     if (output_size < CURVE25519_KEYSIZE) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
+    if (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    out_len = (word32)output_size;
 
     ret = wc_curve25519_init(&priv);
     if (ret != 0) {
@@ -254,8 +265,8 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
     int ret;
     curve448_key key;
     WC_RNG rng;
-    word32 priv_len = (word32)private_key_size;
-    word32 pub_len = (word32)public_key_size;
+    word32 priv_len;
+    word32 pub_len;
 
     if (key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY) ||
         key_bits != 448) {
@@ -265,6 +276,12 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
         public_key == NULL || public_key_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    priv_len = (word32)private_key_size;
+    pub_len = (word32)public_key_size;
 
     ret = wc_curve448_init(&key);
     if (ret != 0) {
@@ -362,7 +379,7 @@ psa_status_t psa_asymmetric_key_agreement_x448(
     int ret;
     curve448_key priv;
     curve448_key pub;
-    word32 out_len = (word32)output_size;
+    word32 out_len;
 
     if (private_key == NULL || peer_key == NULL || output == NULL ||
         output_length == NULL) {
@@ -375,6 +392,10 @@ psa_status_t psa_asymmetric_key_agreement_x448(
     if (output_size < CURVE448_KEY_SIZE) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
+    if (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    out_len = (word32)output_size;
 
     ret = wc_curve448_init(&priv);
     if (ret != 0) {
