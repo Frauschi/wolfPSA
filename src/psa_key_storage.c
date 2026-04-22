@@ -877,6 +877,10 @@ psa_status_t psa_import_key(
                                     data_length);
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if (!wolfpsa_usage_flags_valid(psa_get_key_usage_flags(&attr))) {
+        wolfpsa_debug_import_reason("invalid usage flags", &attr, data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     if (attr.type == PSA_KEY_TYPE_NONE) {
         wolfpsa_debug_import_reason("unsupported key type", &attr, data_length);

@@ -3364,6 +3364,35 @@ static int test_import_key_reports_volatile_store_invalid_argument(void)
     return TEST_OK;
 }
 
+static int test_import_key_rejects_unknown_usage_bits(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+    attrs.policy.usage = ~(psa_key_usage_t)0;
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key rejects unknown usage bits") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null on usage failure") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_asym_rsa_oaep_usage_policy(void)
 {
     static const uint8_t plaintext[] = "psa rsa oaep";
@@ -6385,6 +6414,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "import_key_volatile_store_invalid_argument") == 0) {
         if (run_named_test("import_key_volatile_store_invalid_argument",
                            test_import_key_reports_volatile_store_invalid_argument) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_unknown_usage_bits") == 0) {
+        if (run_named_test("import_key_unknown_usage_bits",
+                           test_import_key_rejects_unknown_usage_bits) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
