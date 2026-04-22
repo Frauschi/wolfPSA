@@ -4583,6 +4583,60 @@ fail:
     return TEST_FAIL;
 }
 
+static int test_kdf_set_capacity_cannot_increase_remaining_capacity(void)
+{
+    static const uint8_t secret[] = "hkdf capacity secret";
+    static const uint8_t info[] = "hkdf capacity info";
+    uint8_t output[8];
+    size_t capacity = 0;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF monotonic capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET HKDF monotonic capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO HKDF monotonic capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_set_capacity(&op, 16u);
+    if (check_status(st, "psa_key_derivation_set_capacity(initial HKDF monotonic capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_output_bytes(HKDF monotonic capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_get_capacity(&op, &capacity);
+    if (check_status(st, "psa_key_derivation_get_capacity(HKDF remaining capacity)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(capacity == 8u,
+                   "psa_key_derivation_get_capacity tracks remaining HKDF capacity") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_set_capacity(&op, 9u);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_set_capacity rejects increasing remaining capacity") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    return ret;
+}
+
 static int test_kdf_pbkdf2_zero_cost_rejected(void)
 {
     static const uint8_t password[] = "pbkdf2-password";
@@ -6152,6 +6206,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_hkdf_default_capacity") == 0) {
         if (run_named_test("kdf_hkdf_default_capacity",
                            test_kdf_hkdf_default_capacity) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_monotonic_capacity") == 0) {
+        if (run_named_test("kdf_monotonic_capacity",
+                           test_kdf_set_capacity_cannot_increase_remaining_capacity) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

@@ -496,6 +496,9 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *ope
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
+    if (capacity > ctx->capacity) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     ctx->capacity = capacity;
     return PSA_SUCCESS;
