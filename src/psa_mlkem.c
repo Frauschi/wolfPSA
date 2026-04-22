@@ -72,6 +72,9 @@ psa_status_t psa_ml_kem_generate_key(psa_ml_kem_parameter_t parameter,
     if (type < 0) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize ML-KEM key */
     ret = wc_MlKemKey_Init(&key, type, NULL, INVALID_DEVID);
@@ -162,6 +165,9 @@ psa_status_t psa_ml_kem_encapsulate(psa_ml_kem_parameter_t parameter,
     if (type < 0) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     
     /* Initialize ML-KEM key */
     ret = wc_MlKemKey_Init(&key, type, NULL, INVALID_DEVID);
@@ -238,6 +244,10 @@ psa_status_t psa_ml_kem_decapsulate(psa_ml_kem_parameter_t parameter,
     type = psa_ml_kem_parameter_to_type(parameter);
     if (type < 0) {
         return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if ((wolfpsa_check_word32_length(private_key_size) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ciphertext_size) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
     }
     
     /* Initialize ML-KEM key */
