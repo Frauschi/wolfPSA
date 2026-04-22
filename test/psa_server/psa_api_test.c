@@ -226,6 +226,72 @@ static int test_hmac(void)
     return TEST_OK;
 }
 
+static int test_mac_verify_finish_accepts_longer_at_least_length_mac(void)
+{
+    static const uint8_t key[] = {
+        0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,
+        0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    };
+    static const uint8_t msg[] = "at least length mac";
+    uint8_t expected[WC_SHA256_DIGEST_SIZE];
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+    Hmac hmac;
+    int ret;
+    int result = TEST_FAIL;
+
+    ret = wc_HmacInit(&hmac, NULL, INVALID_DEVID);
+    if (ret != 0) {
+        printf("FAIL: wc_HmacInit(at least MAC) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+    ret = wc_HmacSetKey(&hmac, WC_SHA256, key, sizeof(key));
+    if (ret != 0) {
+        wc_HmacFree(&hmac);
+        printf("FAIL: wc_HmacSetKey(at least MAC) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+    wc_HmacUpdate(&hmac, msg, (word32)sizeof(msg) - 1u);
+    wc_HmacFinal(&hmac, expected);
+    wc_HmacFree(&hmac);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, (size_t)sizeof(key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_MESSAGE);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_AT_LEAST_THIS_LENGTH_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 16));
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(HMAC at least length verify)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_mac_verify_setup(&op, key_id,
+        PSA_ALG_AT_LEAST_THIS_LENGTH_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), 16));
+    if (check_status(st, "psa_mac_verify_setup(at least length verify)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_mac_update(&op, msg, sizeof(msg) - 1u);
+    if (check_status(st, "psa_mac_update(at least length verify)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_mac_verify_finish(&op, expected, sizeof(expected));
+    if (check_status(st, "psa_mac_verify_finish accepts longer at least-length MAC") != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_mac_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
 static int test_hash_error_aborts_operation(void)
 {
     static const uint8_t msg[] = "hash error state";
@@ -6096,6 +6162,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "hmac") == 0) {
         if (run_named_test("hmac", test_hmac) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "mac_verify_finish_at_least_length") == 0) {
+        if (run_named_test("mac_verify_finish_at_least_length",
+                           test_mac_verify_finish_accepts_longer_at_least_length_mac) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "mac_error_state") == 0) {
         if (run_named_test("mac_error_state",
