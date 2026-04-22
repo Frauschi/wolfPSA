@@ -65,6 +65,9 @@ WOLFPSA_1.0 {
         psa_mac_verify;
         psa_mac_verify_finish;
         psa_mac_verify_setup;
+        psa_ml_dsa_generate_key;
+        psa_ml_dsa_sign;
+        psa_ml_dsa_verify;
         psa_pake_abort;
         psa_pake_cs_get_algorithm;
         psa_pake_cs_get_key_confirmation;

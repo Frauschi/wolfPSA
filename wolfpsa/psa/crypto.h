@@ -352,6 +352,45 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
                              const uint8_t *signature,
                              size_t signature_length);
 
+psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
+                                     uint8_t *private_key,
+                                     size_t private_key_size,
+                                     size_t *private_key_length,
+                                     uint8_t *public_key,
+                                     size_t public_key_size,
+                                     size_t *public_key_length);
+
+psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
+                             const uint8_t *private_key,
+                             size_t private_key_size,
+                             const uint8_t *message,
+                             size_t message_length,
+                             uint8_t *signature,
+                             size_t signature_size,
+                             size_t *signature_length);
+
+psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
+                               const uint8_t *public_key,
+                               size_t public_key_size,
+                               const uint8_t *message,
+                               size_t message_length,
+                               const uint8_t *signature,
+                               size_t signature_length);
+
+psa_status_t psa_lms_verify(const uint8_t *public_key,
+                            size_t public_key_size,
+                            const uint8_t *message,
+                            size_t message_length,
+                            const uint8_t *signature,
+                            size_t signature_length);
+
+psa_status_t psa_xmss_verify(const uint8_t *public_key,
+                             size_t public_key_size,
+                             const uint8_t *message,
+                             size_t message_length,
+                             const uint8_t *signature,
+                             size_t signature_length);
+
 psa_status_t psa_asymmetric_encrypt(psa_key_id_t key,
                                     psa_algorithm_t alg,
                                     const uint8_t *input,

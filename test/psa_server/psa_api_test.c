@@ -40,6 +40,10 @@
 #include <wolfssl/wolfcrypt/kdf.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
+#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
+    defined(WOLFSSL_WC_DILITHIUM)
+#include <wolfssl/wolfcrypt/dilithium.h>
+#endif
 
 #ifndef INVALID_DEVID
 #define INVALID_DEVID -2
@@ -2918,6 +2922,66 @@ static int test_asym_verify_rejects_bad_signatures(void)
     return TEST_OK;
 }
 
+static int test_ml_dsa_verify_rejects_bad_signature(void)
+{
+#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
+    defined(WOLFSSL_WC_DILITHIUM)
+    static const uint8_t message[] = {
+        0x46, 0x2f, 0x32, 0x38, 0x32, 0x33, 0x20, 0x4d,
+        0x4c, 0x2d, 0x44, 0x53, 0x41, 0x20, 0x76, 0x65,
+        0x72, 0x69, 0x66, 0x79
+    };
+    uint8_t private_key[DILITHIUM_LEVEL2_KEY_SIZE];
+    uint8_t public_key[DILITHIUM_LEVEL2_PUB_KEY_SIZE];
+    uint8_t signature[DILITHIUM_LEVEL2_SIG_SIZE];
+    size_t private_key_length = 0;
+    size_t public_key_length = 0;
+    size_t signature_length = 0;
+    psa_status_t st;
+
+    st = psa_ml_dsa_generate_key(PSA_ML_DSA_PARAMETER_2,
+                                 private_key, sizeof(private_key),
+                                 &private_key_length,
+                                 public_key, sizeof(public_key),
+                                 &public_key_length);
+    if (check_status(st, "psa_ml_dsa_generate_key") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_ml_dsa_sign(PSA_ML_DSA_PARAMETER_2,
+                         private_key, private_key_length,
+                         message, sizeof(message),
+                         signature, sizeof(signature),
+                         &signature_length);
+    if (check_status(st, "psa_ml_dsa_sign") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_ml_dsa_verify(PSA_ML_DSA_PARAMETER_2,
+                           public_key, public_key_length,
+                           message, sizeof(message),
+                           signature, signature_length);
+    if (check_status(st, "psa_ml_dsa_verify(valid)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    signature[0] ^= 0x01u;
+    st = psa_ml_dsa_verify(PSA_ML_DSA_PARAMETER_2,
+                           public_key, public_key_length,
+                           message, sizeof(message),
+                           signature, signature_length);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_ml_dsa_verify rejects corrupted signature") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_SIGNATURE, got %d\n", (int)st);
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+#else
+    return TEST_SKIPPED;
+#endif
+}
+
 static int test_mac_alg_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -5101,6 +5165,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_verify_bad_signature") == 0) {
         if (run_named_test("asym_verify_bad_signature",
                            test_asym_verify_rejects_bad_signatures) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ml_dsa_verify_bad_signature") == 0) {
+        if (run_named_test("ml_dsa_verify_bad_signature",
+                           test_ml_dsa_verify_rejects_bad_signature) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

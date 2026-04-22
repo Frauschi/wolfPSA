@@ -21,6 +21,7 @@
 #ifndef PSA_CRYPTO_PQC_H
 #define PSA_CRYPTO_PQC_H
 typedef uint8_t psa_slh_dsa_family_t;
+typedef uint8_t psa_ml_dsa_parameter_t;
 
 #define PSA_ALG_SHA_256_192 ((psa_algorithm_t)0x0200000E)
 #define PSA_ALG_SHAKE128_256 ((psa_algorithm_t)0x02000016)
@@ -32,6 +33,9 @@ typedef uint8_t psa_slh_dsa_family_t;
 #define PSA_ALG_ML_KEM ((psa_algorithm_t)0x0c000200)
 #define PSA_KEY_TYPE_ML_DSA_KEY_PAIR ((psa_key_type_t)0x7002)
 #define PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY ((psa_key_type_t)0x4002)
+#define PSA_ML_DSA_PARAMETER_2 ((psa_ml_dsa_parameter_t)2)
+#define PSA_ML_DSA_PARAMETER_3 ((psa_ml_dsa_parameter_t)3)
+#define PSA_ML_DSA_PARAMETER_5 ((psa_ml_dsa_parameter_t)5)
 #define PSA_KEY_TYPE_IS_ML_DSA(type) 
 #define PSA_ALG_ML_DSA ((psa_algorithm_t) 0x06004400)
 #define PSA_ALG_DETERMINISTIC_ML_DSA ((psa_algorithm_t) 0x06004500)
