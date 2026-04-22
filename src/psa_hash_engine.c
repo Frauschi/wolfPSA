@@ -637,6 +637,7 @@ psa_status_t psa_hash_finish(psa_hash_operation_t *operation,
     *hash_length = expected_hash_size;
     ctx->finalized = 1;
     psa_hash_cleanup_ctx(ctx);
+    wc_ForceZero(ctx, sizeof(*ctx));
     XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     operation->opaque = (uintptr_t)NULL;
 
