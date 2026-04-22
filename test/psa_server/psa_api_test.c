@@ -652,6 +652,46 @@ cleanup:
     return ret;
 }
 
+static int test_cipher_rejects_non_aes_key_type(void)
+{
+    static const uint8_t key[32] = {
+        0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,
+        0x68,0x69,0x6a,0x6b,0x6c,0x6d,0x6e,0x6f,
+        0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,
+        0x78,0x79,0x7a,0x7b,0x7c,0x7d,0x7e,0x7f
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_STREAM_CIPHER);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(ChaCha20 for AES cipher mismatch)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_true(st == PSA_ERROR_NOT_SUPPORTED,
+                   "psa_cipher_encrypt_setup rejects non-AES key for AES cipher") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    (void)psa_cipher_abort(&op);
+    return ret;
+}
+
 static int test_mac_rejects_algorithm_mismatch(void)
 {
     static const uint8_t hmac_key[16] = {
@@ -6432,6 +6472,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_requires_decrypt_usage") == 0) {
         if (run_named_test("cipher_requires_decrypt_usage",
                            test_cipher_requires_decrypt_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_non_aes_key_type") == 0) {
+        if (run_named_test("cipher_non_aes_key_type",
+                           test_cipher_rejects_non_aes_key_type) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
