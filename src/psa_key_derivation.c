@@ -1355,6 +1355,7 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
                                              size_t expected_length)
 {
     uint8_t *buffer;
+    uint8_t dummy = 0;
     psa_status_t status;
 
     if (expected == NULL) {
@@ -1362,6 +1363,9 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *ope
     }
     if (expected_length > INT_MAX) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (expected_length == 0) {
+        return psa_key_derivation_output_bytes(operation, &dummy, 0);
     }
 
     buffer = (uint8_t *)XMALLOC(expected_length, NULL, DYNAMIC_TYPE_TMP_BUFFER);
