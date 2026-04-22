@@ -4621,6 +4621,51 @@ cleanup:
     return ret;
 }
 
+static int test_kdf_pbkdf2_large_cost_rejected(void)
+{
+    static const uint8_t password[] = "pbkdf2-password";
+    static const uint8_t salt[] = "pbkdf2-salt";
+    uint8_t output[16];
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(PBKDF2 large cost)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                        password, sizeof(password) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(PBKDF2 large cost password)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT,
+                                        salt, sizeof(salt) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(PBKDF2 large cost salt)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST,
+                                          0x80000000ULL);
+    if (check_status(st, "psa_key_derivation_input_integer(PBKDF2 large cost)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_output_bytes(&op, output, sizeof(output));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_output_bytes rejects PBKDF2 cost above INT_MAX") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    return ret;
+}
+
 static int test_kdf_input_key_policy(void)
 {
     static const uint8_t secret[] = {
@@ -6113,6 +6158,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_pbkdf2_zero_cost") == 0) {
         if (run_named_test("kdf_pbkdf2_zero_cost",
                            test_kdf_pbkdf2_zero_cost_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "kdf_pbkdf2_large_cost") == 0) {
+        if (run_named_test("kdf_pbkdf2_large_cost",
+                           test_kdf_pbkdf2_large_cost_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

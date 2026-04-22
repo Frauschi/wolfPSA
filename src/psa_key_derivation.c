@@ -999,6 +999,12 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         if (hash_type == WC_HASH_TYPE_NONE) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
+        if (ctx->password_length > (size_t)INT_MAX ||
+            ctx->salt_length > (size_t)INT_MAX ||
+            ctx->cost > (uint32_t)INT_MAX ||
+            output_length > (size_t)INT_MAX) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         ret = wc_PBKDF2(output, password, (int)ctx->password_length,
                         salt, (int)ctx->salt_length,
                         (int)ctx->cost, (int)output_length, hash_type);
