@@ -2511,6 +2511,53 @@ static int test_aead_gcm_rejects_short_tags(void)
     return ret;
 }
 
+static int test_aead_gcm_rejects_short_nonce(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    static const uint8_t short_nonce[11] = {
+        0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(GCM short nonce)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(GCM short nonce)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_aead_set_nonce(&op, short_nonce, sizeof(short_nonce));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_aead_set_nonce rejects 11-byte GCM nonce") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_aead_abort(&op);
+    psa_reset_key_attributes(&attrs);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_chacha20_poly1305_rejects_aes_key(void)
 {
     static const uint8_t key[32] = {
@@ -6095,6 +6142,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_gcm_short_tag") == 0) {
         if (run_named_test("aead_gcm_short_tag",
                            test_aead_gcm_rejects_short_tags) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_gcm_short_nonce") == 0) {
+        if (run_named_test("aead_gcm_short_nonce",
+                           test_aead_gcm_rejects_short_nonce) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
