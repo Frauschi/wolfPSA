@@ -31,6 +31,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
+#if !defined(_WIN32) && !defined(_MSC_VER)
+#include <signal.h>
+#include <sys/resource.h>
+#endif
 
 #include <wolfpsa/psa/crypto.h>
 #include "psa_aead_internal.h"
@@ -884,6 +888,99 @@ cleanup:
         (void)psa_destroy_key(persistent_id);
     }
     return ret;
+}
+
+static int test_import_key_short_write_preserves_persistent_key(void)
+{
+#if defined(_WIN32) || defined(_MSC_VER) || !defined(RLIMIT_FSIZE)
+    return TEST_SKIPPED;
+#else
+    enum { ORIGINAL_LEN = 64, REPLACEMENT_LEN = 1024 };
+    uint8_t original[ORIGINAL_LEN];
+    uint8_t replacement[REPLACEMENT_LEN];
+    uint8_t exported[ORIGINAL_LEN];
+    size_t exported_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 3175u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    struct rlimit old_limit;
+    struct rlimit short_limit;
+    void (*old_sigxfsz)(int);
+    int limit_set = 0;
+    int ret = TEST_FAIL;
+    size_t i;
+
+    for (i = 0; i < sizeof(original); i++) {
+        original[i] = (uint8_t)i;
+    }
+    for (i = 0; i < sizeof(replacement); i++) {
+        replacement[i] = (uint8_t)(0xa5u ^ i);
+    }
+
+    (void)psa_destroy_key(persistent_id);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, ORIGINAL_LEN * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+
+    st = psa_import_key(&attrs, original, sizeof(original), &key_id);
+    if (check_status(st, "psa_import_key(original persistent RAW_DATA)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    if (getrlimit(RLIMIT_FSIZE, &old_limit) != 0) {
+        ret = TEST_SKIPPED;
+        goto cleanup;
+    }
+    old_sigxfsz = signal(SIGXFSZ, SIG_IGN);
+    short_limit.rlim_cur = 1;
+    short_limit.rlim_max = old_limit.rlim_max;
+    if (setrlimit(RLIMIT_FSIZE, &short_limit) != 0) {
+        (void)signal(SIGXFSZ, old_sigxfsz);
+        ret = TEST_SKIPPED;
+        goto cleanup;
+    }
+    limit_set = 1;
+
+    psa_set_key_bits(&attrs, REPLACEMENT_LEN * 8u);
+    st = psa_import_key(&attrs, replacement, sizeof(replacement), &key_id);
+
+    (void)setrlimit(RLIMIT_FSIZE, &old_limit);
+    (void)signal(SIGXFSZ, old_sigxfsz);
+    limit_set = 0;
+
+    if (check_true(st == PSA_ERROR_STORAGE_FAILURE,
+                   "psa_import_key reports short persistent write") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_export_key(persistent_id, exported, sizeof(exported), &exported_len);
+    if (check_status(st, "psa_export_key after failed persistent overwrite") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == sizeof(original),
+                   "failed persistent overwrite preserves length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("failed persistent overwrite preserves data",
+                     exported, original, sizeof(original)) != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (limit_set) {
+        (void)setrlimit(RLIMIT_FSIZE, &old_limit);
+        (void)signal(SIGXFSZ, old_sigxfsz);
+    }
+    psa_reset_key_attributes(&attrs);
+    (void)psa_destroy_key(persistent_id);
+    return ret;
+#endif
 }
 
 static int test_copy_key_requires_copy_usage_flag(void)
@@ -5180,6 +5277,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "export_oversized_persistent_length") == 0) {
         if (run_named_test("export_oversized_persistent_length",
                            test_export_key_rejects_oversized_persistent_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_short_write_preserves_persistent_key") == 0) {
+        if (run_named_test("import_key_short_write_preserves_persistent_key",
+                           test_import_key_short_write_preserves_persistent_key) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
