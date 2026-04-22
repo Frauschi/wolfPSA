@@ -2788,6 +2788,136 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_hash_verify_rejects_bad_signature(psa_key_type_t type,
+                                                  size_t bits,
+                                                  psa_algorithm_t alg,
+                                                  const uint8_t* hash,
+                                                  size_t hash_len,
+                                                  size_t expected_sig_len,
+                                                  const char* label)
+{
+    uint8_t sig[128];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, type);
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, alg, hash, hash_len, sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(bad signature setup)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(sig_len == expected_sig_len,
+                   "psa_sign_hash(bad signature setup) length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, alg, hash, hash_len, sig, sig_len);
+    if (check_status(st, "psa_verify_hash(valid signature setup)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    sig[0] ^= 0x01u;
+    st = psa_verify_hash(key_id, alg, hash, hash_len, sig, sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_verify_hash rejects corrupted signature") != TEST_OK) {
+        printf("  %s expected PSA_ERROR_INVALID_SIGNATURE, got %d\n",
+               label, (int)st);
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        psa_status_t destroy_st = psa_destroy_key(key_id);
+        if (result == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(bad signature test)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+    return result;
+}
+
+static int test_asym_verify_rejects_bad_signatures(void)
+{
+    static const uint8_t hash_sha256[WC_SHA256_DIGEST_SIZE] = {
+        0x9f,0x86,0xd0,0x81,0x88,0x4c,0x7d,0x65,
+        0x9a,0x2f,0xea,0xa0,0xc5,0x5a,0xd0,0x15,
+        0xa3,0xbf,0x4f,0x1b,0x2b,0x0b,0x82,0x2c,
+        0xd1,0x5d,0x6c,0x15,0xb0,0xf0,0x0a,0x08
+    };
+    static const uint8_t hash_ed25519[64] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
+    };
+    static const uint8_t hash_ed448[114] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,
+        0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,
+        0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,
+        0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,
+        0x58,0x59,0x5a,0x5b,0x5c,0x5d,0x5e,0x5f,
+        0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,
+        0x68,0x69,0x6a,0x6b,0x6c,0x6d,0x6e,0x6f,
+        0x70,0x71
+    };
+    int ed25519_result;
+    int ed448_result;
+
+    if (test_hash_verify_rejects_bad_signature(
+            PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1),
+            256, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+            hash_sha256, sizeof(hash_sha256), 64u,
+            "psa_generate_key(ECDSA bad signature)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    ed25519_result = test_hash_verify_rejects_bad_signature(
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS),
+        255, PSA_ALG_ED25519PH, hash_ed25519, sizeof(hash_ed25519), 64u,
+        "psa_generate_key(ED25519 bad signature)");
+    if (ed25519_result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+
+    ed448_result = test_hash_verify_rejects_bad_signature(
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS),
+        448, PSA_ALG_ED448PH, hash_ed448, sizeof(hash_ed448), 114u,
+        "psa_generate_key(ED448 bad signature)");
+    if (ed448_result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_mac_alg_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -4965,6 +5095,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed448_export_pub") == 0) {
         if (run_named_test("ed448_export_pub", test_ed448_export_public_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "asym_verify_bad_signature") == 0) {
+        if (run_named_test("asym_verify_bad_signature",
+                           test_asym_verify_rejects_bad_signatures) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
