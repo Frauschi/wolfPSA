@@ -880,7 +880,12 @@ psa_status_t psa_import_key(
         }
     }
     else if (attr.type == PSA_KEY_TYPE_DES) {
-        if (data_length != 16 && data_length != 24) {
+        if (data_length == 16) {
+            wolfpsa_debug_import_reason("2-key 3DES is not supported", &attr,
+                                        data_length);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (data_length != 24) {
             wolfpsa_debug_import_reason("invalid DES key length", &attr, data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
