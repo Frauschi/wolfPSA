@@ -73,3 +73,7 @@ TOTAL SKIPPED   : 13
 ## License
 
 See `COPYING`.
+
+## ChangeLog
+
+See `CHANGELOG.md`.
