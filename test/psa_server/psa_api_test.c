@@ -130,6 +130,14 @@ static int test_hash(void)
     return TEST_OK;
 }
 
+static int check_status_or_skip(psa_status_t st, const char* what)
+{
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    return check_status(st, what);
+}
+
 static int test_random(void)
 {
     uint8_t buf[32];
@@ -3853,6 +3861,7 @@ static int test_x448_key_usability(void)
     psa_key_id_t generated_key = 0;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_status_t st;
+    int result = TEST_FAIL;
 
     psa_set_key_type(&attrs,
         PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY));
@@ -3875,109 +3884,91 @@ static int test_x448_key_usability(void)
 
     st = psa_export_public_key(alice_key, alice_pub, sizeof(alice_pub),
                                &alice_pub_len);
-    if (check_status(st, "psa_export_public_key(X448 alice)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_export_public_key(X448 alice)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     st = psa_export_public_key(bob_key, bob_pub, sizeof(bob_pub), &bob_pub_len);
-    if (check_status(st, "psa_export_public_key(X448 bob)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_export_public_key(X448 bob)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     if (check_true(alice_pub_len == X448_KEY_BYTES &&
                    bob_pub_len == X448_KEY_BYTES,
                    "psa_export_public_key(X448) length") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_export_public_key(X448 alice)", alice_pub,
                      alice_pub_expected, X448_KEY_BYTES) != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_export_public_key(X448 bob)", bob_pub,
                      bob_pub_expected, X448_KEY_BYTES) != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_raw_key_agreement(PSA_ALG_ECDH, alice_key, bob_pub, bob_pub_len,
                                alice_secret, sizeof(alice_secret),
                                &alice_secret_len);
-    if (check_status(st, "psa_raw_key_agreement(X448 alice)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_raw_key_agreement(X448 alice)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     st = psa_raw_key_agreement(PSA_ALG_ECDH, bob_key, alice_pub, alice_pub_len,
                                bob_secret, sizeof(bob_secret),
                                &bob_secret_len);
-    if (check_status(st, "psa_raw_key_agreement(X448 bob)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_raw_key_agreement(X448 bob)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     if (check_true(alice_secret_len == X448_KEY_BYTES &&
                    bob_secret_len == X448_KEY_BYTES,
                    "psa_raw_key_agreement(X448) length") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_raw_key_agreement(X448)", alice_secret,
                      bob_secret, X448_KEY_BYTES) != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
     if (check_buf_eq("psa_raw_key_agreement(X448 expected)", alice_secret,
                      shared_secret_expected, X448_KEY_BYTES) != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
     st = psa_generate_key(&attrs, &generated_key);
-    if (check_status(st, "psa_generate_key(X448)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_generate_key(X448)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     st = psa_export_public_key(generated_key, generated_pub,
                                sizeof(generated_pub), &generated_pub_len);
-    if (check_status(st, "psa_export_public_key(generated X448)") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        (void)psa_destroy_key(generated_key);
-        return TEST_FAIL;
+    result = check_status_or_skip(st, "psa_export_public_key(generated X448)");
+    if (result != TEST_OK) {
+        goto cleanup;
     }
     if (check_true(generated_pub_len == X448_KEY_BYTES,
                    "psa_export_public_key(generated X448) length") != TEST_OK) {
-        (void)psa_destroy_key(alice_key);
-        (void)psa_destroy_key(bob_key);
-        (void)psa_destroy_key(generated_key);
-        return TEST_FAIL;
+        goto cleanup;
     }
 
+    result = TEST_OK;
+
+cleanup:
     st = psa_destroy_key(alice_key);
-    if (check_status(st, "psa_destroy_key(X448 alice)") != TEST_OK) {
+    if (alice_key != 0 && check_status(st, "psa_destroy_key(X448 alice)") != TEST_OK) {
         return TEST_FAIL;
     }
     st = psa_destroy_key(bob_key);
-    if (check_status(st, "psa_destroy_key(X448 bob)") != TEST_OK) {
+    if (bob_key != 0 && check_status(st, "psa_destroy_key(X448 bob)") != TEST_OK) {
         return TEST_FAIL;
     }
     st = psa_destroy_key(generated_key);
-    if (check_status(st, "psa_destroy_key(X448 generated)") != TEST_OK) {
+    if (generated_key != 0 &&
+        check_status(st, "psa_destroy_key(X448 generated)") != TEST_OK) {
         return TEST_FAIL;
     }
 
-    return TEST_OK;
+    return result;
 }
 
 static int test_hash_verify_rejects_bad_signature(psa_key_type_t type,
@@ -4184,6 +4175,9 @@ static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
                                  &private_key_length,
                                  public_key, sizeof(public_key),
                                  &public_key_length);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
     if (check_status(st, label) != TEST_OK) {
         return TEST_FAIL;
     }
@@ -4237,26 +4231,51 @@ static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
 
 static int test_ml_dsa_verify_rejects_bad_signature(void)
 {
-    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-            PSA_ML_DSA_PARAMETER_2, DILITHIUM_LEVEL2_KEY_SIZE,
-            DILITHIUM_LEVEL2_PUB_KEY_SIZE, DILITHIUM_LEVEL2_SIG_SIZE,
-            "psa_ml_dsa_generate_key(level2)") != TEST_OK) {
-        return TEST_FAIL;
-    }
-    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-            PSA_ML_DSA_PARAMETER_3, DILITHIUM_LEVEL3_KEY_SIZE,
-            DILITHIUM_LEVEL3_PUB_KEY_SIZE, DILITHIUM_LEVEL3_SIG_SIZE,
-            "psa_ml_dsa_generate_key(level3)") != TEST_OK) {
-        return TEST_FAIL;
-    }
-    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-            PSA_ML_DSA_PARAMETER_5, DILITHIUM_LEVEL5_KEY_SIZE,
-            DILITHIUM_LEVEL5_PUB_KEY_SIZE, DILITHIUM_LEVEL5_SIG_SIZE,
-            "psa_ml_dsa_generate_key(level5)") != TEST_OK) {
-        return TEST_FAIL;
-    }
+#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
+    defined(WOLFSSL_WC_DILITHIUM)
+    int ran = 0;
+    int skipped = 0;
+    int ret;
 
+    ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+        PSA_ML_DSA_PARAMETER_2, DILITHIUM_LEVEL2_KEY_SIZE,
+        DILITHIUM_LEVEL2_PUB_KEY_SIZE, DILITHIUM_LEVEL2_SIG_SIZE,
+        "psa_ml_dsa_generate_key(level2)");
+    if (ret == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    ran += (ret == TEST_OK);
+    skipped += (ret == TEST_SKIPPED);
+#ifndef WOLFSSL_NO_ML_DSA_65
+    ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+        PSA_ML_DSA_PARAMETER_3, DILITHIUM_LEVEL3_KEY_SIZE,
+        DILITHIUM_LEVEL3_PUB_KEY_SIZE, DILITHIUM_LEVEL3_SIG_SIZE,
+        "psa_ml_dsa_generate_key(level3)");
+    if (ret == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    ran += (ret == TEST_OK);
+    skipped += (ret == TEST_SKIPPED);
+#endif
+#ifndef WOLFSSL_NO_ML_DSA_87
+    ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+        PSA_ML_DSA_PARAMETER_5, DILITHIUM_LEVEL5_KEY_SIZE,
+        DILITHIUM_LEVEL5_PUB_KEY_SIZE, DILITHIUM_LEVEL5_SIG_SIZE,
+        "psa_ml_dsa_generate_key(level5)");
+    if (ret == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    ran += (ret == TEST_OK);
+    skipped += (ret == TEST_SKIPPED);
+#endif
+
+    if (ran == 0 && skipped > 0) {
+        return TEST_SKIPPED;
+    }
     return TEST_OK;
+#else
+    return TEST_SKIPPED;
+#endif
 }
 
 static int test_mac_alg_mismatch(void)
@@ -6198,6 +6217,88 @@ static int run_named_test(const char* name, test_fn_t fn)
     return ret;
 }
 
+static int test_hash_clone_for_algorithm(psa_algorithm_t alg, const char* label)
+{
+    static const uint8_t msg1[] = "hash clone prefix";
+    static const uint8_t msg2[] = " + suffix";
+    uint8_t digest1[PSA_HASH_MAX_SIZE];
+    uint8_t digest2[PSA_HASH_MAX_SIZE];
+    size_t digest1_len = 0;
+    size_t digest2_len = 0;
+    psa_hash_operation_t source = psa_hash_operation_init();
+    psa_hash_operation_t clone = psa_hash_operation_init();
+    psa_status_t st;
+
+    st = psa_hash_setup(&source, alg);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    st = psa_hash_update(&source, msg1, sizeof(msg1) - 1u);
+    if (check_status(st, "psa_hash_update(source prefix)") != TEST_OK) {
+        (void)psa_hash_abort(&source);
+        return TEST_FAIL;
+    }
+    st = psa_hash_clone(&source, &clone);
+    if (check_status(st, "psa_hash_clone") != TEST_OK) {
+        (void)psa_hash_abort(&source);
+        return TEST_FAIL;
+    }
+    st = psa_hash_update(&source, msg2, sizeof(msg2) - 1u);
+    if (check_status(st, "psa_hash_update(source suffix)") != TEST_OK) {
+        (void)psa_hash_abort(&source);
+        (void)psa_hash_abort(&clone);
+        return TEST_FAIL;
+    }
+    st = psa_hash_update(&clone, msg2, sizeof(msg2) - 1u);
+    if (check_status(st, "psa_hash_update(clone suffix)") != TEST_OK) {
+        (void)psa_hash_abort(&source);
+        (void)psa_hash_abort(&clone);
+        return TEST_FAIL;
+    }
+    st = psa_hash_finish(&source, digest1, sizeof(digest1), &digest1_len);
+    if (check_status(st, "psa_hash_finish(source)") != TEST_OK) {
+        (void)psa_hash_abort(&clone);
+        return TEST_FAIL;
+    }
+    st = psa_hash_finish(&clone, digest2, sizeof(digest2), &digest2_len);
+    if (check_status(st, "psa_hash_finish(clone)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(digest1_len == digest2_len,
+                   "psa_hash_clone digest lengths") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_buf_eq("psa_hash_clone digest equality", digest1, digest2,
+                     digest1_len) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_hash_clone(void)
+{
+    int ret;
+
+    ret = test_hash_clone_for_algorithm(PSA_ALG_SHA_256,
+                                        "psa_hash_setup(SHA-256 clone)");
+    if (ret != TEST_OK) {
+        return ret;
+    }
+#ifdef WOLFSSL_SHA3
+    ret = test_hash_clone_for_algorithm(PSA_ALG_SHA3_256,
+                                        "psa_hash_setup(SHA3-256 clone)");
+    if (ret != TEST_OK) {
+        return ret;
+    }
+#endif
+
+    return TEST_OK;
+}
+
 /* F-2422: CCM_STAR_NO_TAG multi-part cipher must allow multiple update calls.
  * Before the fix, the second update call would return PSA_ERROR_BAD_STATE. */
 static int test_ccm_star_no_tag_multipart(void)
@@ -6314,7 +6415,7 @@ cleanup:
 /* F/3426: OFB decrypt setup must retain the forward AES key schedule.
  * Before the fix, decrypt setup keyed OFB with AES_DECRYPTION, which broke
  * round-trip decryption on software AES builds. */
-static int test_ofb_round_trip(void)
+static int test_cipher_round_trip(psa_algorithm_t alg, const char* label)
 {
     static const uint8_t key_data[16] = {
         0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
@@ -6343,59 +6444,59 @@ static int test_ofb_round_trip(void)
 
     psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&attr, 128);
-    psa_set_key_algorithm(&attr, PSA_ALG_OFB);
+    psa_set_key_algorithm(&attr, alg);
     psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
 
     st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
-    if (check_status(st, "import key for OFB") != TEST_OK)
+    if (check_status(st, "import key for cipher round trip") != TEST_OK)
         return TEST_FAIL;
 
-    st = psa_cipher_encrypt_setup(&op, key, PSA_ALG_OFB);
+    st = psa_cipher_encrypt_setup(&op, key, alg);
     if (st == PSA_ERROR_NOT_SUPPORTED) {
         result = TEST_SKIPPED;
         goto cleanup;
     }
-    if (check_status(st, "psa_cipher_encrypt_setup(OFB)") != TEST_OK)
+    if (check_status(st, label) != TEST_OK)
         goto cleanup;
     st = psa_cipher_set_iv(&op, iv, sizeof(iv));
-    if (check_status(st, "psa_cipher_set_iv(OFB enc)") != TEST_OK)
+    if (check_status(st, "psa_cipher_set_iv(enc)") != TEST_OK)
         goto cleanup;
     st = psa_cipher_update(&op, plaintext, sizeof(plaintext), ciphertext,
                            sizeof(ciphertext), &ciphertext_len);
-    if (check_status(st, "psa_cipher_update(OFB enc)") != TEST_OK)
+    if (check_status(st, "psa_cipher_update(enc)") != TEST_OK)
         goto cleanup;
     st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
                            sizeof(ciphertext) - ciphertext_len, &finish_len);
-    if (check_status(st, "psa_cipher_finish(OFB enc)") != TEST_OK)
+    if (check_status(st, "psa_cipher_finish(enc)") != TEST_OK)
         goto cleanup;
     ciphertext_len += finish_len;
     (void)psa_cipher_abort(&op);
 
     if (check_true(ciphertext_len == sizeof(plaintext),
-                   "psa_cipher_encrypt(OFB) length") != TEST_OK)
+                   "psa_cipher_encrypt length") != TEST_OK)
         goto cleanup;
 
     op = psa_cipher_operation_init();
-    st = psa_cipher_decrypt_setup(&op, key, PSA_ALG_OFB);
-    if (check_status(st, "psa_cipher_decrypt_setup(OFB)") != TEST_OK)
+    st = psa_cipher_decrypt_setup(&op, key, alg);
+    if (check_status(st, "psa_cipher_decrypt_setup") != TEST_OK)
         goto cleanup;
     st = psa_cipher_set_iv(&op, iv, sizeof(iv));
-    if (check_status(st, "psa_cipher_set_iv(OFB dec)") != TEST_OK)
+    if (check_status(st, "psa_cipher_set_iv(dec)") != TEST_OK)
         goto cleanup;
     st = psa_cipher_update(&op, ciphertext, sizeof(ciphertext), decrypted,
                            sizeof(decrypted), &decrypted_len);
-    if (check_status(st, "psa_cipher_update(OFB dec)") != TEST_OK)
+    if (check_status(st, "psa_cipher_update(dec)") != TEST_OK)
         goto cleanup;
     st = psa_cipher_finish(&op, decrypted + decrypted_len,
                            sizeof(decrypted) - decrypted_len, &finish_len);
-    if (check_status(st, "psa_cipher_finish(OFB dec)") != TEST_OK)
+    if (check_status(st, "psa_cipher_finish(dec)") != TEST_OK)
         goto cleanup;
     decrypted_len += finish_len;
 
     if (check_true(decrypted_len == sizeof(plaintext),
-                   "psa_cipher_decrypt(OFB) length") != TEST_OK)
+                   "psa_cipher_decrypt length") != TEST_OK)
         goto cleanup;
-    if (check_buf_eq("psa_cipher_decrypt(OFB)", decrypted, plaintext,
+    if (check_buf_eq("psa_cipher_decrypt", decrypted, plaintext,
                      sizeof(plaintext)) != TEST_OK)
         goto cleanup;
 
@@ -6406,6 +6507,16 @@ cleanup:
     if (key != 0)
         (void)psa_destroy_key(key);
     return result;
+}
+
+static int test_ofb_round_trip(void)
+{
+    return test_cipher_round_trip(PSA_ALG_OFB, "psa_cipher_encrypt_setup(OFB)");
+}
+
+static int test_cfb_round_trip(void)
+{
+    return test_cipher_round_trip(PSA_ALG_CFB, "psa_cipher_encrypt_setup(CFB)");
 }
 
 /* F-2416: Cipher setup error paths must ForceZero ctx before freeing.
@@ -6548,6 +6659,11 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "hash_error_state") == 0) {
         if (run_named_test("hash_error_state",
                            test_hash_error_aborts_operation) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "hash_clone") == 0) {
+        if (run_named_test("hash_clone", test_hash_clone) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -7011,6 +7127,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "ofb_round_trip") == 0) {
         if (run_named_test("ofb_round_trip",
                            test_ofb_round_trip) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cfb_round_trip") == 0) {
+        if (run_named_test("cfb_round_trip",
+                           test_cfb_round_trip) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
