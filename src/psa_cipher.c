@@ -400,7 +400,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         }
 
 #ifdef WOLFSSL_AES_COUNTER
-        if (alg == PSA_ALG_CTR || alg == PSA_ALG_CFB) {
+        if (alg == PSA_ALG_CTR) {
             ret = wc_AesCtrSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                   ctx->iv, AES_ENCRYPTION);
         }
@@ -543,13 +543,14 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
         }
 
 #ifdef WOLFSSL_AES_COUNTER
-        if (alg == PSA_ALG_CTR || alg == PSA_ALG_CFB) {
+        if (alg == PSA_ALG_CTR) {
             ret = wc_AesCtrSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                   ctx->iv, AES_ENCRYPTION);
         }
         else
 #endif
-        if (alg == PSA_ALG_CCM_STAR_NO_TAG) {
+        if (alg == PSA_ALG_CCM_STAR_NO_TAG || alg == PSA_ALG_OFB ||
+            alg == PSA_ALG_CFB) {
             ret = wc_AesSetKey(&ctx->aes, key_data, (word32)key_data_length,
                                ctx->iv, AES_ENCRYPTION);
         }

@@ -47,21 +47,8 @@
 #include <wolfssl/wolfcrypt/aes.h>
 #endif
 
-/* PSA status code to wolfCrypt error code conversion */
-WOLFSSL_LOCAL int psa_status_to_wc_error(psa_status_t status);
-
 /* wolfCrypt error code to PSA status code conversion */
 WOLFSSL_LOCAL psa_status_t wc_error_to_psa_status(int ret);
-
-/* Check if algorithm is supported */
-WOLFSSL_LOCAL psa_status_t psa_check_alg_supported(psa_algorithm_t alg);
-
-/* Check if key type is supported */
-WOLFSSL_LOCAL psa_status_t psa_check_key_type_supported(psa_key_type_t type);
-
-/* Check if key size is valid for the given key type */
-WOLFSSL_LOCAL psa_status_t psa_check_key_size_valid(psa_key_type_t type, 
-                                                   size_t bits);
 
 #endif /* WOLFSSL_PSA_ENGINE */
 #endif /* WOLFSSL_PSA_ENGINE_H */
