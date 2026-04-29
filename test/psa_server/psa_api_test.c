@@ -5287,8 +5287,16 @@ static int test_kdf_input_key_policy(void)
         goto cleanup;
     }
     st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET, verify_only_key);
-    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
-                   "psa_key_derivation_input_key rejects VERIFY_DERIVATION-only usage") != TEST_OK) {
+    if (check_status(st, "psa_key_derivation_input_key(HKDF verify-only key)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        info, sizeof(info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify-only)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_bytes(&op, output, sizeof(output));
+    if (check_status(st, "psa_key_derivation_verify_bytes(verify-only key)") != TEST_OK) {
         goto cleanup;
     }
     st = psa_key_derivation_abort(&op);
