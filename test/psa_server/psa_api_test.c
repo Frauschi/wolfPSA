@@ -4159,7 +4159,10 @@ cleanup:
     return ret;
 }
 
-static int test_ml_dsa_verify_rejects_bad_signature(void)
+static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+    psa_ml_dsa_parameter_t parameter, size_t expected_private_key_length,
+    size_t expected_public_key_length, size_t expected_signature_length,
+    const char* label)
 {
 #if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
     defined(WOLFSSL_WC_DILITHIUM)
@@ -4168,24 +4171,32 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
         0x4c, 0x2d, 0x44, 0x53, 0x41, 0x20, 0x76, 0x65,
         0x72, 0x69, 0x66, 0x79
     };
-    uint8_t private_key[DILITHIUM_LEVEL2_KEY_SIZE];
-    uint8_t public_key[DILITHIUM_LEVEL2_PUB_KEY_SIZE];
-    uint8_t signature[DILITHIUM_LEVEL2_SIG_SIZE];
+    uint8_t private_key[DILITHIUM_MAX_KEY_SIZE];
+    uint8_t public_key[DILITHIUM_MAX_PUB_KEY_SIZE];
+    uint8_t signature[DILITHIUM_MAX_SIG_SIZE];
     size_t private_key_length = 0;
     size_t public_key_length = 0;
     size_t signature_length = 0;
     psa_status_t st;
 
-    st = psa_ml_dsa_generate_key(PSA_ML_DSA_PARAMETER_2,
+    st = psa_ml_dsa_generate_key(parameter,
                                  private_key, sizeof(private_key),
                                  &private_key_length,
                                  public_key, sizeof(public_key),
                                  &public_key_length);
-    if (check_status(st, "psa_ml_dsa_generate_key") != TEST_OK) {
+    if (check_status(st, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(private_key_length == expected_private_key_length,
+                   "psa_ml_dsa_generate_key private key length") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(public_key_length == expected_public_key_length,
+                   "psa_ml_dsa_generate_key public key length") != TEST_OK) {
         return TEST_FAIL;
     }
 
-    st = psa_ml_dsa_sign(PSA_ML_DSA_PARAMETER_2,
+    st = psa_ml_dsa_sign(parameter,
                          private_key, private_key_length,
                          message, sizeof(message),
                          signature, sizeof(signature),
@@ -4193,8 +4204,12 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
     if (check_status(st, "psa_ml_dsa_sign") != TEST_OK) {
         return TEST_FAIL;
     }
+    if (check_true(signature_length == expected_signature_length,
+                   "psa_ml_dsa_sign signature length") != TEST_OK) {
+        return TEST_FAIL;
+    }
 
-    st = psa_ml_dsa_verify(PSA_ML_DSA_PARAMETER_2,
+    st = psa_ml_dsa_verify(parameter,
                            public_key, public_key_length,
                            message, sizeof(message),
                            signature, signature_length);
@@ -4203,13 +4218,14 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
     }
 
     signature[0] ^= 0x01u;
-    st = psa_ml_dsa_verify(PSA_ML_DSA_PARAMETER_2,
+    st = psa_ml_dsa_verify(parameter,
                            public_key, public_key_length,
                            message, sizeof(message),
                            signature, signature_length);
     if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
                    "psa_ml_dsa_verify rejects corrupted signature") != TEST_OK) {
-        printf("  expected PSA_ERROR_INVALID_SIGNATURE, got %d\n", (int)st);
+        printf("  %s expected PSA_ERROR_INVALID_SIGNATURE, got %d\n",
+               label, (int)st);
         return TEST_FAIL;
     }
 
@@ -4217,6 +4233,30 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
 #else
     return TEST_SKIPPED;
 #endif
+}
+
+static int test_ml_dsa_verify_rejects_bad_signature(void)
+{
+    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+            PSA_ML_DSA_PARAMETER_2, DILITHIUM_LEVEL2_KEY_SIZE,
+            DILITHIUM_LEVEL2_PUB_KEY_SIZE, DILITHIUM_LEVEL2_SIG_SIZE,
+            "psa_ml_dsa_generate_key(level2)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+            PSA_ML_DSA_PARAMETER_3, DILITHIUM_LEVEL3_KEY_SIZE,
+            DILITHIUM_LEVEL3_PUB_KEY_SIZE, DILITHIUM_LEVEL3_SIG_SIZE,
+            "psa_ml_dsa_generate_key(level3)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (test_ml_dsa_verify_rejects_bad_signature_for_parameter(
+            PSA_ML_DSA_PARAMETER_5, DILITHIUM_LEVEL5_KEY_SIZE,
+            DILITHIUM_LEVEL5_PUB_KEY_SIZE, DILITHIUM_LEVEL5_SIG_SIZE,
+            "psa_ml_dsa_generate_key(level5)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
 }
 
 static int test_mac_alg_mismatch(void)
