@@ -815,12 +815,14 @@ psa_status_t psa_hash_clone(const psa_hash_operation_t *source_operation,
             break;
 #endif
         default:
+            wc_ForceZero(target_ctx, sizeof(*target_ctx));
             XFREE(target_ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_NOT_SUPPORTED;
     }
 
     if (ret != 0) {
         psa_hash_cleanup_ctx(target_ctx);
+        wc_ForceZero(target_ctx, sizeof(*target_ctx));
         XFREE(target_ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
     }
