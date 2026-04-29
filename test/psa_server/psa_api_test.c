@@ -4976,6 +4976,7 @@ static int test_kdf_input_key_policy(void)
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_key_id_t derive_key = 0;
     psa_key_id_t no_usage_key = 0;
+    psa_key_id_t verify_only_key = 0;
     psa_key_id_t raw_key = 0;
     psa_key_id_t password_key = 0;
     psa_key_id_t wrong_pbkdf2_key = 0;
@@ -5038,6 +5039,30 @@ static int test_kdf_input_key_policy(void)
     }
     st = psa_key_derivation_abort(&op);
     if (check_status(st, "psa_key_derivation_abort(HKDF no usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    psa_set_key_algorithm(&attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_import_key(&attrs, secret, sizeof(secret), &verify_only_key);
+    if (check_status(st, "psa_import_key(KDF verify-only key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify-only)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_key(&op, PSA_KEY_DERIVATION_INPUT_SECRET, verify_only_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_input_key rejects VERIFY_DERIVATION-only usage") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify-only)") != TEST_OK) {
         goto cleanup;
     }
     op = psa_key_derivation_operation_init();
@@ -5121,6 +5146,9 @@ cleanup:
     }
     if (raw_key != 0) {
         (void)psa_destroy_key(raw_key);
+    }
+    if (verify_only_key != 0) {
+        (void)psa_destroy_key(verify_only_key);
     }
     if (no_usage_key != 0) {
         (void)psa_destroy_key(no_usage_key);

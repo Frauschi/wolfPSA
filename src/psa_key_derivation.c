@@ -645,8 +645,7 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
         return status;
     }
 
-    if ((psa_get_key_usage_flags(&attributes) &
-         (PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_VERIFY_DERIVATION)) == 0) {
+    if ((psa_get_key_usage_flags(&attributes) & PSA_KEY_USAGE_DERIVE) == 0) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_NOT_PERMITTED;
     }
