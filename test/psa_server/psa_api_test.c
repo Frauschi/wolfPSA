@@ -6045,6 +6045,103 @@ cleanup:
     return TEST_FAIL;
 }
 
+/* F/3426: OFB decrypt setup must retain the forward AES key schedule.
+ * Before the fix, decrypt setup keyed OFB with AES_DECRYPTION, which broke
+ * round-trip decryption on software AES builds. */
+static int test_ofb_round_trip(void)
+{
+    static const uint8_t key_data[16] = {
+        0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
+        0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01
+    };
+    static const uint8_t iv[16] = {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+    };
+    static const uint8_t plaintext[32] = {
+        0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,
+        0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
+        0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c,
+        0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51
+    };
+    uint8_t ciphertext[sizeof(plaintext)];
+    uint8_t decrypted[sizeof(plaintext)];
+    size_t ciphertext_len = 0;
+    size_t decrypted_len = 0;
+    size_t finish_len = 0;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key = 0;
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_set_key_algorithm(&attr, PSA_ALG_OFB);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+    st = psa_import_key(&attr, key_data, sizeof(key_data), &key);
+    if (check_status(st, "import key for OFB") != TEST_OK)
+        return TEST_FAIL;
+
+    st = psa_cipher_encrypt_setup(&op, key, PSA_ALG_OFB);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        result = TEST_SKIPPED;
+        goto cleanup;
+    }
+    if (check_status(st, "psa_cipher_encrypt_setup(OFB)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(OFB enc)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext), ciphertext,
+                           sizeof(ciphertext), &ciphertext_len);
+    if (check_status(st, "psa_cipher_update(OFB enc)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
+                           sizeof(ciphertext) - ciphertext_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(OFB enc)") != TEST_OK)
+        goto cleanup;
+    ciphertext_len += finish_len;
+    (void)psa_cipher_abort(&op);
+
+    if (check_true(ciphertext_len == sizeof(plaintext),
+                   "psa_cipher_encrypt(OFB) length") != TEST_OK)
+        goto cleanup;
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key, PSA_ALG_OFB);
+    if (check_status(st, "psa_cipher_decrypt_setup(OFB)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(OFB dec)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_update(&op, ciphertext, sizeof(ciphertext), decrypted,
+                           sizeof(decrypted), &decrypted_len);
+    if (check_status(st, "psa_cipher_update(OFB dec)") != TEST_OK)
+        goto cleanup;
+    st = psa_cipher_finish(&op, decrypted + decrypted_len,
+                           sizeof(decrypted) - decrypted_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(OFB dec)") != TEST_OK)
+        goto cleanup;
+    decrypted_len += finish_len;
+
+    if (check_true(decrypted_len == sizeof(plaintext),
+                   "psa_cipher_decrypt(OFB) length") != TEST_OK)
+        goto cleanup;
+    if (check_buf_eq("psa_cipher_decrypt(OFB)", decrypted, plaintext,
+                     sizeof(plaintext)) != TEST_OK)
+        goto cleanup;
+
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key != 0)
+        (void)psa_destroy_key(key);
+    return result;
+}
+
 /* F-2416: Cipher setup error paths must ForceZero ctx before freeing.
  * This test exercises the cipher abort path and a setup-then-abort
  * sequence to verify no crash occurs from the cleanup code. It also
@@ -6636,6 +6733,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "ccm_star_no_tag_multipart") == 0) {
         if (run_named_test("ccm_star_no_tag_multipart",
                            test_ccm_star_no_tag_multipart) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ofb_round_trip") == 0) {
+        if (run_named_test("ofb_round_trip",
+                           test_ofb_round_trip) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
