@@ -45,7 +45,7 @@ psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type)
         case PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY:
             return PSA_SUCCESS;
 #endif
-#if defined(WOLFSSL_HAVE_DILITHIUM)
+#if defined(WOLFSSL_HAVE_MLDSA)
         case PSA_KEY_TYPE_ML_DSA_KEY_PAIR:
         case PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY:
             return PSA_SUCCESS;
@@ -87,7 +87,7 @@ psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits)
             }
             return PSA_ERROR_INVALID_ARGUMENT;
 #endif
-#if defined(WOLFSSL_HAVE_DILITHIUM)
+#if defined(WOLFSSL_HAVE_MLDSA)
         case PSA_KEY_TYPE_ML_DSA_KEY_PAIR:
         case PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY:
             /* ML-DSA key sizes: 2, 3, 5 (security levels) */

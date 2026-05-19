@@ -30,7 +30,6 @@ WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/curve25519.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/curve448.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/des3.c \
-	$(WOLFSSL_PATH)/wolfcrypt/src/dilithium.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/dsa.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/ecc.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/ecc_fp.c \
@@ -63,9 +62,10 @@ WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/sp_int.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/sp_x86_64.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/tfm.c \
+	$(WOLFSSL_PATH)/wolfcrypt/src/wc_encrypt.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wc_lms.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wc_lms_impl.c \
-	$(WOLFSSL_PATH)/wolfcrypt/src/wc_encrypt.c \
+	$(WOLFSSL_PATH)/wolfcrypt/src/wc_mldsa.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wc_mlkem.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wc_mlkem_poly.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/wc_port.c \

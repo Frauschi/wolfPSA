@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
+#include <wolfssl/options.h>
 #include "psa_api_test_user_settings.h"
 
 #ifndef WOLFSSL_USER_SETTINGS
@@ -44,9 +45,8 @@
 #include <wolfssl/wolfcrypt/kdf.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
-#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
-    defined(WOLFSSL_WC_DILITHIUM)
-#include <wolfssl/wolfcrypt/dilithium.h>
+#if defined(WOLFSSL_HAVE_MLDSA)
+#include <wolfssl/wolfcrypt/wc_mldsa.h>
 #endif
 
 #ifndef INVALID_DEVID
@@ -4155,16 +4155,15 @@ static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
     size_t expected_public_key_length, size_t expected_signature_length,
     const char* label)
 {
-#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
-    defined(WOLFSSL_WC_DILITHIUM)
+#if defined(WOLFSSL_HAVE_MLDSA)
     static const uint8_t message[] = {
         0x46, 0x2f, 0x32, 0x38, 0x32, 0x33, 0x20, 0x4d,
         0x4c, 0x2d, 0x44, 0x53, 0x41, 0x20, 0x76, 0x65,
         0x72, 0x69, 0x66, 0x79
     };
-    uint8_t private_key[DILITHIUM_MAX_KEY_SIZE];
-    uint8_t public_key[DILITHIUM_MAX_PUB_KEY_SIZE];
-    uint8_t signature[DILITHIUM_MAX_SIG_SIZE];
+    uint8_t private_key[MLDSA_MAX_KEY_SIZE];
+    uint8_t public_key[MLDSA_MAX_PUB_KEY_SIZE];
+    uint8_t signature[MLDSA_MAX_SIG_SIZE];
     size_t private_key_length = 0;
     size_t public_key_length = 0;
     size_t signature_length = 0;
@@ -4231,15 +4230,14 @@ static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
 
 static int test_ml_dsa_verify_rejects_bad_signature(void)
 {
-#if defined(HAVE_DILITHIUM) || defined(WOLFSSL_HAVE_DILITHIUM) || \
-    defined(WOLFSSL_WC_DILITHIUM)
+#if defined(WOLFSSL_HAVE_MLDSA)
     int ran = 0;
     int skipped = 0;
     int ret;
 
     ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-        PSA_ML_DSA_PARAMETER_2, DILITHIUM_LEVEL2_KEY_SIZE,
-        DILITHIUM_LEVEL2_PUB_KEY_SIZE, DILITHIUM_LEVEL2_SIG_SIZE,
+        PSA_ML_DSA_PARAMETER_2, WC_MLDSA_44_KEY_SIZE,
+        WC_MLDSA_44_PUB_KEY_SIZE, WC_MLDSA_44_SIG_SIZE,
         "psa_ml_dsa_generate_key(level2)");
     if (ret == TEST_FAIL) {
         return TEST_FAIL;
@@ -4248,8 +4246,8 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
     skipped += (ret == TEST_SKIPPED);
 #ifndef WOLFSSL_NO_ML_DSA_65
     ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-        PSA_ML_DSA_PARAMETER_3, DILITHIUM_LEVEL3_KEY_SIZE,
-        DILITHIUM_LEVEL3_PUB_KEY_SIZE, DILITHIUM_LEVEL3_SIG_SIZE,
+        PSA_ML_DSA_PARAMETER_3, WC_MLDSA_65_KEY_SIZE,
+        WC_MLDSA_65_PUB_KEY_SIZE, WC_MLDSA_65_SIG_SIZE,
         "psa_ml_dsa_generate_key(level3)");
     if (ret == TEST_FAIL) {
         return TEST_FAIL;
@@ -4259,8 +4257,8 @@ static int test_ml_dsa_verify_rejects_bad_signature(void)
 #endif
 #ifndef WOLFSSL_NO_ML_DSA_87
     ret = test_ml_dsa_verify_rejects_bad_signature_for_parameter(
-        PSA_ML_DSA_PARAMETER_5, DILITHIUM_LEVEL5_KEY_SIZE,
-        DILITHIUM_LEVEL5_PUB_KEY_SIZE, DILITHIUM_LEVEL5_SIG_SIZE,
+        PSA_ML_DSA_PARAMETER_5, WC_MLDSA_87_KEY_SIZE,
+        WC_MLDSA_87_PUB_KEY_SIZE, WC_MLDSA_87_SIG_SIZE,
         "psa_ml_dsa_generate_key(level5)");
     if (ret == TEST_FAIL) {
         return TEST_FAIL;
