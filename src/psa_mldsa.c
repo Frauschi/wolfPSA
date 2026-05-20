@@ -25,9 +25,7 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && \
-    (defined(WOLFSSL_HAVE_DILITHIUM) || defined(HAVE_DILITHIUM) || \
-     defined(WOLFSSL_WC_DILITHIUM))
+#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_HAVE_MLDSA)
 
 #include <psa/crypto.h>
 #include "psa_size.h"
@@ -38,7 +36,7 @@
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
-#include <wolfssl/wolfcrypt/dilithium.h>
+#include <wolfssl/wolfcrypt/wc_mldsa.h>
 
 /* Convert ML-DSA parameter to wolfCrypt key type */
 static int psa_ml_dsa_parameter_to_type(psa_ml_dsa_parameter_t parameter)
@@ -65,12 +63,12 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
                                     size_t *public_key_length)
 {
     int ret;
-    dilithium_key key;
+    wc_MlDsaKey key;
     int type;
     WC_RNG rng;
     word32 priv_len;
     word32 pub_len;
-    
+
     /* Convert parameter to wolfCrypt key type */
     type = psa_ml_dsa_parameter_to_type(parameter);
     if (type < 0) {
@@ -80,54 +78,54 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
         (wolfpsa_check_word32_length(public_key_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Initialize ML-DSA key */
-    ret = wc_dilithium_init_ex(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_dilithium_set_level(&key, (byte)type);
+    ret = wc_MlDsaKey_SetParams(&key, (byte)type);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Initialize RNG */
     ret = wc_InitRng(&rng);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Generate key pair */
-    ret = wc_dilithium_make_key(&key, &rng);
+    ret = wc_MlDsaKey_MakeKey(&key, &rng);
     if (ret != 0) {
         wc_FreeRng(&rng);
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     priv_len = (word32)private_key_size;
-    ret = wc_dilithium_export_private(&key, private_key, &priv_len);
+    ret = wc_MlDsaKey_ExportPrivRaw(&key, private_key, &priv_len);
     if (ret != 0) {
         wc_FreeRng(&rng);
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
 
     pub_len = (word32)public_key_size;
-    ret = wc_dilithium_export_public(&key, public_key, &pub_len);
+    ret = wc_MlDsaKey_ExportPubRaw(&key, public_key, &pub_len);
     if (ret != 0) {
         wc_FreeRng(&rng);
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
     *private_key_length = priv_len;
     *public_key_length = pub_len;
-    
+
     wc_FreeRng(&rng);
-    wc_dilithium_free(&key);
-    
+    wc_MlDsaKey_Free(&key);
+
     return PSA_SUCCESS;
 }
 
@@ -142,12 +140,12 @@ psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
                             size_t *signature_length)
 {
     int ret;
-    dilithium_key key;
+    wc_MlDsaKey key;
     int type;
     int sig_size;
     WC_RNG rng;
     word32 sigLen;
-    
+
     /* Convert parameter to wolfCrypt key type */
     type = psa_ml_dsa_parameter_to_type(parameter);
     if (type < 0) {
@@ -158,56 +156,57 @@ psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
         (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Initialize ML-DSA key */
-    ret = wc_dilithium_init_ex(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_dilithium_set_level(&key, (byte)type);
+    ret = wc_MlDsaKey_SetParams(&key, (byte)type);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Import private key */
-    ret = wc_dilithium_import_private(private_key, (word32)private_key_size, &key);
+    ret = wc_MlDsaKey_ImportPrivRaw(&key, private_key, (word32)private_key_size);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Check signature buffer size */
-    sig_size = wc_dilithium_sig_size(&key);
+    sig_size = wc_MlDsaKey_SigSize(&key);
     if (sig_size < 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(sig_size);
     }
     if (signature_size < (size_t)sig_size) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
 
     ret = wc_InitRng(&rng);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Sign message (ML-DSA pure, empty context per FIPS 204) */
     sigLen = (word32)signature_size;
-    ret = wc_dilithium_sign_ctx_msg(NULL, 0, message, (word32)message_length,
-                                    signature, &sigLen, &key, &rng);
+    ret = wc_MlDsaKey_SignCtx(&key, NULL, 0,
+                              signature, &sigLen,
+                              message, (word32)message_length, &rng);
     if (ret != 0) {
         wc_FreeRng(&rng);
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
     *signature_length = sigLen;
-    
+
     wc_FreeRng(&rng);
-    wc_dilithium_free(&key);
-    
+    wc_MlDsaKey_Free(&key);
+
     return PSA_SUCCESS;
 }
 
@@ -221,10 +220,10 @@ psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
                               size_t signature_length)
 {
     int ret;
-    dilithium_key key;
+    wc_MlDsaKey key;
     int type;
     int verify_res = 0;
-    
+
     /* Convert parameter to wolfCrypt key type */
     type = psa_ml_dsa_parameter_to_type(parameter);
     if (type < 0) {
@@ -235,41 +234,41 @@ psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
         (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Initialize ML-DSA key */
-    ret = wc_dilithium_init_ex(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_dilithium_set_level(&key, (byte)type);
+    ret = wc_MlDsaKey_SetParams(&key, (byte)type);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Import public key */
-    ret = wc_dilithium_import_public(public_key, (word32)public_key_size, &key);
+    ret = wc_MlDsaKey_ImportPubRaw(&key, public_key, (word32)public_key_size);
     if (ret != 0) {
-        wc_dilithium_free(&key);
+        wc_MlDsaKey_Free(&key);
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Verify signature (ML-DSA pure, empty context per FIPS 204) */
-    ret = wc_dilithium_verify_ctx_msg(signature, (word32)signature_length,
-                                      NULL, 0, message, (word32)message_length,
-                                      &verify_res, &key);
-    
-    wc_dilithium_free(&key);
-    
+    ret = wc_MlDsaKey_VerifyCtx(&key, signature, (word32)signature_length,
+                                NULL, 0,
+                                message, (word32)message_length, &verify_res);
+
+    wc_MlDsaKey_Free(&key);
+
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    
+
     if (verify_res != 1) {
         return PSA_ERROR_INVALID_SIGNATURE;
     }
-    
+
     return PSA_SUCCESS;
 }
 
-#endif /* WOLFSSL_PSA_ENGINE && DILITHIUM */
+#endif /* WOLFSSL_PSA_ENGINE && WOLFSSL_HAVE_MLDSA */
