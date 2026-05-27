@@ -902,7 +902,7 @@ static psa_status_t wolfpsa_kdf_tls12_prf(wolfpsa_kdf_ctx_t *ctx,
                      ctx->secret, (word32)ctx->secret_length,
                      ctx->label, (word32)ctx->label_length,
                      ctx->seed, (word32)ctx->seed_length,
-                     1, hash_type, NULL, INVALID_DEVID);
+                     1, hash_type, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -968,7 +968,7 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
                      premaster, (word32)premaster_len,
                      (const byte *)"master secret", 13u,
                      ctx->seed, (word32)ctx->seed_length,
-                     1, hash_type, NULL, INVALID_DEVID);
+                     1, hash_type, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         status = wc_error_to_psa_status(ret);
     }

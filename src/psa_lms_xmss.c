@@ -60,7 +60,7 @@ psa_status_t psa_lms_generate_key(uint8_t *private_key,
     }
 
     /* Initialize LMS key */
-    ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_LmsKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -134,7 +134,7 @@ psa_status_t psa_lms_sign(const uint8_t *private_key,
     }
 
     /* Initialize LMS key */
-    ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_LmsKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -181,7 +181,7 @@ psa_status_t psa_lms_verify(const uint8_t *public_key,
     }
 
     /* Initialize LMS key */
-    ret = wc_LmsKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_LmsKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -234,7 +234,7 @@ psa_status_t psa_xmss_generate_key(uint8_t *private_key,
     }
 
     /* Initialize XMSS key */
-    ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_XmssKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -308,7 +308,7 @@ psa_status_t psa_xmss_sign(const uint8_t *private_key,
     }
 
     /* Initialize XMSS key */
-    ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_XmssKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -355,7 +355,7 @@ psa_status_t psa_xmss_verify(const uint8_t *public_key,
     }
 
     /* Initialize XMSS key */
-    ret = wc_XmssKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_XmssKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

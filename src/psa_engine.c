@@ -31,6 +31,24 @@
 #include <wolfpsa/psa_engine.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/types.h>
+#include <wolfssl/wolfcrypt/cryptocb.h>
+
+/* Runtime-settable devId threaded through every wolfPSA-internal
+ * wc_*Init()/wc_NewRsaKey() call. INVALID_DEVID (the default) keeps
+ * the original behaviour: wolfCrypt runs the operation locally. */
+static int wolfPSA_default_devid = INVALID_DEVID;
+
+int wolfPSA_SetDefaultDevID(int devId)
+{
+    wolfPSA_default_devid = devId;
+    return 0;
+}
+
+int wolfPSA_GetDefaultDevID(void)
+{
+    return wolfPSA_default_devid;
+}
+
 /* wolfCrypt error code to PSA status code conversion */
 psa_status_t wc_error_to_psa_status(int ret)
 {

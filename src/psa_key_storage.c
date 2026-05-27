@@ -28,6 +28,7 @@
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
+#include <wolfpsa/psa_engine.h>
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
@@ -1493,7 +1494,7 @@ psa_status_t psa_export_public_key(
             size_t total_len;
             uint8_t* out = data;
 
-            rsa = wc_NewRsaKey(NULL, INVALID_DEVID, &ret);
+            rsa = wc_NewRsaKey(NULL, wolfPSA_GetDefaultDevID(), &ret);
             if (rsa == NULL) {
                 if (ret == 0) {
                     ret = MEMORY_E;

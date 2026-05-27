@@ -375,7 +375,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 
         XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
 
-        ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
+        ret = wc_Des3Init(&ctx->des3, NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             wc_ForceZero(des_key, sizeof(des_key));
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -392,7 +392,7 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
 #endif
     }
     else {
-        ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&ctx->aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -518,7 +518,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 
         XMEMCPY(des_key, key_data, DES3_KEY_SIZE);
 
-        ret = wc_Des3Init(&ctx->des3, NULL, INVALID_DEVID);
+        ret = wc_Des3Init(&ctx->des3, NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             wc_ForceZero(des_key, sizeof(des_key));
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -535,7 +535,7 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
 #endif
     }
     else {
-        ret = wc_AesInit(&ctx->aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&ctx->aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
