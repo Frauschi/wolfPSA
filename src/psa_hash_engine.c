@@ -402,16 +402,16 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
 #endif
 #ifdef WOLFSSL_SHA3
         case PSA_ALG_SHA3_224:
-            ret = wc_InitSha3_224(&ctx->ctx.sha3, NULL, INVALID_DEVID);
+            ret = wc_InitSha3_224(&ctx->ctx.sha3, NULL, wolfPSA_GetDefaultDevID());
             break;
         case PSA_ALG_SHA3_256:
-            ret = wc_InitSha3_256(&ctx->ctx.sha3, NULL, INVALID_DEVID);
+            ret = wc_InitSha3_256(&ctx->ctx.sha3, NULL, wolfPSA_GetDefaultDevID());
             break;
         case PSA_ALG_SHA3_384:
-            ret = wc_InitSha3_384(&ctx->ctx.sha3, NULL, INVALID_DEVID);
+            ret = wc_InitSha3_384(&ctx->ctx.sha3, NULL, wolfPSA_GetDefaultDevID());
             break;
         case PSA_ALG_SHA3_512:
-            ret = wc_InitSha3_512(&ctx->ctx.sha3, NULL, INVALID_DEVID);
+            ret = wc_InitSha3_512(&ctx->ctx.sha3, NULL, wolfPSA_GetDefaultDevID());
             break;
 #endif
         default:

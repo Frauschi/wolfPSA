@@ -77,7 +77,7 @@ psa_status_t psa_ml_kem_generate_key(psa_ml_kem_parameter_t parameter,
     }
     
     /* Initialize ML-KEM key */
-    ret = wc_MlKemKey_Init(&key, type, NULL, INVALID_DEVID);
+    ret = wc_MlKemKey_Init(&key, type, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -170,7 +170,7 @@ psa_status_t psa_ml_kem_encapsulate(psa_ml_kem_parameter_t parameter,
     }
     
     /* Initialize ML-KEM key */
-    ret = wc_MlKemKey_Init(&key, type, NULL, INVALID_DEVID);
+    ret = wc_MlKemKey_Init(&key, type, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -251,7 +251,7 @@ psa_status_t psa_ml_kem_decapsulate(psa_ml_kem_parameter_t parameter,
     }
     
     /* Initialize ML-KEM key */
-    ret = wc_MlKemKey_Init(&key, type, NULL, INVALID_DEVID);
+    ret = wc_MlKemKey_Init(&key, type, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

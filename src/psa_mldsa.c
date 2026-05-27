@@ -80,7 +80,7 @@ psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
     }
 
     /* Initialize ML-DSA key */
-    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -158,7 +158,7 @@ psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
     }
 
     /* Initialize ML-DSA key */
-    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -236,7 +236,7 @@ psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
     }
 
     /* Initialize ML-DSA key */
-    ret = wc_MlDsaKey_Init(&key, NULL, INVALID_DEVID);
+    ret = wc_MlDsaKey_Init(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

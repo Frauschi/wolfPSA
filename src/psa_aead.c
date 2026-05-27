@@ -554,7 +554,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
         Aes aes;
-        ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
@@ -580,7 +580,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
@@ -691,7 +691,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
         Aes aes;
-        ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
             ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
@@ -720,7 +720,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (wc_AesCcmCheckTagSize((int)tag_length) != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
-        ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
+        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
             ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
         }
