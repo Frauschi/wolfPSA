@@ -1425,8 +1425,12 @@ psa_status_t psa_key_derivation_verify_key(psa_key_derivation_operation_t *opera
         return PSA_ERROR_NOT_PERMITTED;
     }
 
-    if (PSA_ALG_IS_PBKDF2(ctx->alg) &&
-        psa_get_key_type(&attributes) != PSA_KEY_TYPE_PASSWORD_HASH) {
+    if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
+        if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_PASSWORD_HASH) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    else if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_RAW_DATA) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 

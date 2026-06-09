@@ -6476,6 +6476,7 @@ static int test_kdf_verify_key_policy(void)
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_key_id_t hkdf_verify_key = 0;
     psa_key_id_t hkdf_no_usage_key = 0;
+    psa_key_id_t hkdf_wrong_type_key = 0;
     psa_key_id_t pbkdf2_verify_key = 0;
     psa_key_id_t pbkdf2_wrong_type_key = 0;
     psa_status_t st;
@@ -6565,6 +6566,39 @@ static int test_kdf_verify_key_policy(void)
     }
     st = psa_key_derivation_abort(&op);
     if (check_status(st, "psa_key_derivation_abort(HKDF no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, hkdf_expected, sizeof(hkdf_expected), &hkdf_wrong_type_key);
+    if (check_status(st, "psa_import_key(HKDF wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_wrong_type_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_verify_key rejects non-RAW_DATA HKDF expected key") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF wrong expected key type)") != TEST_OK) {
         goto cleanup;
     }
     op = psa_key_derivation_operation_init();
@@ -6678,6 +6712,9 @@ cleanup:
     }
     if (hkdf_no_usage_key != 0) {
         (void)psa_destroy_key(hkdf_no_usage_key);
+    }
+    if (hkdf_wrong_type_key != 0) {
+        (void)psa_destroy_key(hkdf_wrong_type_key);
     }
     if (hkdf_verify_key != 0) {
         (void)psa_destroy_key(hkdf_verify_key);
