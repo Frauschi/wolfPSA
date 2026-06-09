@@ -999,6 +999,23 @@ psa_status_t psa_import_key(
         }
     }
     else {
+        /* The PSA Crypto API requires psa_import_key() to fail with
+         * PSA_ERROR_ALREADY_EXISTS when a persistent key already exists with
+         * the requested id; the volatile path enforces the same above. Probe
+         * for an existing record before opening a write handle, otherwise the
+         * atomic rename in wolfPSA_Store_Close() would silently destroy the
+         * previously stored key. */
+        ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
+                                 1, &store);
+        if (ret == 0) {
+            wolfPSA_Store_Close(store);
+            store = NULL;
+            wc_ForceZero(buffer, buffer_size);
+            XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            *key_id = PSA_KEY_ID_NULL;
+            return PSA_ERROR_ALREADY_EXISTS;
+        }
+
         /* Open and write key to persistent storage */
         ret = wolfPSA_Store_OpenSz(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
                                   0, (int)data_length, &store);

@@ -1456,15 +1456,14 @@ cleanup:
     return ret;
 }
 
-static int test_import_key_short_write_preserves_persistent_key(void)
+static int test_import_key_short_write_leaves_no_persistent_key(void)
 {
 #if defined(_WIN32) || defined(_MSC_VER) || !defined(RLIMIT_FSIZE)
     return TEST_SKIPPED;
 #else
-    enum { ORIGINAL_LEN = 64, REPLACEMENT_LEN = 1024 };
-    uint8_t original[ORIGINAL_LEN];
-    uint8_t replacement[REPLACEMENT_LEN];
-    uint8_t exported[ORIGINAL_LEN];
+    enum { KEY_LEN = 1024 };
+    uint8_t material[KEY_LEN];
+    uint8_t exported[KEY_LEN];
     size_t exported_len = 0;
     psa_key_id_t key_id = 0;
     psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 3175u;
@@ -1477,25 +1476,17 @@ static int test_import_key_short_write_preserves_persistent_key(void)
     int ret = TEST_FAIL;
     size_t i;
 
-    for (i = 0; i < sizeof(original); i++) {
-        original[i] = (uint8_t)i;
-    }
-    for (i = 0; i < sizeof(replacement); i++) {
-        replacement[i] = (uint8_t)(0xa5u ^ i);
+    for (i = 0; i < sizeof(material); i++) {
+        material[i] = (uint8_t)(0xa5u ^ i);
     }
 
     (void)psa_destroy_key(persistent_id);
 
     psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
-    psa_set_key_bits(&attrs, ORIGINAL_LEN * 8u);
+    psa_set_key_bits(&attrs, KEY_LEN * 8u);
     psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
     psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
     psa_set_key_id(&attrs, persistent_id);
-
-    st = psa_import_key(&attrs, original, sizeof(original), &key_id);
-    if (check_status(st, "psa_import_key(original persistent RAW_DATA)") != TEST_OK) {
-        goto cleanup;
-    }
 
     if (getrlimit(RLIMIT_FSIZE, &old_limit) != 0) {
         ret = TEST_SKIPPED;
@@ -1515,8 +1506,7 @@ static int test_import_key_short_write_preserves_persistent_key(void)
     }
     limit_set = 1;
 
-    psa_set_key_bits(&attrs, REPLACEMENT_LEN * 8u);
-    st = psa_import_key(&attrs, replacement, sizeof(replacement), &key_id);
+    st = psa_import_key(&attrs, material, sizeof(material), &key_id);
 
     (void)setrlimit(RLIMIT_FSIZE, &old_limit);
     (void)signal(SIGXFSZ, old_sigxfsz);
@@ -1526,17 +1516,15 @@ static int test_import_key_short_write_preserves_persistent_key(void)
                    "psa_import_key reports short persistent write") != TEST_OK) {
         goto cleanup;
     }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "short persistent write leaves key id null") != TEST_OK) {
+        goto cleanup;
+    }
 
+    /* The aborted temp file must not have been committed: no key exists. */
     st = psa_export_key(persistent_id, exported, sizeof(exported), &exported_len);
-    if (check_status(st, "psa_export_key after failed persistent overwrite") != TEST_OK) {
-        goto cleanup;
-    }
-    if (check_true(exported_len == sizeof(original),
-                   "failed persistent overwrite preserves length") != TEST_OK) {
-        goto cleanup;
-    }
-    if (check_buf_eq("failed persistent overwrite preserves data",
-                     exported, original, sizeof(original)) != TEST_OK) {
+    if (check_true(st == PSA_ERROR_INVALID_HANDLE,
+                   "short persistent write commits no key") != TEST_OK) {
         goto cleanup;
     }
 
@@ -1551,6 +1539,72 @@ cleanup:
     (void)psa_destroy_key(persistent_id);
     return ret;
 #endif
+}
+
+static int test_import_key_rejects_duplicate_persistent_id(void)
+{
+    static const uint8_t first[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    static const uint8_t second[16] = {
+        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,
+        0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
+    };
+    uint8_t exported[sizeof(first)];
+    size_t exported_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 3857u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, sizeof(first) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+
+    st = psa_import_key(&attrs, first, sizeof(first), &key_id);
+    if (check_status(st, "psa_import_key(first persistent)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* A second import to the same persistent id must be rejected per the PSA
+     * Crypto API rather than silently overwriting the stored key. */
+    key_id = 0;
+    st = psa_import_key(&attrs, second, sizeof(second), &key_id);
+    if (check_true(st == PSA_ERROR_ALREADY_EXISTS,
+                   "psa_import_key rejects duplicate persistent id") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "rejected duplicate import leaves key id null") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* The original key material must remain intact. */
+    st = psa_export_key(persistent_id, exported, sizeof(exported), &exported_len);
+    if (check_status(st, "psa_export_key(after duplicate import)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == sizeof(first),
+                   "duplicate import preserves key length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("duplicate import preserves key data",
+                     exported, first, sizeof(first)) != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&attrs);
+    (void)psa_destroy_key(persistent_id);
+    return ret;
 }
 
 static int test_copy_key_requires_copy_usage_flag(void)
@@ -7424,9 +7478,15 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
-    if (only == NULL || strcmp(only, "import_key_short_write_preserves_persistent_key") == 0) {
-        if (run_named_test("import_key_short_write_preserves_persistent_key",
-                           test_import_key_short_write_preserves_persistent_key) == TEST_FAIL) {
+    if (only == NULL || strcmp(only, "import_key_short_write_leaves_no_persistent_key") == 0) {
+        if (run_named_test("import_key_short_write_leaves_no_persistent_key",
+                           test_import_key_short_write_leaves_no_persistent_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_rejects_duplicate_persistent_id") == 0) {
+        if (run_named_test("import_key_rejects_duplicate_persistent_id",
+                           test_import_key_rejects_duplicate_persistent_id) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
