@@ -188,6 +188,26 @@ static int wolfpsa_key_agreement_alg_permitted(psa_algorithm_t key_alg,
            PSA_ALG_KEY_AGREEMENT_GET_KDF(alg);
 }
 
+/* Return non-zero if a key whose permitted-algorithm policy is 'key_alg' may be
+ * used for the requested signature/encryption algorithm 'alg'. The common case
+ * is exact equality. In addition, a hash-and-sign policy whose hash component is
+ * the PSA_ALG_ANY_HASH wildcard (e.g. PSA_ALG_ECDSA(PSA_ALG_ANY_HASH) or
+ * PSA_ALG_RSA_PSS(PSA_ALG_ANY_HASH)) authorizes any concrete hash-and-sign
+ * algorithm of the same base family, as required by the PSA Crypto API. */
+static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
+                                      psa_algorithm_t alg)
+{
+    if (key_alg == alg) {
+        return 1;
+    }
+    if (PSA_ALG_IS_SIGN_HASH(alg) &&
+        PSA_ALG_SIGN_GET_HASH(key_alg) == PSA_ALG_ANY_HASH) {
+        return (PSA_ALG_SIGN_GET_HASH(alg) != PSA_ALG_ANY_HASH) &&
+               ((key_alg & ~PSA_ALG_HASH_MASK) == (alg & ~PSA_ALG_HASH_MASK));
+    }
+    return 0;
+}
+
 static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
                                                  psa_key_usage_t usage,
                                                  psa_algorithm_t alg,
@@ -229,7 +249,7 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
             return PSA_ERROR_NOT_PERMITTED;
         }
     }
-    else if (key_alg != alg) {
+    else if (!wolfpsa_sign_alg_permitted(key_alg, alg)) {
         wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;

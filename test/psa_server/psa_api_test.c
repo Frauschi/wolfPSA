@@ -3796,6 +3796,64 @@ cleanup:
     return ret;
 }
 
+/* F-5554: a key whose policy is the wildcard PSA_ALG_ECDSA(PSA_ALG_ANY_HASH)
+ * must authorize concrete hash-and-sign operations such as
+ * PSA_ALG_ECDSA(PSA_ALG_SHA_256). */
+static int test_asym_any_hash_policy(void)
+{
+    static const uint8_t msg[] = "wolfpsa any-hash policy";
+    uint8_t hash[WC_SHA256_DIGEST_SIZE];
+    uint8_t sig[80];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    wc_Sha256 sha;
+    int ret;
+
+    ret = wc_InitSha256(&sha);
+    if (ret != 0) {
+        printf("FAIL: wc_InitSha256 (any-hash policy) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+    wc_Sha256Update(&sha, msg, (word32)sizeof(msg) - 1u);
+    wc_Sha256Final(&sha, hash);
+    wc_Sha256Free(&sha);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_ANY_HASH));
+
+    ret = TEST_FAIL;
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_status(st, "psa_generate_key(ECDSA any-hash)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_sign_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(any-hash policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                         hash, sizeof(hash), sig, sig_len);
+    if (check_status(st, "psa_verify_hash(any-hash policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(key_id);
+    }
+
+    return ret;
+}
+
 static int test_rsa_pkcs1v15_raw_sign_hash_roundtrip_large_input(void)
 {
     uint8_t input[65];
@@ -7637,6 +7695,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_algorithm_mismatch_policy") == 0) {
         if (run_named_test("asym_algorithm_mismatch_policy",
                            test_asym_algorithm_mismatch_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "asym_any_hash_policy") == 0) {
+        if (run_named_test("asym_any_hash_policy",
+                           test_asym_any_hash_policy) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
