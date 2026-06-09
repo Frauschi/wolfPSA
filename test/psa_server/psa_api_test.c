@@ -376,6 +376,92 @@ static int test_hmac(void)
     return TEST_OK;
 }
 
+/* Known-answer test for AES-CMAC, locking down the block-cipher-MAC dispatch
+ * in psa_mac.c (setup/update/final/abort) that the HMAC-only tests never
+ * exercise. Vector is NIST SP 800-38B AES-128 CMAC, Example 2 (Mlen = 128).
+ * A build without WOLFSSL_CMAC reports PSA_ERROR_NOT_SUPPORTED and is
+ * skipped, so the test works across the build-config matrix. */
+static int test_cmac(void)
+{
+    static const uint8_t key[] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t msg[] = {
+        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
+        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+    };
+    static const uint8_t expected[] = {
+        0x07,0x0a,0x16,0xb4,0x6b,0x4d,0x41,0x44,
+        0xf7,0x9b,0xdd,0x9d,0xd0,0x4a,0x28,0x7c
+    };
+    uint8_t out[sizeof(expected)];
+    uint8_t bad_mac[sizeof(expected)];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t hmac_key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, (size_t)sizeof(key) * 8u);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CMAC);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES CMAC)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_mac_compute(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                         out, sizeof(out), &out_len);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        printf("SKIP: cmac (not supported by this build)\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_OK;
+    }
+    if (check_status(st, "psa_mac_compute(CMAC)") != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == sizeof(expected), "psa_mac_compute(CMAC) length") != TEST_OK) return TEST_FAIL;
+    if (check_buf_eq("psa_mac_compute(CMAC)", out, expected, sizeof(expected)) != TEST_OK) return TEST_FAIL;
+
+    st = psa_mac_verify(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                        expected, sizeof(expected));
+    if (check_status(st, "psa_mac_verify(CMAC)") != TEST_OK) return TEST_FAIL;
+
+    memcpy(bad_mac, expected, sizeof(bad_mac));
+    bad_mac[0] ^= 0x01u;
+    st = psa_mac_verify(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                        bad_mac, sizeof(bad_mac));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_mac_verify(CMAC) rejects bad MAC") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(CMAC)") != TEST_OK) return TEST_FAIL;
+
+    /* CMAC setup must reject a key whose type is not AES, locking down the
+     * PSA_KEY_TYPE_AES check in wolfpsa_mac_check_key. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, (size_t)sizeof(key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CMAC);
+    st = psa_import_key(&attrs, key, sizeof(key), &hmac_key_id);
+    if (check_status(st, "psa_import_key(non-AES CMAC)") != TEST_OK) return TEST_FAIL;
+    st = psa_mac_sign_setup(&op, hmac_key_id, PSA_ALG_CMAC);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_mac_sign_setup(CMAC) rejects non-AES key") != TEST_OK) {
+        (void)psa_mac_abort(&op);
+        (void)psa_destroy_key(hmac_key_id);
+        return TEST_FAIL;
+    }
+    (void)psa_mac_abort(&op);
+    st = psa_destroy_key(hmac_key_id);
+    if (check_status(st, "psa_destroy_key(non-AES CMAC)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_mac_verify_finish_accepts_longer_at_least_length_mac(void)
 {
     static const uint8_t key[] = {
@@ -6946,6 +7032,9 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "hmac") == 0) {
         if (run_named_test("hmac", test_hmac) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "cmac") == 0) {
+        if (run_named_test("cmac", test_cmac) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "mac_verify_finish_at_least_length") == 0) {
         if (run_named_test("mac_verify_finish_at_least_length",
