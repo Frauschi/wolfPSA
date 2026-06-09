@@ -51,7 +51,7 @@
 
 /* Key storage state */
 static int g_key_storage_initialized = 0;
-static psa_key_id_t g_next_key_id = 1;
+static psa_key_id_t g_next_key_id = PSA_KEY_ID_VENDOR_MIN;
 
 typedef struct wolfpsa_volatile_key_node {
     psa_key_id_t id;
@@ -956,7 +956,13 @@ psa_status_t psa_import_key(
             *key_id = attr_id;
         }
         else {
-            if (g_next_key_id == PSA_KEY_ID_NULL) {
+            /* Auto-assign implementation key ids from the vendor range so
+             * they cannot collide with caller-specified persistent ids, which
+             * the PSA API reserves to the user range. A collision would let an
+             * auto-assigned volatile key shadow a persistent record on read and
+             * survive psa_destroy_key() on disk. */
+            if (g_next_key_id < PSA_KEY_ID_VENDOR_MIN ||
+                g_next_key_id > PSA_KEY_ID_VENDOR_MAX) {
                 return PSA_ERROR_INSUFFICIENT_STORAGE;
             }
             *key_id = g_next_key_id++;

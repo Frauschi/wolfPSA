@@ -3535,7 +3535,7 @@ static int test_import_key_rejects_wrapped_volatile_key_id(void)
         0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
     };
     const psa_key_id_t original_next_key_id = wolfpsa_test_get_next_key_id();
-    const psa_key_id_t max_key_id = (psa_key_id_t)~(psa_key_id_t)0;
+    const psa_key_id_t max_key_id = PSA_KEY_ID_VENDOR_MAX;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_key_id_t first_key_id = PSA_KEY_ID_NULL;
     psa_key_id_t second_key_id = PSA_KEY_ID_NULL;
@@ -3576,6 +3576,50 @@ cleanup:
         (void)psa_destroy_key(first_key_id);
     }
     wolfpsa_test_set_next_key_id(original_next_key_id);
+    return result;
+}
+
+static int test_import_key_auto_id_uses_vendor_range(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CTR);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(auto-assigned volatile id)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* The PSA API reserves the user id range
+     * [PSA_KEY_ID_USER_MIN, PSA_KEY_ID_USER_MAX] for caller-specified
+     * persistent keys. Implementation-assigned (volatile) ids must come from
+     * the vendor range so an auto-assigned id can never collide with - and
+     * thus shadow on read or leave undestroyed on disk - a persistent key
+     * that a caller created with the same numeric id. */
+    if (check_true(key_id >= PSA_KEY_ID_VENDOR_MIN &&
+                   key_id <= PSA_KEY_ID_VENDOR_MAX,
+                   "auto-assigned volatile id avoids the user range") != TEST_OK) {
+        printf("  got key id 0x%08lx\n", (unsigned long)key_id);
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(key_id);
+    }
     return result;
 }
 
@@ -7252,6 +7296,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "import_key_volatile_key_id_wrap") == 0) {
         if (run_named_test("import_key_volatile_key_id_wrap",
                            test_import_key_rejects_wrapped_volatile_key_id) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_auto_id_vendor_range") == 0) {
+        if (run_named_test("import_key_auto_id_vendor_range",
+                           test_import_key_auto_id_uses_vendor_range) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
