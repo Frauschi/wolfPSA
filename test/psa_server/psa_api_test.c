@@ -878,6 +878,119 @@ static int test_cipher_cbc(void)
     return TEST_OK;
 }
 
+/* Exercises psa_cipher_generate_iv, which no other test reaches. Covers the
+ * encrypt-direction success path (a freshly randomized IV is produced and
+ * accepted by the operation, and a round trip still decrypts), the
+ * decrypt-direction rejection, the re-generation rejection on an operation that
+ * already has an IV, and the buffer-too-small rejection. The IV buffers are
+ * zero-initialized so that dropping the psa_generate_random() call would leave
+ * them equal and be caught by the "IVs differ" check. */
+static int test_cipher_generate_iv(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t plaintext[16] = {
+        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
+        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+    };
+    uint8_t iv1[16] = {0};
+    uint8_t iv2[16] = {0};
+    uint8_t small_iv[8] = {0};
+    uint8_t enc[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext) + 16];
+    size_t iv1_len = 0;
+    size_t iv2_len = 0;
+    size_t small_len = 0;
+    size_t enc_len = 0;
+    size_t enc_finish = 0;
+    size_t dec_len = 0;
+    size_t dec_finish = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(generate_iv)") != TEST_OK) goto cleanup;
+
+    /* (a) encrypt-direction success: an IV is generated, has the algorithm's
+     * length, and the operation can complete an encrypt round trip with it. */
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv1, sizeof(iv1), &iv1_len);
+    if (check_status(st, "psa_cipher_generate_iv") != TEST_OK) goto cleanup;
+    if (check_true(iv1_len == 16, "psa_cipher_generate_iv length") != TEST_OK) goto cleanup;
+
+    /* (c) a second generate on the same operation must be rejected. */
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_cipher_generate_iv rejects re-generation") != TEST_OK) goto cleanup;
+
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext), enc, sizeof(enc), &enc_len);
+    if (check_status(st, "psa_cipher_update(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_finish(&op, enc + enc_len, sizeof(enc) - enc_len, &enc_finish);
+    if (check_status(st, "psa_cipher_finish(gen_iv)") != TEST_OK) goto cleanup;
+    enc_len += enc_finish;
+
+    /* Decrypt using the generated IV to confirm it was the one actually used. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_decrypt_setup(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_set_iv(&op, iv1, iv1_len);
+    if (check_status(st, "psa_cipher_set_iv(gen_iv dec)") != TEST_OK) goto cleanup;
+    st = psa_cipher_update(&op, enc, enc_len, dec, sizeof(dec), &dec_len);
+    if (check_status(st, "psa_cipher_update(gen_iv dec)") != TEST_OK) goto cleanup;
+    st = psa_cipher_finish(&op, dec + dec_len, sizeof(dec) - dec_len, &dec_finish);
+    if (check_status(st, "psa_cipher_finish(gen_iv dec)") != TEST_OK) goto cleanup;
+    dec_len += dec_finish;
+    if (check_true(dec_len == sizeof(plaintext), "psa_cipher_generate_iv round-trip length") != TEST_OK) goto cleanup;
+    if (check_buf_eq("psa_cipher_generate_iv round-trip", dec, plaintext, sizeof(plaintext)) != TEST_OK) goto cleanup;
+
+    /* (a cont.) a fresh operation must produce a different random IV. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv 2)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_status(st, "psa_cipher_generate_iv(2)") != TEST_OK) goto cleanup;
+    if (check_true(memcmp(iv1, iv2, sizeof(iv1)) != 0,
+                   "psa_cipher_generate_iv produces fresh randomness") != TEST_OK) goto cleanup;
+    (void)psa_cipher_abort(&op);
+
+    /* (b) decrypt-direction operations must reject IV generation. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_decrypt_setup(gen_iv reject)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_cipher_generate_iv rejects decrypt direction") != TEST_OK) goto cleanup;
+    (void)psa_cipher_abort(&op);
+
+    /* (d) too-small output buffer must be rejected. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv small)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, small_iv, sizeof(small_iv), &small_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "psa_cipher_generate_iv rejects too-small buffer") != TEST_OK) goto cleanup;
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_cipher_rejects_algorithm_mismatch(void)
 {
     static const uint8_t key[16] = {
@@ -7106,6 +7219,9 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
         if (run_named_test("cipher_cbc", test_cipher_cbc) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "cipher_generate_iv") == 0) {
+        if (run_named_test("cipher_generate_iv", test_cipher_generate_iv) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "cipher_algorithm_mismatch") == 0) {
         if (run_named_test("cipher_algorithm_mismatch",
