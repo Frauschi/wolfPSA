@@ -2456,6 +2456,190 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+/* F-5551: a corrupted authentication tag must be rejected with
+ * PSA_ERROR_INVALID_SIGNATURE and must not yield any accepted plaintext.
+ * Exercises the one-shot psa_aead_decrypt path. */
+static int aead_corrupt_tag_oneshot(psa_key_id_t key_id, psa_algorithm_t alg,
+                                    const uint8_t *nonce, size_t nonce_len,
+                                    const char *label)
+{
+    static const uint8_t plaintext[16] = {
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+    };
+    uint8_t aead_out[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext)];
+    size_t out_len = 0;
+    size_t dec_len = 0;
+    psa_status_t st;
+
+    st = psa_aead_encrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          aead_out, sizeof(aead_out), &out_len);
+    if (check_status(st, label) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len > 0, label) != TEST_OK) return TEST_FAIL;
+
+    /* Flip one tag byte (the last byte of the ciphertext||tag output). */
+    aead_out[out_len - 1] ^= 0xff;
+
+    st = psa_aead_decrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          aead_out, out_len, dec, sizeof(dec), &dec_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(dec_len == 0, label) != TEST_OK) return TEST_FAIL;
+    return TEST_OK;
+}
+
+/* F-5551: same property exercised through the multipart psa_aead_verify path. */
+static int aead_corrupt_tag_multipart(psa_key_id_t key_id, psa_algorithm_t alg,
+                                      const uint8_t *nonce, size_t nonce_len,
+                                      const char *label)
+{
+    static const uint8_t plaintext[16] = {
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f
+    };
+    const size_t tag_len = 16;
+    uint8_t aead_out[sizeof(plaintext) + 16];
+    uint8_t update_out[sizeof(plaintext)];
+    uint8_t dec[sizeof(plaintext)];
+    size_t out_len = 0;
+    size_t update_len = 0;
+    size_t dec_len = 0;
+    size_t ct_len;
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    st = psa_aead_encrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          aead_out, sizeof(aead_out), &out_len);
+    if (check_status(st, label) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == sizeof(plaintext) + tag_len, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    ct_len = out_len - tag_len;
+
+    /* Flip one tag byte. */
+    aead_out[out_len - 1] ^= 0xff;
+
+    st = psa_aead_decrypt_setup(&op, key_id, alg);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_set_nonce(&op, nonce, nonce_len);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_update_ad(&op, NULL, 0);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_update(&op, aead_out, ct_len,
+                         update_out, sizeof(update_out), &update_len);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_verify(&op, dec, sizeof(dec), &dec_len,
+                         aead_out + ct_len, tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE, label) != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    return ret;
+}
+
+static int test_aead_rejects_corrupted_tag(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs;
+    psa_status_t st;
+    int ret = TEST_OK;
+
+#ifdef HAVE_AESGCM
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(GCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_GCM, nonce, sizeof(nonce),
+                                 "psa_aead_decrypt(GCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    if (aead_corrupt_tag_multipart(key_id, PSA_ALG_GCM, nonce, sizeof(nonce),
+                                   "psa_aead_verify(GCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+#endif /* HAVE_AESGCM */
+
+#ifdef HAVE_AESCCM
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CCM);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(CCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_CCM, nonce, sizeof(nonce),
+                                 "psa_aead_decrypt(CCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(CCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+#endif /* HAVE_AESCCM */
+
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
+    {
+        static const uint8_t chacha_key[32] = {
+            0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,
+            0x88,0x89,0x8a,0x8b,0x8c,0x8d,0x8e,0x8f,
+            0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,
+            0x98,0x99,0x9a,0x9b,0x9c,0x9d,0x9e,0x9f
+        };
+        attrs = psa_key_attributes_init();
+        psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+        psa_set_key_bits(&attrs, 256);
+        psa_set_key_usage_flags(&attrs,
+                                PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+        psa_set_key_algorithm(&attrs, PSA_ALG_CHACHA20_POLY1305);
+        st = psa_import_key(&attrs, chacha_key, sizeof(chacha_key), &key_id);
+        if (check_status(st, "psa_import_key(ChaCha20 corrupt tag)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_CHACHA20_POLY1305,
+                                     nonce, sizeof(nonce),
+                                     "psa_aead_decrypt(ChaCha20 corrupt tag)")
+                != TEST_OK) {
+            ret = TEST_FAIL;
+        }
+        st = psa_destroy_key(key_id);
+        if (check_status(st, "psa_destroy_key(ChaCha20 corrupt tag)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        key_id = 0;
+    }
+#endif /* HAVE_CHACHA && HAVE_POLY1305 */
+
+    return ret;
+}
+
 static int test_aead_generate_nonce(void)
 {
     static const uint8_t key[16] = {
@@ -7610,6 +7794,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_rejects_corrupted_tag") == 0) {
+        if (run_named_test("aead_rejects_corrupted_tag",
+                           test_aead_rejects_corrupted_tag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "aead_generate_nonce") == 0) {
         if (run_named_test("aead_generate_nonce",
