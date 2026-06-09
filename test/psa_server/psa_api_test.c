@@ -5780,6 +5780,114 @@ cleanup:
     return ret;
 }
 
+/* F-5550: a key whose policy fixes a KDF (e.g. ECDH+HKDF) must not be usable
+ * for raw key agreement or for a different KDF; only the base algorithm was
+ * being checked, which let the KDF domain-separation barrier be bypassed. */
+static int test_ka_kdf_policy_separation(void)
+{
+    uint8_t peer_pub[128];
+    size_t peer_pub_len = 0;
+    uint8_t secret[128];
+    size_t secret_len = 0;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_attributes_t out_attrs = psa_key_attributes_init();
+    psa_key_id_t hkdf_key = 0;
+    psa_key_id_t peer_key = 0;
+    psa_key_id_t out_key = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    /* Private key restricted to ECDH followed by HKDF-SHA256. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &hkdf_key);
+    if (check_status(st, "psa_generate_key(ECDH+HKDF policy)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_generate_key(&attrs, &peer_key);
+    if (check_status(st, "psa_generate_key(ECDH+HKDF peer)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_export_public_key(peer_key, peer_pub, sizeof(peer_pub),
+                               &peer_pub_len);
+    if (check_status(st, "psa_export_public_key(ECDH+HKDF peer)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* One-shot raw agreement must be rejected: it would expose the bare
+     * shared secret, bypassing the HKDF the policy requires. */
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, hkdf_key, peer_pub, peer_pub_len,
+                               secret, sizeof(secret), &secret_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_raw_key_agreement rejects HKDF-only policy key")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Multipart raw agreement (raw ECDH operation) must likewise be rejected. */
+    st = psa_key_derivation_setup(&op, PSA_ALG_ECDH);
+    if (check_status(st, "psa_key_derivation_setup(raw ECDH)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          hkdf_key, peer_pub, peer_pub_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_key_agreement rejects HKDF-only policy "
+                   "key for raw op") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_key_derivation_abort(&op);
+    op = psa_key_derivation_operation_init();
+
+    /* One-shot agreement with a different KDF (HKDF-Extract) must be rejected. */
+    psa_set_key_type(&out_attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&out_attrs, 256);
+    psa_set_key_usage_flags(&out_attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&out_attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_key_agreement(hkdf_key, peer_pub, peer_pub_len,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH,
+                              PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256)),
+        &out_attrs, &out_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_agreement rejects mismatched KDF") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Sanity: the policy's own algorithm (ECDH+HKDF-SHA256) is still allowed. */
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "psa_key_derivation_setup(ECDH+HKDF)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          hkdf_key, peer_pub, peer_pub_len);
+    if (check_status(st, "psa_key_derivation_key_agreement(ECDH+HKDF allowed)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    if (out_key != 0) {
+        (void)psa_destroy_key(out_key);
+    }
+    if (peer_key != 0) {
+        (void)psa_destroy_key(peer_key);
+    }
+    if (hkdf_key != 0) {
+        (void)psa_destroy_key(hkdf_key);
+    }
+    psa_reset_key_attributes(&attrs);
+    psa_reset_key_attributes(&out_attrs);
+    return ret;
+}
+
 static int test_kdf_tls12_psk_to_ms_rfc4279_order(void)
 {
     static const uint8_t psk[] = { 0xa1, 0xb2, 0xc3, 0xd4, 0xe5 };
@@ -6990,6 +7098,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_key_agreement_policy") == 0) {
         if (run_named_test("kdf_key_agreement_policy",
                            test_kdf_key_agreement_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ka_kdf_policy_separation") == 0) {
+        if (run_named_test("ka_kdf_policy_separation",
+                           test_ka_kdf_policy_separation) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

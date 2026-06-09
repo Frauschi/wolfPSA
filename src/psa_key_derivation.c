@@ -44,6 +44,17 @@
     #include <wolfcrypt/src/misc.c>
 #endif
 
+/* Defined in psa_asymmetric_api.c: compute the raw ECDH shared secret while
+ * enforcing the private key's full key-agreement policy (base algorithm and
+ * embedded KDF), not just the base algorithm. */
+extern psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
+                                                 psa_key_id_t private_key,
+                                                 const uint8_t *peer_key,
+                                                 size_t peer_key_length,
+                                                 uint8_t *output,
+                                                 size_t output_size,
+                                                 size_t *output_length);
+
 typedef struct wolfpsa_kdf_ctx {
     psa_algorithm_t alg;
     psa_algorithm_t ka_alg;
@@ -749,9 +760,9 @@ psa_status_t psa_key_derivation_key_agreement(psa_key_derivation_operation_t *op
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    status = psa_raw_key_agreement(ctx->ka_alg, private_key,
-                                   peer_key, peer_key_length,
-                                   secret, secret_len, &output_len);
+    status = wolfpsa_key_agreement_secret(
+                 PSA_ALG_KEY_AGREEMENT(ctx->ka_alg, ctx->alg), private_key,
+                 peer_key, peer_key_length, secret, secret_len, &output_len);
     if (status == PSA_SUCCESS) {
         status = psa_key_derivation_input_bytes(operation,
                                                 step,
