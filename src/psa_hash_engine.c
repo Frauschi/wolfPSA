@@ -886,7 +886,7 @@ psa_status_t psa_hash_compare(psa_algorithm_t alg,
     }
     
     /* Check if the reference hash length is valid */
-    if (!PSA_ALG_IS_HASH(alg)) {
+    if (!PSA_ALG_IS_HASH(alg) || hash == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 

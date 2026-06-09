@@ -88,6 +88,23 @@ static int test_hash_requires_psa_crypto_init(void)
     return 0;
 }
 
+static int test_hash_compare_rejects_null_reference(void)
+{
+    static const uint8_t msg[] = "abc";
+    psa_status_t st;
+
+    /* A NULL reference hash with a length matching the algorithm output size
+     * must be rejected, not dereferenced. */
+    st = psa_hash_compare(PSA_ALG_SHA_256, msg, sizeof(msg) - 1, NULL,
+                          PSA_HASH_LENGTH(PSA_ALG_SHA_256));
+    if (expect_status("psa_hash_compare NULL reference", st,
+                      PSA_ERROR_INVALID_ARGUMENT) != 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static int test_random_requires_psa_crypto_init(void)
 {
     uint8_t buf[16];
@@ -134,6 +151,10 @@ int main(void)
     }
     if (g_wolfcrypt_init_calls != 2) {
         printf("FAIL wolfCrypt_Init calls=%d expected=2\n", g_wolfcrypt_init_calls);
+        return 1;
+    }
+
+    if (test_hash_compare_rejects_null_reference() != 0) {
         return 1;
     }
 
