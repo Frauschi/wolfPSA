@@ -317,6 +317,9 @@ psa_status_t psa_aead_set_lengths(psa_aead_operation_t *operation,
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
     }
+    if (ctx->lengths_set) {
+        return PSA_ERROR_BAD_STATE;
+    }
     if (ctx->nonce_length != 0 || ctx->aad_length != 0 || ctx->input_length != 0) {
         return PSA_ERROR_BAD_STATE;
     }

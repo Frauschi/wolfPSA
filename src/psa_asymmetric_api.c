@@ -166,6 +166,48 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
                                         size_t signature_length);
 #endif
 
+/* Return non-zero if a key whose permitted-algorithm policy is the
+ * key-agreement algorithm 'key_alg' may be used for the requested
+ * key-agreement algorithm 'alg'. The base algorithm (e.g. ECDH) must match and
+ * the embedded KDF must match exactly, except that a raw key-agreement policy
+ * (no KDF) is the most permissive form and therefore permits any KDF. This
+ * keeps the KDF embedded in the policy as a real domain-separation barrier:
+ * a key restricted to e.g. ECDH+HKDF must not be usable for raw agreement or
+ * for a different KDF. */
+static int wolfpsa_key_agreement_alg_permitted(psa_algorithm_t key_alg,
+                                               psa_algorithm_t alg)
+{
+    if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
+        PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {
+        return 0;
+    }
+    if (PSA_ALG_IS_RAW_KEY_AGREEMENT(key_alg)) {
+        return 1;
+    }
+    return PSA_ALG_KEY_AGREEMENT_GET_KDF(key_alg) ==
+           PSA_ALG_KEY_AGREEMENT_GET_KDF(alg);
+}
+
+/* Return non-zero if a key whose permitted-algorithm policy is 'key_alg' may be
+ * used for the requested signature/encryption algorithm 'alg'. The common case
+ * is exact equality. In addition, a hash-and-sign policy whose hash component is
+ * the PSA_ALG_ANY_HASH wildcard (e.g. PSA_ALG_ECDSA(PSA_ALG_ANY_HASH) or
+ * PSA_ALG_RSA_PSS(PSA_ALG_ANY_HASH)) authorizes any concrete hash-and-sign
+ * algorithm of the same base family, as required by the PSA Crypto API. */
+static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
+                                      psa_algorithm_t alg)
+{
+    if (key_alg == alg) {
+        return 1;
+    }
+    if (PSA_ALG_IS_SIGN_HASH(alg) &&
+        PSA_ALG_SIGN_GET_HASH(key_alg) == PSA_ALG_ANY_HASH) {
+        return (PSA_ALG_SIGN_GET_HASH(alg) != PSA_ALG_ANY_HASH) &&
+               ((key_alg & ~PSA_ALG_HASH_MASK) == (alg & ~PSA_ALG_HASH_MASK));
+    }
+    return 0;
+}
+
 static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
                                                  psa_key_usage_t usage,
                                                  psa_algorithm_t alg,
@@ -200,15 +242,14 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
 
     /* Algorithm match checks */
     if (PSA_ALG_IS_KEY_AGREEMENT(alg) && PSA_ALG_IS_KEY_AGREEMENT(key_alg)) {
-        if (PSA_ALG_KEY_AGREEMENT_GET_BASE(key_alg) !=
-            PSA_ALG_KEY_AGREEMENT_GET_BASE(alg)) {
+        if (!wolfpsa_key_agreement_alg_permitted(key_alg, alg)) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
             return PSA_ERROR_NOT_PERMITTED;
         }
     }
-    else if (key_alg != alg) {
+    else if (!wolfpsa_sign_alg_permitted(key_alg, alg)) {
         wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
@@ -648,16 +689,21 @@ cleanup:
     return status;
 }
 
-psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
-                                   psa_key_id_t private_key,
-                                   const uint8_t *peer_key,
-                                   size_t peer_key_length,
-                                   uint8_t *output,
-                                   size_t output_size,
-                                   size_t *output_length)
+/* Compute the raw ECDH shared secret after verifying that the private key's
+ * policy permits the full key-agreement algorithm 'alg'. 'alg' is the complete
+ * key-agreement algorithm requested by the caller (raw PSA_ALG_ECDH, or a
+ * combined PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, kdf)) so that the KDF embedded
+ * in the policy is enforced, not just the base algorithm. Shared by
+ * psa_raw_key_agreement(), psa_key_agreement() and
+ * psa_key_derivation_key_agreement(). */
+psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
+                                          psa_key_id_t private_key,
+                                          const uint8_t *peer_key,
+                                          size_t peer_key_length,
+                                          uint8_t *output,
+                                          size_t output_size,
+                                          size_t *output_length)
 {
-    wolfpsa_trace("psa_raw_key_agreement(alg=0x%08x key=%u peer_len=%zu)",
-                  (unsigned)alg, (unsigned)private_key, peer_key_length);
     psa_key_attributes_t attributes;
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
@@ -668,13 +714,6 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     int curve_id;
     word32 out_len;
 
-    if (output == NULL || output_length == NULL) {
-        return PSA_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (!PSA_ALG_IS_RAW_KEY_AGREEMENT(alg)) {
-        return PSA_ERROR_INVALID_ARGUMENT;
-    }
     if (PSA_ALG_KEY_AGREEMENT_GET_BASE(alg) != PSA_ALG_ECDH) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -801,6 +840,29 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     return PSA_SUCCESS;
 }
 
+psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
+                                   psa_key_id_t private_key,
+                                   const uint8_t *peer_key,
+                                   size_t peer_key_length,
+                                   uint8_t *output,
+                                   size_t output_size,
+                                   size_t *output_length)
+{
+    wolfpsa_trace("psa_raw_key_agreement(alg=0x%08x key=%u peer_len=%zu)",
+                  (unsigned)alg, (unsigned)private_key, peer_key_length);
+
+    if (output == NULL || output_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (!PSA_ALG_IS_RAW_KEY_AGREEMENT(alg)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    return wolfpsa_key_agreement_secret(alg, private_key, peer_key,
+                                        peer_key_length, output, output_size,
+                                        output_length);
+}
+
 psa_status_t psa_key_agreement(psa_key_id_t private_key,
                                const uint8_t *peer_key,
                                size_t peer_key_length,
@@ -841,9 +903,9 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
 
-    status = psa_raw_key_agreement(PSA_ALG_KEY_AGREEMENT_GET_BASE(alg),
-                                   private_key, peer_key, peer_key_length,
-                                   secret, secret_len, &output_len);
+    status = wolfpsa_key_agreement_secret(alg, private_key, peer_key,
+                                          peer_key_length, secret, secret_len,
+                                          &output_len);
     if (status != PSA_SUCCESS) {
         wc_ForceZero(secret, secret_len);
         XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);

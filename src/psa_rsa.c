@@ -474,7 +474,10 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
     word32 idx = 0;
     int padding;
     int hash_type;
-    
+#ifdef WC_RSA_BLINDING
+    WC_RNG rng;
+#endif
+
     (void)key_bits;
     (void)salt;
     (void)salt_length;
@@ -489,20 +492,36 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
         (wolfpsa_check_word32_length(salt_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Initialize RSA key */
     ret = wc_InitRsaKey(&rsa_key, NULL);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Decode private key */
     ret = wc_RsaPrivateKeyDecode(key_buffer, &idx, &rsa_key, (word32)key_buffer_size);
     if (ret != 0) {
         wc_FreeRsaKey(&rsa_key);
         return wc_error_to_psa_status(ret);
     }
-    
+
+#ifdef WC_RSA_BLINDING
+    /* RSA blinding requires an RNG associated with the key. Unlike the signing
+     * routines, wc_RsaPrivateDecrypt() takes no RNG argument, so set it here. */
+    ret = wc_InitRng(&rng);
+    if (ret != 0) {
+        wc_FreeRsaKey(&rsa_key);
+        return wc_error_to_psa_status(ret);
+    }
+    ret = wc_RsaSetRNG(&rsa_key, &rng);
+    if (ret != 0) {
+        wc_FreeRng(&rng);
+        wc_FreeRsaKey(&rsa_key);
+        return wc_error_to_psa_status(ret);
+    }
+#endif
+
     /* Get padding type and hash type */
     padding = wc_psa_get_rsa_padding(alg);
     hash_type = wc_psa_get_hash_type(alg);
@@ -535,15 +554,18 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
     else {
         ret = BAD_FUNC_ARG;
     }
-    
+
+#ifdef WC_RSA_BLINDING
+    wc_FreeRng(&rng);
+#endif
     wc_FreeRsaKey(&rsa_key);
-    
+
     if (ret < 0) {
         return wc_error_to_psa_status(ret);
     }
-    
+
     *output_length = (size_t)ret;
-    
+
     return PSA_SUCCESS;
 }
 

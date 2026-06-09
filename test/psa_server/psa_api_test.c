@@ -35,6 +35,8 @@
 #if !defined(_WIN32) && !defined(_MSC_VER)
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <wolfpsa/psa/crypto.h>
@@ -96,6 +98,52 @@ static int check_buf_eq(const char* what, const uint8_t* a, const uint8_t* b, si
     return TEST_OK;
 }
 
+/* Known-answer test for a single hash algorithm: checks both the one-shot
+ * psa_hash_compute path and the multipart setup/update/finish path against a
+ * fixed digest of "abc". Catches mutated or swapped dispatch cases that a
+ * SHA-256-only test would miss. Algorithms that the linked library was not
+ * built with report PSA_ERROR_NOT_SUPPORTED and are skipped, so the same test
+ * works across the build-config matrix. */
+static int test_hash_kat(psa_algorithm_t alg, const uint8_t *expected,
+                         size_t expected_len, const char *name)
+{
+    static const uint8_t msg[] = "abc";
+    uint8_t out[PSA_HASH_MAX_SIZE];
+    size_t out_len = 0;
+    psa_hash_operation_t op = psa_hash_operation_init();
+    psa_status_t st;
+    char what[64];
+
+    snprintf(what, sizeof(what), "psa_hash_compute(%s)", name);
+    st = psa_hash_compute(alg, msg, sizeof(msg) - 1, out, sizeof(out),
+                          &out_len);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        printf("SKIP: %s (not supported by this build)\n", name);
+        return TEST_OK;
+    }
+    if (check_status(st, what) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == expected_len, what) != TEST_OK) return TEST_FAIL;
+    if (check_buf_eq(what, out, expected, expected_len) != TEST_OK)
+        return TEST_FAIL;
+
+    out_len = 0;
+    snprintf(what, sizeof(what), "psa_hash_finish(%s)", name);
+    st = psa_hash_setup(&op, alg);
+    if (check_status(st, what) != TEST_OK) return TEST_FAIL;
+    st = psa_hash_update(&op, msg, sizeof(msg) - 1);
+    if (check_status(st, what) != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_hash_finish(&op, out, sizeof(out), &out_len);
+    if (check_status(st, what) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == expected_len, what) != TEST_OK) return TEST_FAIL;
+    if (check_buf_eq(what, out, expected, expected_len) != TEST_OK)
+        return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_hash(void)
 {
     static const uint8_t msg[] = "abc";
@@ -126,6 +174,101 @@ static int test_hash(void)
     if (check_status(st, "psa_hash_finish") != TEST_OK) return TEST_FAIL;
     if (check_true(out2_len == sizeof(expected), "psa_hash_finish length") != TEST_OK) return TEST_FAIL;
     if (check_buf_eq("psa_hash_finish", out2, expected, sizeof(expected)) != TEST_OK) return TEST_FAIL;
+
+    /* Known-answer coverage for every other hash dispatch case the library may
+     * implement, so a mutated, swapped, or removed non-SHA-256 case does not
+     * pass unnoticed. Cases the build omits report NOT_SUPPORTED and skip. */
+    static const uint8_t exp_sha1[] = {
+        0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a,
+        0xba, 0x3e, 0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c,
+        0x9c, 0xd0, 0xd8, 0x9d,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_1, exp_sha1, sizeof(exp_sha1), "SHA-1")
+            != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha224[] = {
+        0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22,
+        0x86, 0x42, 0xa4, 0x77, 0xbd, 0xa2, 0x55, 0xb3,
+        0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7,
+        0xe3, 0x6c, 0x9d, 0xa7,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_224, exp_sha224, sizeof(exp_sha224),
+            "SHA-224") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha384[] = {
+        0xcb, 0x00, 0x75, 0x3f, 0x45, 0xa3, 0x5e, 0x8b,
+        0xb5, 0xa0, 0x3d, 0x69, 0x9a, 0xc6, 0x50, 0x07,
+        0x27, 0x2c, 0x32, 0xab, 0x0e, 0xde, 0xd1, 0x63,
+        0x1a, 0x8b, 0x60, 0x5a, 0x43, 0xff, 0x5b, 0xed,
+        0x80, 0x86, 0x07, 0x2b, 0xa1, 0xe7, 0xcc, 0x23,
+        0x58, 0xba, 0xec, 0xa1, 0x34, 0xc8, 0x25, 0xa7,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_384, exp_sha384, sizeof(exp_sha384),
+            "SHA-384") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha512[] = {
+        0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba,
+        0xcc, 0x41, 0x73, 0x49, 0xae, 0x20, 0x41, 0x31,
+        0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2,
+        0x0a, 0x9e, 0xee, 0xe6, 0x4b, 0x55, 0xd3, 0x9a,
+        0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1, 0xa8,
+        0x36, 0xba, 0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd,
+        0x45, 0x4d, 0x44, 0x23, 0x64, 0x3c, 0xe8, 0x0e,
+        0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_512, exp_sha512, sizeof(exp_sha512),
+            "SHA-512") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha512_224[] = {
+        0x46, 0x34, 0x27, 0x0f, 0x70, 0x7b, 0x6a, 0x54,
+        0xda, 0xae, 0x75, 0x30, 0x46, 0x08, 0x42, 0xe2,
+        0x0e, 0x37, 0xed, 0x26, 0x5c, 0xee, 0xe9, 0xa4,
+        0x3e, 0x89, 0x24, 0xaa,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_512_224, exp_sha512_224,
+            sizeof(exp_sha512_224), "SHA-512/224") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha512_256[] = {
+        0x53, 0x04, 0x8e, 0x26, 0x81, 0x94, 0x1e, 0xf9,
+        0x9b, 0x2e, 0x29, 0xb7, 0x6b, 0x4c, 0x7d, 0xab,
+        0xe4, 0xc2, 0xd0, 0xc6, 0x34, 0xfc, 0x6d, 0x46,
+        0xe0, 0xe2, 0xf1, 0x31, 0x07, 0xe7, 0xaf, 0x23,
+    };
+    if (test_hash_kat(PSA_ALG_SHA_512_256, exp_sha512_256,
+            sizeof(exp_sha512_256), "SHA-512/256") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha3_224[] = {
+        0xe6, 0x42, 0x82, 0x4c, 0x3f, 0x8c, 0xf2, 0x4a,
+        0xd0, 0x92, 0x34, 0xee, 0x7d, 0x3c, 0x76, 0x6f,
+        0xc9, 0xa3, 0xa5, 0x16, 0x8d, 0x0c, 0x94, 0xad,
+        0x73, 0xb4, 0x6f, 0xdf,
+    };
+    if (test_hash_kat(PSA_ALG_SHA3_224, exp_sha3_224, sizeof(exp_sha3_224),
+            "SHA3-224") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha3_256[] = {
+        0x3a, 0x98, 0x5d, 0xa7, 0x4f, 0xe2, 0x25, 0xb2,
+        0x04, 0x5c, 0x17, 0x2d, 0x6b, 0xd3, 0x90, 0xbd,
+        0x85, 0x5f, 0x08, 0x6e, 0x3e, 0x9d, 0x52, 0x5b,
+        0x46, 0xbf, 0xe2, 0x45, 0x11, 0x43, 0x15, 0x32,
+    };
+    if (test_hash_kat(PSA_ALG_SHA3_256, exp_sha3_256, sizeof(exp_sha3_256),
+            "SHA3-256") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha3_384[] = {
+        0xec, 0x01, 0x49, 0x82, 0x88, 0x51, 0x6f, 0xc9,
+        0x26, 0x45, 0x9f, 0x58, 0xe2, 0xc6, 0xad, 0x8d,
+        0xf9, 0xb4, 0x73, 0xcb, 0x0f, 0xc0, 0x8c, 0x25,
+        0x96, 0xda, 0x7c, 0xf0, 0xe4, 0x9b, 0xe4, 0xb2,
+        0x98, 0xd8, 0x8c, 0xea, 0x92, 0x7a, 0xc7, 0xf5,
+        0x39, 0xf1, 0xed, 0xf2, 0x28, 0x37, 0x6d, 0x25,
+    };
+    if (test_hash_kat(PSA_ALG_SHA3_384, exp_sha3_384, sizeof(exp_sha3_384),
+            "SHA3-384") != TEST_OK) return TEST_FAIL;
+    static const uint8_t exp_sha3_512[] = {
+        0xb7, 0x51, 0x85, 0x0b, 0x1a, 0x57, 0x16, 0x8a,
+        0x56, 0x93, 0xcd, 0x92, 0x4b, 0x6b, 0x09, 0x6e,
+        0x08, 0xf6, 0x21, 0x82, 0x74, 0x44, 0xf7, 0x0d,
+        0x88, 0x4f, 0x5d, 0x02, 0x40, 0xd2, 0x71, 0x2e,
+        0x10, 0xe1, 0x16, 0xe9, 0x19, 0x2a, 0xf3, 0xc9,
+        0x1a, 0x7e, 0xc5, 0x76, 0x47, 0xe3, 0x93, 0x40,
+        0x57, 0x34, 0x0b, 0x4c, 0xf4, 0x08, 0xd5, 0xa5,
+        0x65, 0x92, 0xf8, 0x27, 0x4e, 0xec, 0x53, 0xf0,
+    };
+    if (test_hash_kat(PSA_ALG_SHA3_512, exp_sha3_512, sizeof(exp_sha3_512),
+            "SHA3-512") != TEST_OK) return TEST_FAIL;
 
     return TEST_OK;
 }
@@ -231,6 +374,92 @@ static int test_hmac(void)
 
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(HMAC)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
+/* Known-answer test for AES-CMAC, locking down the block-cipher-MAC dispatch
+ * in psa_mac.c (setup/update/final/abort) that the HMAC-only tests never
+ * exercise. Vector is NIST SP 800-38B AES-128 CMAC, Example 2 (Mlen = 128).
+ * A build without WOLFSSL_CMAC reports PSA_ERROR_NOT_SUPPORTED and is
+ * skipped, so the test works across the build-config matrix. */
+static int test_cmac(void)
+{
+    static const uint8_t key[] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t msg[] = {
+        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
+        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+    };
+    static const uint8_t expected[] = {
+        0x07,0x0a,0x16,0xb4,0x6b,0x4d,0x41,0x44,
+        0xf7,0x9b,0xdd,0x9d,0xd0,0x4a,0x28,0x7c
+    };
+    uint8_t out[sizeof(expected)];
+    uint8_t bad_mac[sizeof(expected)];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t hmac_key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_mac_operation_t op = psa_mac_operation_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, (size_t)sizeof(key) * 8u);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CMAC);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES CMAC)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_mac_compute(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                         out, sizeof(out), &out_len);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        printf("SKIP: cmac (not supported by this build)\n");
+        (void)psa_destroy_key(key_id);
+        return TEST_OK;
+    }
+    if (check_status(st, "psa_mac_compute(CMAC)") != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == sizeof(expected), "psa_mac_compute(CMAC) length") != TEST_OK) return TEST_FAIL;
+    if (check_buf_eq("psa_mac_compute(CMAC)", out, expected, sizeof(expected)) != TEST_OK) return TEST_FAIL;
+
+    st = psa_mac_verify(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                        expected, sizeof(expected));
+    if (check_status(st, "psa_mac_verify(CMAC)") != TEST_OK) return TEST_FAIL;
+
+    memcpy(bad_mac, expected, sizeof(bad_mac));
+    bad_mac[0] ^= 0x01u;
+    st = psa_mac_verify(key_id, PSA_ALG_CMAC, msg, sizeof(msg),
+                        bad_mac, sizeof(bad_mac));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_mac_verify(CMAC) rejects bad MAC") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(CMAC)") != TEST_OK) return TEST_FAIL;
+
+    /* CMAC setup must reject a key whose type is not AES, locking down the
+     * PSA_KEY_TYPE_AES check in wolfpsa_mac_check_key. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attrs, (size_t)sizeof(key) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CMAC);
+    st = psa_import_key(&attrs, key, sizeof(key), &hmac_key_id);
+    if (check_status(st, "psa_import_key(non-AES CMAC)") != TEST_OK) return TEST_FAIL;
+    st = psa_mac_sign_setup(&op, hmac_key_id, PSA_ALG_CMAC);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_mac_sign_setup(CMAC) rejects non-AES key") != TEST_OK) {
+        (void)psa_mac_abort(&op);
+        (void)psa_destroy_key(hmac_key_id);
+        return TEST_FAIL;
+    }
+    (void)psa_mac_abort(&op);
+    st = psa_destroy_key(hmac_key_id);
+    if (check_status(st, "psa_destroy_key(non-AES CMAC)") != TEST_OK) return TEST_FAIL;
 
     return TEST_OK;
 }
@@ -649,6 +878,119 @@ static int test_cipher_cbc(void)
     if (check_status(st, "psa_destroy_key(AES)") != TEST_OK) return TEST_FAIL;
 
     return TEST_OK;
+}
+
+/* Exercises psa_cipher_generate_iv, which no other test reaches. Covers the
+ * encrypt-direction success path (a freshly randomized IV is produced and
+ * accepted by the operation, and a round trip still decrypts), the
+ * decrypt-direction rejection, the re-generation rejection on an operation that
+ * already has an IV, and the buffer-too-small rejection. The IV buffers are
+ * zero-initialized so that dropping the psa_generate_random() call would leave
+ * them equal and be caught by the "IVs differ" check. */
+static int test_cipher_generate_iv(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t plaintext[16] = {
+        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
+        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+    };
+    uint8_t iv1[16] = {0};
+    uint8_t iv2[16] = {0};
+    uint8_t small_iv[8] = {0};
+    uint8_t enc[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext) + 16];
+    size_t iv1_len = 0;
+    size_t iv2_len = 0;
+    size_t small_len = 0;
+    size_t enc_len = 0;
+    size_t enc_finish = 0;
+    size_t dec_len = 0;
+    size_t dec_finish = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_NO_PADDING);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(generate_iv)") != TEST_OK) goto cleanup;
+
+    /* (a) encrypt-direction success: an IV is generated, has the algorithm's
+     * length, and the operation can complete an encrypt round trip with it. */
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv1, sizeof(iv1), &iv1_len);
+    if (check_status(st, "psa_cipher_generate_iv") != TEST_OK) goto cleanup;
+    if (check_true(iv1_len == 16, "psa_cipher_generate_iv length") != TEST_OK) goto cleanup;
+
+    /* (c) a second generate on the same operation must be rejected. */
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_cipher_generate_iv rejects re-generation") != TEST_OK) goto cleanup;
+
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext), enc, sizeof(enc), &enc_len);
+    if (check_status(st, "psa_cipher_update(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_finish(&op, enc + enc_len, sizeof(enc) - enc_len, &enc_finish);
+    if (check_status(st, "psa_cipher_finish(gen_iv)") != TEST_OK) goto cleanup;
+    enc_len += enc_finish;
+
+    /* Decrypt using the generated IV to confirm it was the one actually used. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_decrypt_setup(gen_iv)") != TEST_OK) goto cleanup;
+    st = psa_cipher_set_iv(&op, iv1, iv1_len);
+    if (check_status(st, "psa_cipher_set_iv(gen_iv dec)") != TEST_OK) goto cleanup;
+    st = psa_cipher_update(&op, enc, enc_len, dec, sizeof(dec), &dec_len);
+    if (check_status(st, "psa_cipher_update(gen_iv dec)") != TEST_OK) goto cleanup;
+    st = psa_cipher_finish(&op, dec + dec_len, sizeof(dec) - dec_len, &dec_finish);
+    if (check_status(st, "psa_cipher_finish(gen_iv dec)") != TEST_OK) goto cleanup;
+    dec_len += dec_finish;
+    if (check_true(dec_len == sizeof(plaintext), "psa_cipher_generate_iv round-trip length") != TEST_OK) goto cleanup;
+    if (check_buf_eq("psa_cipher_generate_iv round-trip", dec, plaintext, sizeof(plaintext)) != TEST_OK) goto cleanup;
+
+    /* (a cont.) a fresh operation must produce a different random IV. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv 2)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_status(st, "psa_cipher_generate_iv(2)") != TEST_OK) goto cleanup;
+    if (check_true(memcmp(iv1, iv2, sizeof(iv1)) != 0,
+                   "psa_cipher_generate_iv produces fresh randomness") != TEST_OK) goto cleanup;
+    (void)psa_cipher_abort(&op);
+
+    /* (b) decrypt-direction operations must reject IV generation. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_decrypt_setup(gen_iv reject)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, iv2, sizeof(iv2), &iv2_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_cipher_generate_iv rejects decrypt direction") != TEST_OK) goto cleanup;
+    (void)psa_cipher_abort(&op);
+
+    /* (d) too-small output buffer must be rejected. */
+    op = psa_cipher_operation_init();
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_NO_PADDING);
+    if (check_status(st, "psa_cipher_encrypt_setup(gen_iv small)") != TEST_OK) goto cleanup;
+    st = psa_cipher_generate_iv(&op, small_iv, sizeof(small_iv), &small_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "psa_cipher_generate_iv rejects too-small buffer") != TEST_OK) goto cleanup;
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
 }
 
 static int test_cipher_rejects_algorithm_mismatch(void)
@@ -1116,15 +1458,105 @@ cleanup:
     return ret;
 }
 
-static int test_import_key_short_write_preserves_persistent_key(void)
+static int test_export_key_zeroizes_buffer_on_short_read(void)
+{
+#if defined(_WIN32) || defined(_MSC_VER)
+    return TEST_SKIPPED;
+#else
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t exported[sizeof(key)];
+    size_t exported_len = sizeof(key);
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 4097u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    struct stat sb;
+    char path[256];
+    int len;
+    int all_zero;
+    size_t i;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    setup_aes_key_attrs(&attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES persistent short read)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Truncate the store file by one byte so the key-data read in
+     * psa_export_key returns fewer bytes than the recorded key_data_length.
+     * The header (including the recorded length) stays intact, so the
+     * failure happens at the key-data read, not the header read. */
+    len = get_persistent_key_store_path(key_id, path, sizeof(path));
+    if (len <= 0 || (size_t)len >= sizeof(path)) {
+        printf("FAIL: get_persistent_key_store_path\n");
+        goto cleanup;
+    }
+    if (stat(path, &sb) != 0 || sb.st_size <= 1) {
+        printf("FAIL: stat persistent store\n");
+        goto cleanup;
+    }
+    if (truncate(path, sb.st_size - 1) != 0) {
+        printf("FAIL: truncate persistent store\n");
+        goto cleanup;
+    }
+
+    /* Poison the caller buffer so leftover key material is detectable. */
+    memset(exported, 0x5a, sizeof(exported));
+
+    st = psa_export_key(key_id, exported, sizeof(exported), &exported_len);
+    if (check_true(st == PSA_ERROR_STORAGE_FAILURE,
+                   "psa_export_key reports short key-data read") != TEST_OK) {
+        goto cleanup;
+    }
+
+    all_zero = 1;
+    for (i = 0; i < sizeof(exported); i++) {
+        if (exported[i] != 0) {
+            all_zero = 0;
+            break;
+        }
+    }
+    if (check_true(all_zero,
+                   "psa_export_key zeroizes buffer on short read") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == 0,
+                   "psa_export_key clears length on short read") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&attrs);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    else {
+        (void)psa_destroy_key(persistent_id);
+    }
+    return ret;
+#endif
+}
+
+static int test_import_key_short_write_leaves_no_persistent_key(void)
 {
 #if defined(_WIN32) || defined(_MSC_VER) || !defined(RLIMIT_FSIZE)
     return TEST_SKIPPED;
 #else
-    enum { ORIGINAL_LEN = 64, REPLACEMENT_LEN = 1024 };
-    uint8_t original[ORIGINAL_LEN];
-    uint8_t replacement[REPLACEMENT_LEN];
-    uint8_t exported[ORIGINAL_LEN];
+    enum { KEY_LEN = 1024 };
+    uint8_t material[KEY_LEN];
+    uint8_t exported[KEY_LEN];
     size_t exported_len = 0;
     psa_key_id_t key_id = 0;
     psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 3175u;
@@ -1137,25 +1569,17 @@ static int test_import_key_short_write_preserves_persistent_key(void)
     int ret = TEST_FAIL;
     size_t i;
 
-    for (i = 0; i < sizeof(original); i++) {
-        original[i] = (uint8_t)i;
-    }
-    for (i = 0; i < sizeof(replacement); i++) {
-        replacement[i] = (uint8_t)(0xa5u ^ i);
+    for (i = 0; i < sizeof(material); i++) {
+        material[i] = (uint8_t)(0xa5u ^ i);
     }
 
     (void)psa_destroy_key(persistent_id);
 
     psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
-    psa_set_key_bits(&attrs, ORIGINAL_LEN * 8u);
+    psa_set_key_bits(&attrs, KEY_LEN * 8u);
     psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
     psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
     psa_set_key_id(&attrs, persistent_id);
-
-    st = psa_import_key(&attrs, original, sizeof(original), &key_id);
-    if (check_status(st, "psa_import_key(original persistent RAW_DATA)") != TEST_OK) {
-        goto cleanup;
-    }
 
     if (getrlimit(RLIMIT_FSIZE, &old_limit) != 0) {
         ret = TEST_SKIPPED;
@@ -1175,8 +1599,7 @@ static int test_import_key_short_write_preserves_persistent_key(void)
     }
     limit_set = 1;
 
-    psa_set_key_bits(&attrs, REPLACEMENT_LEN * 8u);
-    st = psa_import_key(&attrs, replacement, sizeof(replacement), &key_id);
+    st = psa_import_key(&attrs, material, sizeof(material), &key_id);
 
     (void)setrlimit(RLIMIT_FSIZE, &old_limit);
     (void)signal(SIGXFSZ, old_sigxfsz);
@@ -1186,17 +1609,15 @@ static int test_import_key_short_write_preserves_persistent_key(void)
                    "psa_import_key reports short persistent write") != TEST_OK) {
         goto cleanup;
     }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "short persistent write leaves key id null") != TEST_OK) {
+        goto cleanup;
+    }
 
+    /* The aborted temp file must not have been committed: no key exists. */
     st = psa_export_key(persistent_id, exported, sizeof(exported), &exported_len);
-    if (check_status(st, "psa_export_key after failed persistent overwrite") != TEST_OK) {
-        goto cleanup;
-    }
-    if (check_true(exported_len == sizeof(original),
-                   "failed persistent overwrite preserves length") != TEST_OK) {
-        goto cleanup;
-    }
-    if (check_buf_eq("failed persistent overwrite preserves data",
-                     exported, original, sizeof(original)) != TEST_OK) {
+    if (check_true(st == PSA_ERROR_INVALID_HANDLE,
+                   "short persistent write commits no key") != TEST_OK) {
         goto cleanup;
     }
 
@@ -1211,6 +1632,72 @@ cleanup:
     (void)psa_destroy_key(persistent_id);
     return ret;
 #endif
+}
+
+static int test_import_key_rejects_duplicate_persistent_id(void)
+{
+    static const uint8_t first[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    static const uint8_t second[16] = {
+        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,
+        0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
+    };
+    uint8_t exported[sizeof(first)];
+    size_t exported_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 3857u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, sizeof(first) * 8u);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+
+    st = psa_import_key(&attrs, first, sizeof(first), &key_id);
+    if (check_status(st, "psa_import_key(first persistent)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* A second import to the same persistent id must be rejected per the PSA
+     * Crypto API rather than silently overwriting the stored key. */
+    key_id = 0;
+    st = psa_import_key(&attrs, second, sizeof(second), &key_id);
+    if (check_true(st == PSA_ERROR_ALREADY_EXISTS,
+                   "psa_import_key rejects duplicate persistent id") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "rejected duplicate import leaves key id null") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* The original key material must remain intact. */
+    st = psa_export_key(persistent_id, exported, sizeof(exported), &exported_len);
+    if (check_status(st, "psa_export_key(after duplicate import)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == sizeof(first),
+                   "duplicate import preserves key length") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_buf_eq("duplicate import preserves key data",
+                     exported, first, sizeof(first)) != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&attrs);
+    (void)psa_destroy_key(persistent_id);
+    return ret;
 }
 
 static int test_copy_key_requires_copy_usage_flag(void)
@@ -2062,6 +2549,367 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+/* F-5551: a corrupted authentication tag must be rejected with
+ * PSA_ERROR_INVALID_SIGNATURE and must not yield any accepted plaintext.
+ * Exercises the one-shot psa_aead_decrypt path. */
+static int aead_corrupt_tag_oneshot(psa_key_id_t key_id, psa_algorithm_t alg,
+                                    const uint8_t *nonce, size_t nonce_len,
+                                    const char *label)
+{
+    static const uint8_t plaintext[16] = {
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+    };
+    uint8_t aead_out[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext)];
+    size_t out_len = 0;
+    size_t dec_len = 0;
+    psa_status_t st;
+
+    st = psa_aead_encrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          aead_out, sizeof(aead_out), &out_len);
+    if (check_status(st, label) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len > 0, label) != TEST_OK) return TEST_FAIL;
+
+    /* Flip one tag byte (the last byte of the ciphertext||tag output). */
+    aead_out[out_len - 1] ^= 0xff;
+
+    st = psa_aead_decrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          aead_out, out_len, dec, sizeof(dec), &dec_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (check_true(dec_len == 0, label) != TEST_OK) return TEST_FAIL;
+    return TEST_OK;
+}
+
+/* F-5551: same property exercised through the multipart psa_aead_verify path. */
+static int aead_corrupt_tag_multipart(psa_key_id_t key_id, psa_algorithm_t alg,
+                                      const uint8_t *nonce, size_t nonce_len,
+                                      const char *label)
+{
+    static const uint8_t plaintext[16] = {
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f
+    };
+    const size_t tag_len = 16;
+    uint8_t aead_out[sizeof(plaintext) + 16];
+    uint8_t update_out[sizeof(plaintext)];
+    uint8_t dec[sizeof(plaintext)];
+    size_t out_len = 0;
+    size_t update_len = 0;
+    size_t dec_len = 0;
+    size_t ct_len;
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    st = psa_aead_encrypt(key_id, alg, nonce, nonce_len, NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          aead_out, sizeof(aead_out), &out_len);
+    if (check_status(st, label) != TEST_OK) return TEST_FAIL;
+    if (check_true(out_len == sizeof(plaintext) + tag_len, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+    ct_len = out_len - tag_len;
+
+    /* Flip one tag byte. */
+    aead_out[out_len - 1] ^= 0xff;
+
+    st = psa_aead_decrypt_setup(&op, key_id, alg);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_set_nonce(&op, nonce, nonce_len);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_update_ad(&op, NULL, 0);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_update(&op, aead_out, ct_len,
+                         update_out, sizeof(update_out), &update_len);
+    if (check_status(st, label) != TEST_OK) { ret = TEST_FAIL; goto cleanup; }
+    st = psa_aead_verify(&op, dec, sizeof(dec), &dec_len,
+                         aead_out + ct_len, tag_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE, label) != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    return ret;
+}
+
+static int test_aead_rejects_corrupted_tag(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs;
+    psa_status_t st;
+    int ret = TEST_OK;
+
+#ifdef HAVE_AESGCM
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(GCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_GCM, nonce, sizeof(nonce),
+                                 "psa_aead_decrypt(GCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    if (aead_corrupt_tag_multipart(key_id, PSA_ALG_GCM, nonce, sizeof(nonce),
+                                   "psa_aead_verify(GCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(GCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+#endif /* HAVE_AESGCM */
+
+#ifdef HAVE_AESCCM
+    attrs = psa_key_attributes_init();
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CCM);
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(CCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_CCM, nonce, sizeof(nonce),
+                                 "psa_aead_decrypt(CCM corrupt tag)") != TEST_OK) {
+        ret = TEST_FAIL;
+    }
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(CCM corrupt tag)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    key_id = 0;
+#endif /* HAVE_AESCCM */
+
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
+    {
+        static const uint8_t chacha_key[32] = {
+            0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,
+            0x88,0x89,0x8a,0x8b,0x8c,0x8d,0x8e,0x8f,
+            0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,
+            0x98,0x99,0x9a,0x9b,0x9c,0x9d,0x9e,0x9f
+        };
+        attrs = psa_key_attributes_init();
+        psa_set_key_type(&attrs, PSA_KEY_TYPE_CHACHA20);
+        psa_set_key_bits(&attrs, 256);
+        psa_set_key_usage_flags(&attrs,
+                                PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+        psa_set_key_algorithm(&attrs, PSA_ALG_CHACHA20_POLY1305);
+        st = psa_import_key(&attrs, chacha_key, sizeof(chacha_key), &key_id);
+        if (check_status(st, "psa_import_key(ChaCha20 corrupt tag)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        if (aead_corrupt_tag_oneshot(key_id, PSA_ALG_CHACHA20_POLY1305,
+                                     nonce, sizeof(nonce),
+                                     "psa_aead_decrypt(ChaCha20 corrupt tag)")
+                != TEST_OK) {
+            ret = TEST_FAIL;
+        }
+        st = psa_destroy_key(key_id);
+        if (check_status(st, "psa_destroy_key(ChaCha20 corrupt tag)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        key_id = 0;
+    }
+#endif /* HAVE_CHACHA && HAVE_POLY1305 */
+
+    return ret;
+}
+
+static int test_aead_generate_nonce(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t aad[4] = { 0x10,0x11,0x12,0x13 };
+    static const uint8_t plaintext[16] = {
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f
+    };
+    uint8_t nonce[16];
+    uint8_t ciphertext[sizeof(plaintext)];
+    uint8_t tag[16];
+    uint8_t combined[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext)];
+    size_t nonce_len = 0;
+    size_t ct_len = 0;
+    size_t tag_len = 0;
+    size_t update_len = 0;
+    size_t dec_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(generate_nonce)") != TEST_OK) return TEST_FAIL;
+
+    /* (1) success on an encrypt context: the generated nonce drives a round-trip */
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_status(st, "psa_aead_generate_nonce") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_true(nonce_len == PSA_AEAD_NONCE_LENGTH(PSA_KEY_TYPE_AES, PSA_ALG_GCM),
+                   "generate_nonce length matches PSA_AEAD_NONCE_LENGTH") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, sizeof(aad));
+    if (check_status(st, "update_ad(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_update(&op, plaintext, sizeof(plaintext),
+                         ciphertext, sizeof(ciphertext), &update_len);
+    if (check_status(st, "update(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_finish(&op, ciphertext + update_len, sizeof(ciphertext) - update_len,
+                         &ct_len, tag, sizeof(tag), &tag_len);
+    if (check_status(st, "finish(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_true(update_len + ct_len == sizeof(ciphertext) &&
+                   tag_len == sizeof(tag),
+                   "generate_nonce ciphertext+tag length") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    memcpy(combined, ciphertext, sizeof(ciphertext));
+    memcpy(combined + sizeof(ciphertext), tag, sizeof(tag));
+    /* The generated nonce must be accepted by a single-shot decrypt. */
+    st = psa_aead_decrypt(key_id, PSA_ALG_GCM,
+                          nonce, nonce_len,
+                          aad, sizeof(aad),
+                          combined, sizeof(combined),
+                          dec, sizeof(dec), &dec_len);
+    if (check_status(st, "decrypt(generate_nonce round-trip)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_buf_eq("generate_nonce round-trip plaintext",
+                     dec, plaintext, sizeof(plaintext)) != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+
+    /* (2) generating a nonce on a decrypt context is rejected. */
+    (void)psa_aead_abort(&op);
+    op = psa_aead_operation_init();
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "decrypt_setup(generate_nonce neg)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "generate_nonce on decrypt context rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    /* (3) generating a nonce twice on the same operation is rejected. */
+    op = psa_aead_operation_init();
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce twice)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_status(st, "generate_nonce(first)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "generate_nonce twice rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    /* (5) nonce buffer smaller than PSA_AEAD_NONCE_LENGTH is rejected. */
+    op = psa_aead_operation_init();
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce small buf)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce,
+                                 PSA_AEAD_NONCE_LENGTH(PSA_KEY_TYPE_AES, PSA_ALG_GCM) - 1,
+                                 &nonce_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "generate_nonce buffer too small rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(generate_nonce)") != TEST_OK) return TEST_FAIL;
+    key_id = 0;
+
+#ifdef HAVE_AESCCM
+    /* (4) CCM requires psa_aead_set_lengths before a nonce can be generated. */
+    {
+        psa_key_attributes_t ccm_attrs = psa_key_attributes_init();
+        psa_key_id_t ccm_key_id = 0;
+
+        psa_set_key_type(&ccm_attrs, PSA_KEY_TYPE_AES);
+        psa_set_key_bits(&ccm_attrs, 128);
+        psa_set_key_usage_flags(&ccm_attrs, PSA_KEY_USAGE_ENCRYPT);
+        psa_set_key_algorithm(&ccm_attrs, PSA_ALG_CCM);
+        st = psa_import_key(&ccm_attrs, key, sizeof(key), &ccm_key_id);
+        if (check_status(st, "psa_import_key(generate_nonce CCM)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        op = psa_aead_operation_init();
+        st = psa_aead_encrypt_setup(&op, ccm_key_id, PSA_ALG_CCM);
+        if (check_status(st, "encrypt_setup(generate_nonce CCM)") != TEST_OK) {
+            (void)psa_destroy_key(ccm_key_id);
+            return TEST_FAIL;
+        }
+        st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+        if (check_true(st == PSA_ERROR_BAD_STATE,
+                       "generate_nonce CCM without set_lengths rejected") != TEST_OK) {
+            (void)psa_aead_abort(&op);
+            (void)psa_destroy_key(ccm_key_id);
+            return TEST_FAIL;
+        }
+        (void)psa_aead_abort(&op);
+        st = psa_destroy_key(ccm_key_id);
+        if (check_status(st, "psa_destroy_key(generate_nonce CCM)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+    }
+#endif
+
+    return TEST_OK;
+
+cleanup:
+    (void)psa_aead_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_aead_gcm_multipart_zero_length_inputs(void)
 {
     static const uint8_t key[16] = {
@@ -2371,6 +3219,55 @@ cleanup:
     psa_aead_abort(&op);
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(GCM overflow)") != TEST_OK) return TEST_FAIL;
+    return ret;
+}
+
+/* F-3861: psa_aead_set_lengths is a one-shot setup call -- a second call
+ * before any nonce/AAD/input is provided must fail with PSA_ERROR_BAD_STATE
+ * rather than silently overwriting the committed lengths. */
+static int test_aead_set_lengths_twice_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    int ret = TEST_OK;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(set_lengths twice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(set_lengths twice)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_set_lengths(&op, 4, 16);
+    if (check_status(st, "psa_aead_set_lengths(first)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_set_lengths(&op, 8, 32);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_aead_set_lengths rejects second call") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(set_lengths twice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
     return ret;
 }
 
@@ -3225,6 +4122,64 @@ cleanup:
     return ret;
 }
 
+/* F-5554: a key whose policy is the wildcard PSA_ALG_ECDSA(PSA_ALG_ANY_HASH)
+ * must authorize concrete hash-and-sign operations such as
+ * PSA_ALG_ECDSA(PSA_ALG_SHA_256). */
+static int test_asym_any_hash_policy(void)
+{
+    static const uint8_t msg[] = "wolfpsa any-hash policy";
+    uint8_t hash[WC_SHA256_DIGEST_SIZE];
+    uint8_t sig[80];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    wc_Sha256 sha;
+    int ret;
+
+    ret = wc_InitSha256(&sha);
+    if (ret != 0) {
+        printf("FAIL: wc_InitSha256 (any-hash policy) (%d)\n", ret);
+        return TEST_FAIL;
+    }
+    wc_Sha256Update(&sha, msg, (word32)sizeof(msg) - 1u);
+    wc_Sha256Final(&sha, hash);
+    wc_Sha256Free(&sha);
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_ANY_HASH));
+
+    ret = TEST_FAIL;
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_status(st, "psa_generate_key(ECDSA any-hash)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_sign_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                       hash, sizeof(hash), sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(any-hash policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                         hash, sizeof(hash), sig, sig_len);
+    if (check_status(st, "psa_verify_hash(any-hash policy)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(key_id);
+    }
+
+    return ret;
+}
+
 static int test_rsa_pkcs1v15_raw_sign_hash_roundtrip_large_input(void)
 {
     uint8_t input[65];
@@ -3308,7 +4263,7 @@ static int test_import_key_rejects_wrapped_volatile_key_id(void)
         0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
     };
     const psa_key_id_t original_next_key_id = wolfpsa_test_get_next_key_id();
-    const psa_key_id_t max_key_id = (psa_key_id_t)~(psa_key_id_t)0;
+    const psa_key_id_t max_key_id = PSA_KEY_ID_VENDOR_MAX;
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_key_id_t first_key_id = PSA_KEY_ID_NULL;
     psa_key_id_t second_key_id = PSA_KEY_ID_NULL;
@@ -3352,6 +4307,50 @@ cleanup:
     return result;
 }
 
+static int test_import_key_auto_id_uses_vendor_range(void)
+{
+    static const uint8_t aes_key[16] = {
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+    };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CTR);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, aes_key, sizeof(aes_key), &key_id);
+    if (check_status(st, "psa_import_key(auto-assigned volatile id)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* The PSA API reserves the user id range
+     * [PSA_KEY_ID_USER_MIN, PSA_KEY_ID_USER_MAX] for caller-specified
+     * persistent keys. Implementation-assigned (volatile) ids must come from
+     * the vendor range so an auto-assigned id can never collide with - and
+     * thus shadow on read or leave undestroyed on disk - a persistent key
+     * that a caller created with the same numeric id. */
+    if (check_true(key_id >= PSA_KEY_ID_VENDOR_MIN &&
+                   key_id <= PSA_KEY_ID_VENDOR_MAX,
+                   "auto-assigned volatile id avoids the user range") != TEST_OK) {
+        printf("  got key id 0x%08lx\n", (unsigned long)key_id);
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
 static int test_import_key_reports_volatile_store_invalid_argument(void)
 {
     static const uint8_t key_data[1] = { 0 };
@@ -3371,6 +4370,36 @@ static int test_import_key_reports_volatile_store_invalid_argument(void)
     }
     if (check_true(key_id == PSA_KEY_ID_NULL,
                    "psa_import_key leaves key id null on volatile-store failure") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_import_key_rejects_overflow_data_length(void)
+{
+    static const uint8_t key_data[1] = { 0x42 };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+
+    /* A data_length close to SIZE_MAX wraps the internal buffer_size
+     * computation to a tiny allocation; the subsequent copy of data_length
+     * bytes would then overflow that allocation. The import must reject the
+     * length before allocating or copying anything. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, 8);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, key_data, ~(size_t)0 - 4, &key_id);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key rejects overflowing data_length") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null on overflow length") != TEST_OK) {
         return TEST_FAIL;
     }
 
@@ -3603,6 +4632,72 @@ static int test_ed25519_signature_length(void)
     if (check_status(st, "psa_destroy_key(ED25519)") != TEST_OK) return TEST_FAIL;
 
     return TEST_OK;
+}
+
+/*
+ * HashEdDSA (Ed25519ph / Ed448ph) signs and verifies a fixed 64-byte prehash
+ * (SHA-512 for Ed25519ph, the 64-byte SHAKE256 digest for Ed448ph). The PSA
+ * API must reject any other hash length with PSA_ERROR_INVALID_ARGUMENT
+ * instead of silently producing a non-RFC-8032 signature (F-4095).
+ */
+static int test_hash_eddsa_rejects_bad_hash_length(size_t bits,
+                                                   psa_algorithm_t alg,
+                                                   const char* gen_label)
+{
+    static const uint8_t short_hash[32] = { 0 };
+    uint8_t sig[128];
+    size_t sig_len = sizeof(sig);
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs,
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, gen_label) != TEST_OK) return TEST_FAIL;
+
+    st = psa_sign_hash(key_id, alg, short_hash, sizeof(short_hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects non-64-byte prehash") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_hash(key_id, alg, short_hash, sizeof(short_hash),
+                         sig, sizeof(sig));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_verify_hash rejects non-64-byte prehash") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HashEdDSA bad hash len)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_ed25519_rejects_bad_hash_length(void)
+{
+    return test_hash_eddsa_rejects_bad_hash_length(
+        255, PSA_ALG_ED25519PH, "psa_generate_key(ED25519 bad hash len)");
+}
+
+static int test_ed448_rejects_bad_hash_length(void)
+{
+    return test_hash_eddsa_rejects_bad_hash_length(
+        448, PSA_ALG_ED448PH, "psa_generate_key(ED448 bad hash len)");
 }
 
 static int test_twisted_edwards_export_public_key(size_t bits,
@@ -5430,6 +6525,7 @@ static int test_kdf_verify_key_policy(void)
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_key_id_t hkdf_verify_key = 0;
     psa_key_id_t hkdf_no_usage_key = 0;
+    psa_key_id_t hkdf_wrong_type_key = 0;
     psa_key_id_t pbkdf2_verify_key = 0;
     psa_key_id_t pbkdf2_wrong_type_key = 0;
     psa_status_t st;
@@ -5519,6 +6615,39 @@ static int test_kdf_verify_key_policy(void)
     }
     st = psa_key_derivation_abort(&op);
     if (check_status(st, "psa_key_derivation_abort(HKDF no verify usage)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, hkdf_expected, sizeof(hkdf_expected), &hkdf_wrong_type_key);
+    if (check_status(st, "psa_import_key(HKDF wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO wrong expected key type)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_wrong_type_key);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_key_derivation_verify_key rejects non-RAW_DATA HKDF expected key") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF wrong expected key type)") != TEST_OK) {
         goto cleanup;
     }
     op = psa_key_derivation_operation_init();
@@ -5632,6 +6761,9 @@ cleanup:
     }
     if (hkdf_no_usage_key != 0) {
         (void)psa_destroy_key(hkdf_no_usage_key);
+    }
+    if (hkdf_wrong_type_key != 0) {
+        (void)psa_destroy_key(hkdf_wrong_type_key);
     }
     if (hkdf_verify_key != 0) {
         (void)psa_destroy_key(hkdf_verify_key);
@@ -5777,6 +6909,114 @@ cleanup:
         (void)psa_destroy_key(good_key);
     }
     psa_reset_key_attributes(&attrs);
+    return ret;
+}
+
+/* F-5550: a key whose policy fixes a KDF (e.g. ECDH+HKDF) must not be usable
+ * for raw key agreement or for a different KDF; only the base algorithm was
+ * being checked, which let the KDF domain-separation barrier be bypassed. */
+static int test_ka_kdf_policy_separation(void)
+{
+    uint8_t peer_pub[128];
+    size_t peer_pub_len = 0;
+    uint8_t secret[128];
+    size_t secret_len = 0;
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_attributes_t out_attrs = psa_key_attributes_init();
+    psa_key_id_t hkdf_key = 0;
+    psa_key_id_t peer_key = 0;
+    psa_key_id_t out_key = 0;
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    /* Private key restricted to ECDH followed by HKDF-SHA256. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    st = psa_generate_key(&attrs, &hkdf_key);
+    if (check_status(st, "psa_generate_key(ECDH+HKDF policy)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_generate_key(&attrs, &peer_key);
+    if (check_status(st, "psa_generate_key(ECDH+HKDF peer)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_export_public_key(peer_key, peer_pub, sizeof(peer_pub),
+                               &peer_pub_len);
+    if (check_status(st, "psa_export_public_key(ECDH+HKDF peer)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* One-shot raw agreement must be rejected: it would expose the bare
+     * shared secret, bypassing the HKDF the policy requires. */
+    st = psa_raw_key_agreement(PSA_ALG_ECDH, hkdf_key, peer_pub, peer_pub_len,
+                               secret, sizeof(secret), &secret_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_raw_key_agreement rejects HKDF-only policy key")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Multipart raw agreement (raw ECDH operation) must likewise be rejected. */
+    st = psa_key_derivation_setup(&op, PSA_ALG_ECDH);
+    if (check_status(st, "psa_key_derivation_setup(raw ECDH)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          hkdf_key, peer_pub, peer_pub_len);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_derivation_key_agreement rejects HKDF-only policy "
+                   "key for raw op") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_key_derivation_abort(&op);
+    op = psa_key_derivation_operation_init();
+
+    /* One-shot agreement with a different KDF (HKDF-Extract) must be rejected. */
+    psa_set_key_type(&out_attrs, PSA_KEY_TYPE_DERIVE);
+    psa_set_key_bits(&out_attrs, 256);
+    psa_set_key_usage_flags(&out_attrs, PSA_KEY_USAGE_DERIVE);
+    psa_set_key_algorithm(&out_attrs, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    st = psa_key_agreement(hkdf_key, peer_pub, peer_pub_len,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH,
+                              PSA_ALG_HKDF_EXTRACT(PSA_ALG_SHA_256)),
+        &out_attrs, &out_key);
+    if (check_true(st == PSA_ERROR_NOT_PERMITTED,
+                   "psa_key_agreement rejects mismatched KDF") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Sanity: the policy's own algorithm (ECDH+HKDF-SHA256) is still allowed. */
+    st = psa_key_derivation_setup(&op,
+        PSA_ALG_KEY_AGREEMENT(PSA_ALG_ECDH, PSA_ALG_HKDF(PSA_ALG_SHA_256)));
+    if (check_status(st, "psa_key_derivation_setup(ECDH+HKDF)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_key_agreement(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                          hkdf_key, peer_pub, peer_pub_len);
+    if (check_status(st, "psa_key_derivation_key_agreement(ECDH+HKDF allowed)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_key_derivation_abort(&op);
+    if (out_key != 0) {
+        (void)psa_destroy_key(out_key);
+    }
+    if (peer_key != 0) {
+        (void)psa_destroy_key(peer_key);
+    }
+    if (hkdf_key != 0) {
+        (void)psa_destroy_key(hkdf_key);
+    }
+    psa_reset_key_attributes(&attrs);
+    psa_reset_key_attributes(&out_attrs);
     return ret;
 }
 
@@ -6668,6 +7908,9 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "hmac") == 0) {
         if (run_named_test("hmac", test_hmac) == TEST_FAIL) return TEST_FAIL;
     }
+    if (only == NULL || strcmp(only, "cmac") == 0) {
+        if (run_named_test("cmac", test_cmac) == TEST_FAIL) return TEST_FAIL;
+    }
     if (only == NULL || strcmp(only, "mac_verify_finish_at_least_length") == 0) {
         if (run_named_test("mac_verify_finish_at_least_length",
                            test_mac_verify_finish_accepts_longer_at_least_length_mac) == TEST_FAIL) {
@@ -6695,6 +7938,9 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_cbc") == 0) {
         if (run_named_test("cipher_cbc", test_cipher_cbc) == TEST_FAIL) return TEST_FAIL;
     }
+    if (only == NULL || strcmp(only, "cipher_generate_iv") == 0) {
+        if (run_named_test("cipher_generate_iv", test_cipher_generate_iv) == TEST_FAIL) return TEST_FAIL;
+    }
     if (only == NULL || strcmp(only, "cipher_algorithm_mismatch") == 0) {
         if (run_named_test("cipher_algorithm_mismatch",
                            test_cipher_rejects_algorithm_mismatch) == TEST_FAIL) {
@@ -6719,9 +7965,21 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
-    if (only == NULL || strcmp(only, "import_key_short_write_preserves_persistent_key") == 0) {
-        if (run_named_test("import_key_short_write_preserves_persistent_key",
-                           test_import_key_short_write_preserves_persistent_key) == TEST_FAIL) {
+    if (only == NULL || strcmp(only, "export_zeroizes_buffer_on_short_read") == 0) {
+        if (run_named_test("export_zeroizes_buffer_on_short_read",
+                           test_export_key_zeroizes_buffer_on_short_read) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_short_write_leaves_no_persistent_key") == 0) {
+        if (run_named_test("import_key_short_write_leaves_no_persistent_key",
+                           test_import_key_short_write_leaves_no_persistent_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_rejects_duplicate_persistent_id") == 0) {
+        if (run_named_test("import_key_rejects_duplicate_persistent_id",
+                           test_import_key_rejects_duplicate_persistent_id) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -6788,6 +8046,18 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
     }
+    if (only == NULL || strcmp(only, "aead_rejects_corrupted_tag") == 0) {
+        if (run_named_test("aead_rejects_corrupted_tag",
+                           test_aead_rejects_corrupted_tag) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_generate_nonce") == 0) {
+        if (run_named_test("aead_generate_nonce",
+                           test_aead_generate_nonce) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "aead_gcm_multipart_zero_length") == 0) {
         if (run_named_test("aead_gcm_multipart_zero_length",
                            test_aead_gcm_multipart_zero_length_inputs) == TEST_FAIL) {
@@ -6797,6 +8067,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_multipart_length_overflow") == 0) {
         if (run_named_test("aead_multipart_length_overflow",
                            test_aead_multipart_length_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_set_lengths_twice") == 0) {
+        if (run_named_test("aead_set_lengths_twice",
+                           test_aead_set_lengths_twice_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -6869,6 +8145,12 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
+    if (only == NULL || strcmp(only, "asym_any_hash_policy") == 0) {
+        if (run_named_test("asym_any_hash_policy",
+                           test_asym_any_hash_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "rsa_pkcs1v15_raw_roundtrip_large_input") == 0) {
         if (run_named_test("rsa_pkcs1v15_raw_roundtrip_large_input",
                            test_rsa_pkcs1v15_raw_sign_hash_roundtrip_large_input) == TEST_FAIL) {
@@ -6887,9 +8169,21 @@ int main(int argc, char** argv)
             return TEST_FAIL;
         }
     }
+    if (only == NULL || strcmp(only, "import_key_auto_id_vendor_range") == 0) {
+        if (run_named_test("import_key_auto_id_vendor_range",
+                           test_import_key_auto_id_uses_vendor_range) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
     if (only == NULL || strcmp(only, "import_key_volatile_store_invalid_argument") == 0) {
         if (run_named_test("import_key_volatile_store_invalid_argument",
                            test_import_key_reports_volatile_store_invalid_argument) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_overflow_data_length") == 0) {
+        if (run_named_test("import_key_overflow_data_length",
+                           test_import_key_rejects_overflow_data_length) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -6907,6 +8201,18 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
         if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed25519_bad_hash_len") == 0) {
+        if (run_named_test("ed25519_bad_hash_len",
+                           test_ed25519_rejects_bad_hash_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed448_bad_hash_len") == 0) {
+        if (run_named_test("ed448_bad_hash_len",
+                           test_ed448_rejects_bad_hash_length) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -6990,6 +8296,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "kdf_key_agreement_policy") == 0) {
         if (run_named_test("kdf_key_agreement_policy",
                            test_kdf_key_agreement_policy) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ka_kdf_policy_separation") == 0) {
+        if (run_named_test("ka_kdf_policy_separation",
+                           test_ka_kdf_policy_separation) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

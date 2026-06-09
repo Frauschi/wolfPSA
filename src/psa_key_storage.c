@@ -51,7 +51,7 @@
 
 /* Key storage state */
 static int g_key_storage_initialized = 0;
-static psa_key_id_t g_next_key_id = 1;
+static psa_key_id_t g_next_key_id = PSA_KEY_ID_VENDOR_MIN;
 
 typedef struct wolfpsa_volatile_key_node {
     psa_key_id_t id;
@@ -871,6 +871,14 @@ psa_status_t psa_import_key(
     /* Always treat key_id as output-only. */
     *key_id = PSA_KEY_ID_NULL;
 
+    /* Reject lengths that do not fit the int-based storage API or that would
+     * overflow the serialized buffer_size computation below. */
+    if (data_length > (size_t)INT_MAX) {
+        wolfpsa_debug_import_reason("key data length too large", attributes,
+                                    data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     attr = *attributes;
 
     if (attr.policy.alg2 != PSA_ALG_NONE) {
@@ -948,7 +956,13 @@ psa_status_t psa_import_key(
             *key_id = attr_id;
         }
         else {
-            if (g_next_key_id == PSA_KEY_ID_NULL) {
+            /* Auto-assign implementation key ids from the vendor range so
+             * they cannot collide with caller-specified persistent ids, which
+             * the PSA API reserves to the user range. A collision would let an
+             * auto-assigned volatile key shadow a persistent record on read and
+             * survive psa_destroy_key() on disk. */
+            if (g_next_key_id < PSA_KEY_ID_VENDOR_MIN ||
+                g_next_key_id > PSA_KEY_ID_VENDOR_MAX) {
                 return PSA_ERROR_INSUFFICIENT_STORAGE;
             }
             *key_id = g_next_key_id++;
@@ -985,6 +999,23 @@ psa_status_t psa_import_key(
         }
     }
     else {
+        /* The PSA Crypto API requires psa_import_key() to fail with
+         * PSA_ERROR_ALREADY_EXISTS when a persistent key already exists with
+         * the requested id; the volatile path enforces the same above. Probe
+         * for an existing record before opening a write handle, otherwise the
+         * atomic rename in wolfPSA_Store_Close() would silently destroy the
+         * previously stored key. */
+        ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
+                                 1, &store);
+        if (ret == 0) {
+            wolfPSA_Store_Close(store);
+            store = NULL;
+            wc_ForceZero(buffer, buffer_size);
+            XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            *key_id = PSA_KEY_ID_NULL;
+            return PSA_ERROR_ALREADY_EXISTS;
+        }
+
         /* Open and write key to persistent storage */
         ret = wolfPSA_Store_OpenSz(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
                                   0, (int)data_length, &store);
@@ -1364,6 +1395,10 @@ psa_status_t psa_export_key(
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)key_data_length) {
+        /* A short/failed read may have left partial key material in the
+         * caller-owned buffer; zeroize it like the sibling read paths. */
+        wc_ForceZero(data, key_data_length);
+        *data_length = 0;
         return PSA_ERROR_STORAGE_FAILURE;
     }
     *data_length = key_data_length;

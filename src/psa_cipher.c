@@ -804,6 +804,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     return wolfpsa_cipher_fail(operation,
                                                wc_error_to_psa_status(ret));
                 }
+                wc_ForceZero(block, sizeof(block));
                 output_offset += block_size;
                 input_offset += needed;
                 ctx->partial_len = 0;
@@ -916,6 +917,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         return wolfpsa_cipher_fail(operation,
                                                    wc_error_to_psa_status(ret));
                     }
+                    wc_ForceZero(block, sizeof(block));
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
@@ -1140,6 +1142,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     return wolfpsa_cipher_fail(operation,
                                                wc_error_to_psa_status(ret));
                 }
+                wc_ForceZero(block, sizeof(block));
                 output_offset += block_size;
                 input_offset += needed;
                 ctx->partial_len = 0;

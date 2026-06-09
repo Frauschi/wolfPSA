@@ -33,7 +33,11 @@
 #define HAVE_SP_ECC
 #define RSA_MIN_SIZE 1024
 #define WOLFSSL_KEY_GEN
-#define WC_NO_HARDEN
+/* Side-channel hardening: enable constant-time and blinding protection for
+ * RSA/ECC private-key operations dispatched through the PSA engine. */
+#define TFM_TIMING_RESISTANT
+#define ECC_TIMING_RESISTANT
+#define WC_RSA_BLINDING
 #define WOLFSSL_HAVE_PRF
 #define HAVE_HKDF
 #define HAVE_PBKDF2
