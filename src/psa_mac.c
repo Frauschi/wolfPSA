@@ -71,6 +71,18 @@ static wolfpsa_mac_ctx_t* wolfpsa_mac_get_ctx(psa_mac_operation_t *operation)
     return (wolfpsa_mac_ctx_t *)(uintptr_t)operation->opaque;
 }
 
+static void wolfpsa_mac_free_underlying(wolfpsa_mac_ctx_t *ctx)
+{
+    if (ctx->type == WOLFPSA_MAC_HMAC) {
+        wc_HmacFree(&ctx->ctx.hmac);
+    }
+#ifdef WOLFSSL_CMAC
+    if (ctx->type == WOLFPSA_MAC_CMAC) {
+        wc_CmacFree(&ctx->ctx.cmac);
+    }
+#endif
+}
+
 psa_status_t psa_mac_abort(psa_mac_operation_t *operation);
 
 static psa_status_t wolfpsa_mac_fail(psa_mac_operation_t *operation,
@@ -301,6 +313,7 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     if (ctx->mac_length == 0 || ctx->full_length == 0 ||
         ctx->mac_length > ctx->full_length) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        wolfpsa_mac_free_underlying(ctx);
         wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -310,12 +323,14 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
         size_t trunc_len = PSA_MAC_TRUNCATED_LENGTH(alg);
         if (trunc_len > ctx->full_length) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            wolfpsa_mac_free_underlying(ctx);
             wc_ForceZero(ctx, sizeof(*ctx));
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         if (trunc_len < 4u) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            wolfpsa_mac_free_underlying(ctx);
             wc_ForceZero(ctx, sizeof(*ctx));
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_NOT_SUPPORTED;
@@ -325,6 +340,7 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
 
     if (ret != 0) {
+        wolfpsa_mac_free_underlying(ctx);
         wc_ForceZero(ctx, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return wc_error_to_psa_status(ret);
