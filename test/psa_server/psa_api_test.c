@@ -2402,6 +2402,183 @@ static int test_aead_gcm(void)
     return TEST_OK;
 }
 
+static int test_aead_generate_nonce(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t aad[4] = { 0x10,0x11,0x12,0x13 };
+    static const uint8_t plaintext[16] = {
+        0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+        0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f
+    };
+    uint8_t nonce[16];
+    uint8_t ciphertext[sizeof(plaintext)];
+    uint8_t tag[16];
+    uint8_t combined[sizeof(plaintext) + 16];
+    uint8_t dec[sizeof(plaintext)];
+    size_t nonce_len = 0;
+    size_t ct_len = 0;
+    size_t tag_len = 0;
+    size_t update_len = 0;
+    size_t dec_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_OK;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(generate_nonce)") != TEST_OK) return TEST_FAIL;
+
+    /* (1) success on an encrypt context: the generated nonce drives a round-trip */
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_status(st, "psa_aead_generate_nonce") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_true(nonce_len == PSA_AEAD_NONCE_LENGTH(PSA_KEY_TYPE_AES, PSA_ALG_GCM),
+                   "generate_nonce length matches PSA_AEAD_NONCE_LENGTH") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_update_ad(&op, aad, sizeof(aad));
+    if (check_status(st, "update_ad(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_update(&op, plaintext, sizeof(plaintext),
+                         ciphertext, sizeof(ciphertext), &update_len);
+    if (check_status(st, "update(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_finish(&op, ciphertext + update_len, sizeof(ciphertext) - update_len,
+                         &ct_len, tag, sizeof(tag), &tag_len);
+    if (check_status(st, "finish(generate_nonce)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_true(update_len + ct_len == sizeof(ciphertext) &&
+                   tag_len == sizeof(tag),
+                   "generate_nonce ciphertext+tag length") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    memcpy(combined, ciphertext, sizeof(ciphertext));
+    memcpy(combined + sizeof(ciphertext), tag, sizeof(tag));
+    /* The generated nonce must be accepted by a single-shot decrypt. */
+    st = psa_aead_decrypt(key_id, PSA_ALG_GCM,
+                          nonce, nonce_len,
+                          aad, sizeof(aad),
+                          combined, sizeof(combined),
+                          dec, sizeof(dec), &dec_len);
+    if (check_status(st, "decrypt(generate_nonce round-trip)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    if (check_buf_eq("generate_nonce round-trip plaintext",
+                     dec, plaintext, sizeof(plaintext)) != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+
+    /* (2) generating a nonce on a decrypt context is rejected. */
+    (void)psa_aead_abort(&op);
+    op = psa_aead_operation_init();
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "decrypt_setup(generate_nonce neg)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "generate_nonce on decrypt context rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    /* (3) generating a nonce twice on the same operation is rejected. */
+    op = psa_aead_operation_init();
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce twice)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_status(st, "generate_nonce(first)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "generate_nonce twice rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    /* (5) nonce buffer smaller than PSA_AEAD_NONCE_LENGTH is rejected. */
+    op = psa_aead_operation_init();
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "encrypt_setup(generate_nonce small buf)") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    st = psa_aead_generate_nonce(&op, nonce,
+                                 PSA_AEAD_NONCE_LENGTH(PSA_KEY_TYPE_AES, PSA_ALG_GCM) - 1,
+                                 &nonce_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "generate_nonce buffer too small rejected") != TEST_OK) {
+        ret = TEST_FAIL; goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(generate_nonce)") != TEST_OK) return TEST_FAIL;
+    key_id = 0;
+
+#ifdef HAVE_AESCCM
+    /* (4) CCM requires psa_aead_set_lengths before a nonce can be generated. */
+    {
+        psa_key_attributes_t ccm_attrs = psa_key_attributes_init();
+        psa_key_id_t ccm_key_id = 0;
+
+        psa_set_key_type(&ccm_attrs, PSA_KEY_TYPE_AES);
+        psa_set_key_bits(&ccm_attrs, 128);
+        psa_set_key_usage_flags(&ccm_attrs, PSA_KEY_USAGE_ENCRYPT);
+        psa_set_key_algorithm(&ccm_attrs, PSA_ALG_CCM);
+        st = psa_import_key(&ccm_attrs, key, sizeof(key), &ccm_key_id);
+        if (check_status(st, "psa_import_key(generate_nonce CCM)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+        op = psa_aead_operation_init();
+        st = psa_aead_encrypt_setup(&op, ccm_key_id, PSA_ALG_CCM);
+        if (check_status(st, "encrypt_setup(generate_nonce CCM)") != TEST_OK) {
+            (void)psa_destroy_key(ccm_key_id);
+            return TEST_FAIL;
+        }
+        st = psa_aead_generate_nonce(&op, nonce, sizeof(nonce), &nonce_len);
+        if (check_true(st == PSA_ERROR_BAD_STATE,
+                       "generate_nonce CCM without set_lengths rejected") != TEST_OK) {
+            (void)psa_aead_abort(&op);
+            (void)psa_destroy_key(ccm_key_id);
+            return TEST_FAIL;
+        }
+        (void)psa_aead_abort(&op);
+        st = psa_destroy_key(ccm_key_id);
+        if (check_status(st, "psa_destroy_key(generate_nonce CCM)") != TEST_OK) {
+            return TEST_FAIL;
+        }
+    }
+#endif
+
+    return TEST_OK;
+
+cleanup:
+    (void)psa_aead_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_aead_gcm_multipart_zero_length_inputs(void)
 {
     static const uint8_t key[16] = {
@@ -7315,6 +7492,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_generate_nonce") == 0) {
+        if (run_named_test("aead_generate_nonce",
+                           test_aead_generate_nonce) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "aead_gcm_multipart_zero_length") == 0) {
         if (run_named_test("aead_gcm_multipart_zero_length",
