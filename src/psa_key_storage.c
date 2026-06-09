@@ -1395,6 +1395,10 @@ psa_status_t psa_export_key(
     wolfPSA_Store_Close(store);
     store = NULL;
     if (ret != (int)key_data_length) {
+        /* A short/failed read may have left partial key material in the
+         * caller-owned buffer; zeroize it like the sibling read paths. */
+        wc_ForceZero(data, key_data_length);
+        *data_length = 0;
         return PSA_ERROR_STORAGE_FAILURE;
     }
     *data_length = key_data_length;

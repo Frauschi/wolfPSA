@@ -35,6 +35,8 @@
 #if !defined(_WIN32) && !defined(_MSC_VER)
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <wolfpsa/psa/crypto.h>
@@ -1454,6 +1456,97 @@ cleanup:
         (void)psa_destroy_key(persistent_id);
     }
     return ret;
+}
+
+static int test_export_key_zeroizes_buffer_on_short_read(void)
+{
+#if defined(_WIN32) || defined(_MSC_VER)
+    return TEST_SKIPPED;
+#else
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    uint8_t exported[sizeof(key)];
+    size_t exported_len = sizeof(key);
+    psa_key_id_t key_id = 0;
+    psa_key_id_t persistent_id = PSA_KEY_ID_USER_MIN + 4097u;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    struct stat sb;
+    char path[256];
+    int len;
+    int all_zero;
+    size_t i;
+    int ret = TEST_FAIL;
+
+    (void)psa_destroy_key(persistent_id);
+
+    setup_aes_key_attrs(&attrs,
+                        PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
+                        PSA_ALG_CBC_NO_PADDING,
+                        PSA_KEY_LIFETIME_PERSISTENT);
+    psa_set_key_id(&attrs, persistent_id);
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES persistent short read)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Truncate the store file by one byte so the key-data read in
+     * psa_export_key returns fewer bytes than the recorded key_data_length.
+     * The header (including the recorded length) stays intact, so the
+     * failure happens at the key-data read, not the header read. */
+    len = get_persistent_key_store_path(key_id, path, sizeof(path));
+    if (len <= 0 || (size_t)len >= sizeof(path)) {
+        printf("FAIL: get_persistent_key_store_path\n");
+        goto cleanup;
+    }
+    if (stat(path, &sb) != 0 || sb.st_size <= 1) {
+        printf("FAIL: stat persistent store\n");
+        goto cleanup;
+    }
+    if (truncate(path, sb.st_size - 1) != 0) {
+        printf("FAIL: truncate persistent store\n");
+        goto cleanup;
+    }
+
+    /* Poison the caller buffer so leftover key material is detectable. */
+    memset(exported, 0x5a, sizeof(exported));
+
+    st = psa_export_key(key_id, exported, sizeof(exported), &exported_len);
+    if (check_true(st == PSA_ERROR_STORAGE_FAILURE,
+                   "psa_export_key reports short key-data read") != TEST_OK) {
+        goto cleanup;
+    }
+
+    all_zero = 1;
+    for (i = 0; i < sizeof(exported); i++) {
+        if (exported[i] != 0) {
+            all_zero = 0;
+            break;
+        }
+    }
+    if (check_true(all_zero,
+                   "psa_export_key zeroizes buffer on short read") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(exported_len == 0,
+                   "psa_export_key clears length on short read") != TEST_OK) {
+        goto cleanup;
+    }
+
+    ret = TEST_OK;
+
+cleanup:
+    psa_reset_key_attributes(&attrs);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    else {
+        (void)psa_destroy_key(persistent_id);
+    }
+    return ret;
+#endif
 }
 
 static int test_import_key_short_write_leaves_no_persistent_key(void)
@@ -7717,6 +7810,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "export_oversized_persistent_length") == 0) {
         if (run_named_test("export_oversized_persistent_length",
                            test_export_key_rejects_oversized_persistent_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "export_zeroizes_buffer_on_short_read") == 0) {
+        if (run_named_test("export_zeroizes_buffer_on_short_read",
+                           test_export_key_zeroizes_buffer_on_short_read) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
