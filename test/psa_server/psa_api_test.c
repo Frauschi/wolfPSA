@@ -3377,6 +3377,36 @@ static int test_import_key_reports_volatile_store_invalid_argument(void)
     return TEST_OK;
 }
 
+static int test_import_key_rejects_overflow_data_length(void)
+{
+    static const uint8_t key_data[1] = { 0x42 };
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+
+    /* A data_length close to SIZE_MAX wraps the internal buffer_size
+     * computation to a tiny allocation; the subsequent copy of data_length
+     * bytes would then overflow that allocation. The import must reject the
+     * length before allocating or copying anything. */
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_bits(&attrs, 8);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, key_data, ~(size_t)0 - 4, &key_id);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_import_key rejects overflowing data_length") != TEST_OK) {
+        printf("  expected PSA_ERROR_INVALID_ARGUMENT, got %d\n", (int)st);
+        return TEST_FAIL;
+    }
+    if (check_true(key_id == PSA_KEY_ID_NULL,
+                   "psa_import_key leaves key id null on overflow length") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_import_key_rejects_unknown_usage_bits(void)
 {
     static const uint8_t key[16] = {
@@ -6998,6 +7028,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "import_key_volatile_store_invalid_argument") == 0) {
         if (run_named_test("import_key_volatile_store_invalid_argument",
                            test_import_key_reports_volatile_store_invalid_argument) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "import_key_overflow_data_length") == 0) {
+        if (run_named_test("import_key_overflow_data_length",
+                           test_import_key_rejects_overflow_data_length) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

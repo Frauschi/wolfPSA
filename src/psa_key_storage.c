@@ -871,6 +871,14 @@ psa_status_t psa_import_key(
     /* Always treat key_id as output-only. */
     *key_id = PSA_KEY_ID_NULL;
 
+    /* Reject lengths that do not fit the int-based storage API or that would
+     * overflow the serialized buffer_size computation below. */
+    if (data_length > (size_t)INT_MAX) {
+        wolfpsa_debug_import_reason("key data length too large", attributes,
+                                    data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     attr = *attributes;
 
     if (attr.policy.alg2 != PSA_ALG_NONE) {
