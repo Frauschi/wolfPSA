@@ -3222,6 +3222,55 @@ cleanup:
     return ret;
 }
 
+/* F-3861: psa_aead_set_lengths is a one-shot setup call -- a second call
+ * before any nonce/AAD/input is provided must fail with PSA_ERROR_BAD_STATE
+ * rather than silently overwriting the committed lengths. */
+static int test_aead_set_lengths_twice_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    int ret = TEST_OK;
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(set_lengths twice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(set_lengths twice)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_set_lengths(&op, 4, 16);
+    if (check_status(st, "psa_aead_set_lengths(first)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_set_lengths(&op, 8, 32);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_aead_set_lengths rejects second call") != TEST_OK) {
+        ret = TEST_FAIL;
+        goto cleanup;
+    }
+
+cleanup:
+    psa_aead_abort(&op);
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(set_lengths twice)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+    return ret;
+}
+
 static int test_aead_finish_verify_word32_overflow_rejected(void)
 {
     static const uint8_t key[16] = {
@@ -8018,6 +8067,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_multipart_length_overflow") == 0) {
         if (run_named_test("aead_multipart_length_overflow",
                            test_aead_multipart_length_overflow_rejected) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_set_lengths_twice") == 0) {
+        if (run_named_test("aead_set_lengths_twice",
+                           test_aead_set_lengths_twice_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
