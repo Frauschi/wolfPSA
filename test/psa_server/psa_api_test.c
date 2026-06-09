@@ -4585,6 +4585,72 @@ static int test_ed25519_signature_length(void)
     return TEST_OK;
 }
 
+/*
+ * HashEdDSA (Ed25519ph / Ed448ph) signs and verifies a fixed 64-byte prehash
+ * (SHA-512 for Ed25519ph, the 64-byte SHAKE256 digest for Ed448ph). The PSA
+ * API must reject any other hash length with PSA_ERROR_INVALID_ARGUMENT
+ * instead of silently producing a non-RFC-8032 signature (F-4095).
+ */
+static int test_hash_eddsa_rejects_bad_hash_length(size_t bits,
+                                                   psa_algorithm_t alg,
+                                                   const char* gen_label)
+{
+    static const uint8_t short_hash[32] = { 0 };
+    uint8_t sig[128];
+    size_t sig_len = sizeof(sig);
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs,
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, gen_label) != TEST_OK) return TEST_FAIL;
+
+    st = psa_sign_hash(key_id, alg, short_hash, sizeof(short_hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects non-64-byte prehash") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_hash(key_id, alg, short_hash, sizeof(short_hash),
+                         sig, sizeof(sig));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_verify_hash rejects non-64-byte prehash") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(HashEdDSA bad hash len)") != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
+static int test_ed25519_rejects_bad_hash_length(void)
+{
+    return test_hash_eddsa_rejects_bad_hash_length(
+        255, PSA_ALG_ED25519PH, "psa_generate_key(ED25519 bad hash len)");
+}
+
+static int test_ed448_rejects_bad_hash_length(void)
+{
+    return test_hash_eddsa_rejects_bad_hash_length(
+        448, PSA_ALG_ED448PH, "psa_generate_key(ED448 bad hash len)");
+}
+
 static int test_twisted_edwards_export_public_key(size_t bits,
                                                   psa_algorithm_t alg,
                                                   size_t expected_pub_len,
@@ -8043,6 +8109,18 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed25519_sig_len") == 0) {
         if (run_named_test("ed25519_sig_len", test_ed25519_signature_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed25519_bad_hash_len") == 0) {
+        if (run_named_test("ed25519_bad_hash_len",
+                           test_ed25519_rejects_bad_hash_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed448_bad_hash_len") == 0) {
+        if (run_named_test("ed448_bad_hash_len",
+                           test_ed448_rejects_bad_hash_length) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

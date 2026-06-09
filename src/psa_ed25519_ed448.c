@@ -76,13 +76,18 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
         (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+    /* HashEdDSA (Ed25519ph) signs the SHA-512 prehash, which is exactly
+     * PSA_HASH_LENGTH(PSA_ALG_SHA_512) (64) bytes. */
+    if (hash_length != PSA_HASH_LENGTH(PSA_ALG_SHA_512)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize ED25519 key */
     ret = wc_ed25519_init(&ed_key);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    
+
     /* Import the stored private seed and derive the public component. */
     ret = wc_ed25519_import_private_only(key_buffer, (word32)key_buffer_size,
                                          &ed_key);
@@ -140,8 +145,12 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
         (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    /* HashEdDSA (Ed25519ph) verifies over the SHA-512 prehash, which is
+     * exactly PSA_HASH_LENGTH(PSA_ALG_SHA_512) (64) bytes. */
+    if (hash_length != PSA_HASH_LENGTH(PSA_ALG_SHA_512)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
-    
     /* Initialize ED25519 key */
     ret = wc_ed25519_init(&ed_key);
     if (ret != 0) {
@@ -352,7 +361,12 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
         (wolfpsa_check_word32_length(signature_size) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+    /* HashEdDSA (Ed448ph) signs the 64-byte SHAKE256 prehash
+     * (PSA_HASH_LENGTH(PSA_ALG_SHAKE256_512)). */
+    if (hash_length != 64u) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Initialize ED448 key */
     ret = wc_ed448_init(&ed_key);
     if (ret != 0) {
@@ -416,8 +430,12 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
         (wolfpsa_check_word32_length(signature_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    /* HashEdDSA (Ed448ph) verifies over the 64-byte SHAKE256 prehash
+     * (PSA_HASH_LENGTH(PSA_ALG_SHAKE256_512)). */
+    if (hash_length != 64u) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
-    
     /* Initialize ED448 key */
     ret = wc_ed448_init(&ed_key);
     if (ret != 0) {
