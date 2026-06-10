@@ -4912,6 +4912,53 @@ static int test_ed448_rejects_bad_hash_length(void)
         448, PSA_ALG_ED448PH, "psa_generate_key(ED448 bad hash len)");
 }
 
+static int test_ed448_sign_message(void)
+{
+    static const uint8_t msg[] = "ed448 sign_message roundtrip";
+    uint8_t sig[128];
+    size_t sig_len = sizeof(sig);
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs,
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS));
+    psa_set_key_bits(&attrs, 448);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ED448PH);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(ED448)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_sign_message(key_id, PSA_ALG_ED448PH,
+                          msg, sizeof(msg) - 1,
+                          sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_message(ED448PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(sig_len == 114u, "psa_sign_message(ED448PH) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_verify_message(key_id, PSA_ALG_ED448PH,
+                            msg, sizeof(msg) - 1, sig, sig_len);
+    if (check_status(st, "psa_verify_message(ED448PH)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ED448)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_twisted_edwards_export_public_key(size_t bits,
                                                   psa_algorithm_t alg,
                                                   size_t expected_pub_len,
@@ -8479,6 +8526,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "ed448_bad_hash_len") == 0) {
         if (run_named_test("ed448_bad_hash_len",
                            test_ed448_rejects_bad_hash_length) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ed448_sign_message") == 0) {
+        if (run_named_test("ed448_sign_message",
+                           test_ed448_sign_message) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
