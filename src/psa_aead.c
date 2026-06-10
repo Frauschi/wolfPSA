@@ -146,27 +146,10 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
-#ifdef HAVE_XCHACHA
-    else if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_XCHACHA20_POLY1305)) {
-        if (attributes->type != PSA_KEY_TYPE_XCHACHA20) {
-            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-            *key_data = NULL;
-            *key_data_length = 0;
-            return PSA_ERROR_INVALID_ARGUMENT;
-        }
-    }
-#endif /* HAVE_XCHACHA */
-#ifdef HAVE_ASCON
-    else if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_ASCON_AEAD128)) {
-        if (attributes->type != PSA_KEY_TYPE_ASCON) {
-            wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
-            *key_data = NULL;
-            *key_data_length = 0;
-            return PSA_ERROR_INVALID_ARGUMENT;
-        }
-    }
-#endif /* HAVE_ASCON */
     else {
+        /* XChaCha20-Poly1305 and Ascon-AEAD128 never reach this function:
+         * they are one-shot only and rejected by wolfpsa_aead_setup before
+         * the key is checked; the one-shot paths validate the key inline. */
         wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;

@@ -1239,6 +1239,13 @@ cleanup:
  *              snapshotted from capacity at first output_bytes() call
  *
  * Output stream is K(1) || K(2) || ... truncated to output_length bytes.
+ *
+ * Interoperability note: L is bound to the operation's capacity, not to the
+ * amount of output actually read (PSA 1.4 §10.8).  Callers MUST set the
+ * capacity to the exact total derivation length before the first output
+ * call to match other SP 800-108 implementations that encode L from the
+ * requested output length; with the default capacity (2^29 - 1 bytes) the
+ * output is self-consistent but not interoperable.
  */
 static psa_status_t wolfpsa_kdf_sp800_108_hmac(wolfpsa_kdf_ctx_t *ctx,
                                                uint8_t *output,
@@ -1379,6 +1386,8 @@ hmac_cleanup:
  * The secret (K_IN) must be a valid AES key: 16, 24, or 32 bytes.
  * Output block size is WC_AES_BLOCK_SIZE (16 bytes).
  * [L]_4 encodes total output length in bits as 4-byte big-endian.
+ * The interoperability note on wolfpsa_kdf_sp800_108_hmac() about binding
+ * L via psa_key_derivation_set_capacity() applies here as well.
  */
 static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
                                                uint8_t *output,
@@ -1612,7 +1621,14 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
          * any output has been consumed (spec: PSA 1.4 §10.8, SP800-108
          * counter mode).  At this point capacity has not yet been decremented
          * by wolfpsa_kdf_require_output, so capacity + output_length equals
-         * the original capacity set at setup / set_capacity time. */
+         * the original capacity set at setup / set_capacity time.
+         *
+         * Callers that did not call psa_key_derivation_set_capacity() get
+         * L derived from the default capacity (2^29 - 1 bytes).  That is
+         * the behavior the PSA spec mandates, but the resulting stream will
+         * not match SP 800-108 implementations that bind L to the requested
+         * output length — see the interoperability note on
+         * wolfpsa_kdf_sp800_108_hmac(). */
         if (!ctx->output_started) {
             ctx->sp800_108_L_bytes = ctx->capacity;
         }
