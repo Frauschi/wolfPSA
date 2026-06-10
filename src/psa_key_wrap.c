@@ -48,6 +48,7 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
                            size_t data_size,
                            size_t *data_length)
 {
+#ifdef HAVE_AES_KEYWRAP
     psa_status_t status;
     psa_key_attributes_t wrap_attr;
     psa_key_attributes_t target_attr;
@@ -60,6 +61,7 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
     size_t plain_max;
     size_t exported_len = 0;
     int wret;
+#endif
 
     wolfpsa_trace("psa_wrap_key(wrapping_key=%u alg=0x%08x key=%u)",
                   (unsigned)wrapping_key, (unsigned)alg, (unsigned)key);
@@ -199,6 +201,7 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
                              size_t data_length,
                              psa_key_id_t *key)
 {
+#ifdef HAVE_AES_KEYWRAP
     psa_status_t status;
     psa_key_attributes_t wrap_attr;
     psa_key_type_t wrap_type;
@@ -209,6 +212,7 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
     uint8_t *plaintext = NULL;
     size_t plain_len;
     int wret;
+#endif
 
     wolfpsa_trace("psa_unwrap_key(wrapping_key=%u alg=0x%08x data_len=%zu)",
                   (unsigned)wrapping_key, (unsigned)alg, data_length);

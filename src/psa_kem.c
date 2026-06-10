@@ -277,6 +277,7 @@ psa_status_t psa_decapsulate(psa_key_id_t key,
                                        ciphertext, ciphertext_length,
                                        ss);
 #else
+    (void)key_bits;
     status = PSA_ERROR_NOT_SUPPORTED;
 #endif
 

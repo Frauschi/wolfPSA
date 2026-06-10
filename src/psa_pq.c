@@ -77,6 +77,9 @@ psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type)
 /* Check if a key size is valid for the given post-quantum key type */
 psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits)
 {
+    /* Unused when every PQC backend is compiled out. */
+    (void)bits;
+
     /* SLH-DSA is unsupported; reject before the switch (family of values). */
     if (PSA_KEY_TYPE_IS_SLH_DSA(type)) {
         return PSA_ERROR_NOT_SUPPORTED;

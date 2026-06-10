@@ -87,6 +87,8 @@
  * without this opt-in. */
 #define WOLFSSL_EXPERIMENTAL_SETTINGS
 #define HAVE_ASCON
+/* AES key wrap requires the direct (single-block) AES API. */
+#define WOLFSSL_AES_DIRECT
 #define HAVE_AES_KEYWRAP
 #define HAVE_XCHACHA
 #define HAVE_CMAC_KDF
