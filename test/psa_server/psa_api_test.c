@@ -3486,6 +3486,68 @@ cleanup:
     return ret;
 }
 
+/* F-3860: psa_aead_finish on a decrypt context and psa_aead_verify on an
+ * encrypt context must both return PSA_ERROR_BAD_STATE. */
+static int test_aead_direction_mismatch_rejected(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t tag[16] = { 0 };
+    uint8_t buf[16];
+    size_t len;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_aead_operation_t op = psa_aead_operation_init();
+    psa_status_t st;
+    int ret = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(direction mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* decrypt_setup + psa_aead_finish must be rejected */
+    st = psa_aead_decrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_decrypt_setup(direction mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_finish(&op, buf, sizeof(buf), &len, buf, sizeof(buf), &len);
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_aead_finish on decrypt context rejected") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    /* encrypt_setup + psa_aead_verify must be rejected */
+    op = psa_aead_operation_init();
+    st = psa_aead_encrypt_setup(&op, key_id, PSA_ALG_GCM);
+    if (check_status(st, "psa_aead_encrypt_setup(direction mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_aead_verify(&op, buf, sizeof(buf), &len, tag, sizeof(tag));
+    if (check_true(st == PSA_ERROR_BAD_STATE,
+                   "psa_aead_verify on encrypt context rejected") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_aead_abort(&op);
+
+    ret = TEST_OK;
+
+cleanup:
+    (void)psa_aead_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return ret;
+}
+
 static int test_aead_gcm_rejects_short_tags(void)
 {
     static const uint8_t key[16] = {
@@ -8091,6 +8153,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "aead_requires_decrypt_usage") == 0) {
         if (run_named_test("aead_requires_decrypt_usage",
                            test_aead_requires_decrypt_usage) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "aead_direction_mismatch") == 0) {
+        if (run_named_test("aead_direction_mismatch",
+                           test_aead_direction_mismatch_rejected) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
