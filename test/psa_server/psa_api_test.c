@@ -273,6 +273,48 @@ static int test_hash(void)
     return TEST_OK;
 }
 
+static int test_hash_compare(void)
+{
+    static const uint8_t msg[] = "abc";
+    /* SHA-256("abc") */
+    static const uint8_t sha256_abc[WC_SHA256_DIGEST_SIZE] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+    };
+    uint8_t bad_hash[WC_SHA256_DIGEST_SIZE];
+    psa_status_t st;
+
+    /* Success path: correct digest must return PSA_SUCCESS. */
+    st = psa_hash_compare(PSA_ALG_SHA_256, msg, sizeof(msg) - 1,
+                          sha256_abc, sizeof(sha256_abc));
+    if (check_status(st, "psa_hash_compare correct") != TEST_OK) return TEST_FAIL;
+
+    /* Mismatch path: one byte flipped must return PSA_ERROR_INVALID_SIGNATURE.
+     * Catches mutation of the ConstantCompare check. */
+    memcpy(bad_hash, sha256_abc, sizeof(bad_hash));
+    bad_hash[0] ^= 0x01;
+    st = psa_hash_compare(PSA_ALG_SHA_256, msg, sizeof(msg) - 1,
+                          bad_hash, sizeof(bad_hash));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_hash_compare mismatch") != TEST_OK) return TEST_FAIL;
+
+    /* Wrong reference length must return PSA_ERROR_INVALID_SIGNATURE. */
+    st = psa_hash_compare(PSA_ALG_SHA_256, msg, sizeof(msg) - 1,
+                          sha256_abc, sizeof(sha256_abc) - 1);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_hash_compare wrong length") != TEST_OK) return TEST_FAIL;
+
+    /* Non-hash algorithm must return PSA_ERROR_INVALID_ARGUMENT. */
+    st = psa_hash_compare(PSA_ALG_HMAC(PSA_ALG_SHA_256), msg, sizeof(msg) - 1,
+                          sha256_abc, sizeof(sha256_abc));
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_hash_compare non-hash alg") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int check_status_or_skip(psa_status_t st, const char* what)
 {
     if (st == PSA_ERROR_NOT_SUPPORTED) {
@@ -7955,6 +7997,9 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "hash") == 0) {
         if (run_named_test("hash", test_hash) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "hash_compare") == 0) {
+        if (run_named_test("hash_compare", test_hash_compare) == TEST_FAIL) return TEST_FAIL;
     }
     if (only == NULL || strcmp(only, "hash_error_state") == 0) {
         if (run_named_test("hash_error_state",
