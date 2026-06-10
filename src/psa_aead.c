@@ -625,7 +625,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return (psa_status_t)ret;
         }
-        if (out_len < ctx->tag_length) {
+        if (out_len < ctx->input_length + ctx->tag_length) {
             wc_ForceZero(tmp, chacha_ciphertext_size);
             XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_GENERIC_ERROR;
