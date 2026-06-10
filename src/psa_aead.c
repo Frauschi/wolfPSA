@@ -888,6 +888,15 @@ psa_status_t psa_aead_encrypt(psa_key_id_t key,
         return status;
     }
 
+    {
+        size_t needed_tag_len = wolfpsa_aead_tag_length(alg);
+        if (needed_tag_len > ciphertext_size ||
+            ciphertext_size - needed_tag_len < plaintext_length) {
+            psa_aead_abort(&operation);
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+    }
+
     status = psa_aead_finish(&operation, ciphertext, ciphertext_size,
                              &out_len, tag, sizeof(tag), &tag_length);
     if (status != PSA_SUCCESS) {

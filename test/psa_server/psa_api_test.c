@@ -2679,6 +2679,64 @@ cleanup:
     return ret;
 }
 
+/* F-3653: psa_aead_encrypt must return BUFFER_TOO_SMALL without modifying the
+ * output buffer when ciphertext_size < plaintext_length + tag_length. */
+static int test_aead_encrypt_buffer_too_small(void)
+{
+    static const uint8_t key[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    static const uint8_t nonce[12] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00
+    };
+    static const uint8_t plaintext[16] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    };
+    /* Exactly plaintext_length — no room for the 16-byte GCM tag. */
+    uint8_t out[sizeof(plaintext)];
+    size_t out_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_GCM);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key") != TEST_OK) goto cleanup;
+
+    XMEMSET(out, 0, sizeof(out));
+
+    st = psa_aead_encrypt(key_id, PSA_ALG_GCM,
+                          nonce, sizeof(nonce),
+                          NULL, 0,
+                          plaintext, sizeof(plaintext),
+                          out, sizeof(out), &out_len);
+    if (check_true(st == PSA_ERROR_BUFFER_TOO_SMALL,
+                   "psa_aead_encrypt with short buffer returns BUFFER_TOO_SMALL")
+        != TEST_OK) goto cleanup;
+
+    /* Output buffer must not have been modified on BUFFER_TOO_SMALL. */
+    {
+        uint8_t zeros[sizeof(out)];
+        XMEMSET(zeros, 0, sizeof(zeros));
+        if (check_buf_eq("psa_aead_encrypt short-buf output unmodified",
+                         out, zeros, sizeof(zeros)) != TEST_OK) goto cleanup;
+    }
+
+    result = TEST_OK;
+cleanup:
+    if (key_id != 0)
+        (void)psa_destroy_key(key_id);
+    return result;
+}
+
 static int test_aead_rejects_corrupted_tag(void)
 {
     static const uint8_t aes_key[16] = {
@@ -8152,6 +8210,12 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "aead_gcm") == 0) {
         if (run_named_test("aead_gcm", test_aead_gcm) == TEST_FAIL) return TEST_FAIL;
+    }
+    if (only == NULL || strcmp(only, "aead_encrypt_buffer_too_small") == 0) {
+        if (run_named_test("aead_encrypt_buffer_too_small",
+                           test_aead_encrypt_buffer_too_small) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
     }
     if (only == NULL || strcmp(only, "aead_rejects_corrupted_tag") == 0) {
         if (run_named_test("aead_rejects_corrupted_tag",
