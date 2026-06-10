@@ -4918,6 +4918,39 @@ static int test_ed448_export_public_key(void)
                                                   "psa_generate_key(ED448 export)");
 }
 
+static int test_ecc_export_public_key(void)
+{
+    /* P-256 uncompressed: 0x04 || 32-byte X || 32-byte Y */
+    uint8_t pub[65];
+    size_t pub_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attrs, 256);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (check_status(st, "psa_generate_key(ECC export)") != TEST_OK) return TEST_FAIL;
+
+    st = psa_export_public_key(key_id, pub, sizeof(pub), &pub_len);
+    if (check_status(st, "psa_export_public_key(ECC)") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+    if (check_true(pub_len == 65u, "psa_export_public_key(ECC) length") != TEST_OK) {
+        (void)psa_destroy_key(key_id);
+        return TEST_FAIL;
+    }
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(ECC)") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int test_x25519_key_usability(void)
 {
     static const uint8_t alice_priv[X25519_KEY_BYTES] = {
@@ -8400,6 +8433,11 @@ int main(int argc, char** argv)
     }
     if (only == NULL || strcmp(only, "ed448_export_pub") == 0) {
         if (run_named_test("ed448_export_pub", test_ed448_export_public_key) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "ecc_export_pub") == 0) {
+        if (run_named_test("ecc_export_pub", test_ecc_export_public_key) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
