@@ -224,24 +224,24 @@ psa_status_t psa_xchacha20_poly1305_encrypt(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
-    if (alg != PSA_ALG_CHACHA20_POLY1305) {
+    if (alg == PSA_ALG_CHACHA20_POLY1305) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
-    
+
     if (nonce == NULL || nonce_length != XCHACHA20_POLY1305_AEAD_NONCE_SIZE) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Additional data can be NULL if length is 0 */
     if (additional_data == NULL && additional_data_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Plaintext can be NULL if length is 0 */
     if (plaintext == NULL && plaintext_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     if (plaintext_length > SIZE_MAX - CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
@@ -251,7 +251,7 @@ psa_status_t psa_xchacha20_poly1305_encrypt(
     if (ciphertext_size < required_size) {
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
-    
+
     /* Encrypt using XChaCha20-Poly1305 */
     ret = wc_XChaCha20Poly1305_Encrypt(
         ciphertext, ciphertext_size,
@@ -287,19 +287,19 @@ psa_status_t psa_xchacha20_poly1305_decrypt(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
-    if (alg != PSA_ALG_CHACHA20_POLY1305) {
+    if (alg == PSA_ALG_CHACHA20_POLY1305) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
-    
+
     if (nonce == NULL || nonce_length != XCHACHA20_POLY1305_AEAD_NONCE_SIZE) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Additional data can be NULL if length is 0 */
     if (additional_data == NULL && additional_data_length > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-    
+
     /* Ciphertext must include authentication tag */
     if (ciphertext_length < CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
         return PSA_ERROR_INVALID_ARGUMENT;
