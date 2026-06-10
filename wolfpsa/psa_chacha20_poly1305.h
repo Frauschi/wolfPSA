@@ -61,25 +61,5 @@ WOLFSSL_LOCAL psa_status_t psa_chacha20_poly1305_decrypt(
     const uint8_t *ciphertext, size_t ciphertext_length,
     uint8_t *plaintext, size_t plaintext_size, size_t *plaintext_length);
 
-#ifdef HAVE_XCHACHA
-/* Encrypt using XChaCha20-Poly1305 */
-WOLFSSL_LOCAL psa_status_t psa_xchacha20_poly1305_encrypt(
-    const uint8_t *key, size_t key_length,
-    psa_algorithm_t alg,
-    const uint8_t *nonce, size_t nonce_length,
-    const uint8_t *additional_data, size_t additional_data_length,
-    const uint8_t *plaintext, size_t plaintext_length,
-    uint8_t *ciphertext, size_t ciphertext_size, size_t *ciphertext_length);
-
-/* Decrypt using XChaCha20-Poly1305 */
-WOLFSSL_LOCAL psa_status_t psa_xchacha20_poly1305_decrypt(
-    const uint8_t *key, size_t key_length,
-    psa_algorithm_t alg,
-    const uint8_t *nonce, size_t nonce_length,
-    const uint8_t *additional_data, size_t additional_data_length,
-    const uint8_t *ciphertext, size_t ciphertext_length,
-    uint8_t *plaintext, size_t plaintext_size, size_t *plaintext_length);
-#endif /* HAVE_XCHACHA */
-
 #endif /* WOLFSSL_PSA_ENGINE && HAVE_CHACHA && HAVE_POLY1305 */
 #endif /* WOLFSSL_PSA_CHACHA20_POLY1305_H */
