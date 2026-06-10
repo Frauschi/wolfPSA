@@ -42,6 +42,8 @@
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/misc.h>
 #include <limits.h>
+#include <psa/crypto-pqc.h>
+#include "psa_pqc_internal.h"
 
 #ifdef WOLFPSA_DEBUG_IMPORT
 #include <stdio.h>
@@ -259,7 +261,9 @@ static int wolfpsa_usage_flags_valid(psa_key_usage_t usage)
                            PSA_KEY_USAGE_SIGN_HASH |
                            PSA_KEY_USAGE_VERIFY_HASH |
                            PSA_KEY_USAGE_DERIVE |
-                           PSA_KEY_USAGE_VERIFY_DERIVATION;
+                           PSA_KEY_USAGE_VERIFY_DERIVATION |
+                           PSA_KEY_USAGE_WRAP |
+                           PSA_KEY_USAGE_UNWRAP;
 
     return (usage & ~mask) == 0;
 }
@@ -418,6 +422,7 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         attr->type == PSA_KEY_TYPE_HMAC ||
         attr->type == PSA_KEY_TYPE_RAW_DATA ||
         attr->type == PSA_KEY_TYPE_CHACHA20 ||
+        attr->type == PSA_KEY_TYPE_XCHACHA20 ||
         attr->type == PSA_KEY_TYPE_DERIVE ||
         attr->type == PSA_KEY_TYPE_PASSWORD ||
         attr->type == PSA_KEY_TYPE_PASSWORD_HASH ||
@@ -493,6 +498,61 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
     if (PSA_KEY_TYPE_IS_DH(attr->type)) {
         attr->bits = (psa_key_bits_t)(data_length * 8U);
         return PSA_SUCCESS;
+    }
+
+    /* ML-DSA: key pairs store a 32-byte seed — ambiguous across parameter sets,
+     * caller must set bits explicitly. Public keys have unambiguous sizes. */
+    if (PSA_KEY_TYPE_IS_ML_DSA(attr->type)) {
+        if (attr->type == PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY) {
+            switch (data_length) {
+                case 1312: attr->bits = 128; return PSA_SUCCESS;
+                case 1952: attr->bits = 192; return PSA_SUCCESS;
+                case 2592: attr->bits = 256; return PSA_SUCCESS;
+                default:   return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        /* Key pair: 32-byte seed is ambiguous — bits must be set by caller. */
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* ML-KEM: key pairs store a 64-byte seed — ambiguous. Public key sizes
+     * are unambiguous. */
+    if (PSA_KEY_TYPE_IS_ML_KEM(attr->type)) {
+        if (attr->type == PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY) {
+            switch (data_length) {
+                case  800: attr->bits =  512; return PSA_SUCCESS;
+                case 1184: attr->bits =  768; return PSA_SUCCESS;
+                case 1568: attr->bits = 1024; return PSA_SUCCESS;
+                default:   return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        /* Key pair: 64-byte seed is ambiguous — bits must be set by caller. */
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* LMS / HSS / XMSS / XMSS^MT — public-key-only types, infer bits from
+     * blob length (hash-output length: 192-bit or 256-bit parameter sets). */
+    if (attr->type == PSA_KEY_TYPE_LMS_PUBLIC_KEY) {
+        switch (data_length) {
+            case 48: attr->bits = 192; return PSA_SUCCESS;
+            case 56: attr->bits = 256; return PSA_SUCCESS;
+            default: return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    if (attr->type == PSA_KEY_TYPE_HSS_PUBLIC_KEY) {
+        switch (data_length) {
+            case 52: attr->bits = 192; return PSA_SUCCESS;
+            case 60: attr->bits = 256; return PSA_SUCCESS;
+            default: return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    if (attr->type == PSA_KEY_TYPE_XMSS_PUBLIC_KEY ||
+        attr->type == PSA_KEY_TYPE_XMSS_MT_PUBLIC_KEY) {
+        switch (data_length) {
+            case 52: attr->bits = 192; return PSA_SUCCESS;
+            case 68: attr->bits = 256; return PSA_SUCCESS;
+            default: return PSA_ERROR_INVALID_ARGUMENT;
+        }
     }
 
     return PSA_ERROR_INVALID_ARGUMENT;
@@ -911,13 +971,16 @@ psa_status_t psa_import_key(
             return status;
         }
     }
-    if (attr.type == PSA_KEY_TYPE_CHACHA20) {
+    if (attr.type == PSA_KEY_TYPE_CHACHA20 ||
+        attr.type == PSA_KEY_TYPE_XCHACHA20) {
         if (attr.bits != 256) {
-            wolfpsa_debug_import_reason("invalid ChaCha20 key bits", &attr, data_length);
+            wolfpsa_debug_import_reason("invalid ChaCha20/XChaCha20 key bits", &attr,
+                                        data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
-            wolfpsa_debug_import_reason("ChaCha20 bits/length mismatch", &attr, data_length);
+        if (data_length != 32) {
+            wolfpsa_debug_import_reason("ChaCha20/XChaCha20 key length must be 32", &attr,
+                                        data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
@@ -952,7 +1015,120 @@ psa_status_t psa_import_key(
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
-    
+    else if (PSA_KEY_TYPE_IS_ML_DSA(attr.type)) {
+        if (attr.type == PSA_KEY_TYPE_ML_DSA_KEY_PAIR) {
+            if (attr.bits != 128 && attr.bits != 192 && attr.bits != 256) {
+                wolfpsa_debug_import_reason("invalid ML-DSA key pair bits", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            if (data_length != 32) {
+                wolfpsa_debug_import_reason("ML-DSA key pair must be 32-byte seed",
+                                            &attr, data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        else {
+            /* PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY */
+            size_t expected;
+            switch (attr.bits) {
+                case 128: expected = 1312; break;
+                case 192: expected = 1952; break;
+                case 256: expected = 2592; break;
+                default:
+                    wolfpsa_debug_import_reason("invalid ML-DSA public key bits", &attr,
+                                                data_length);
+                    return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            if (data_length != expected) {
+                wolfpsa_debug_import_reason("ML-DSA public key length mismatch", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    else if (PSA_KEY_TYPE_IS_ML_KEM(attr.type)) {
+        if (attr.type == PSA_KEY_TYPE_ML_KEM_KEY_PAIR) {
+            if (attr.bits != 512 && attr.bits != 768 && attr.bits != 1024) {
+                wolfpsa_debug_import_reason("invalid ML-KEM key pair bits", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            if (data_length != 64) {
+                wolfpsa_debug_import_reason("ML-KEM key pair must be 64-byte seed",
+                                            &attr, data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        else {
+            /* PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY */
+            size_t expected;
+            switch (attr.bits) {
+                case  512: expected =  800; break;
+                case  768: expected = 1184; break;
+                case 1024: expected = 1568; break;
+                default:
+                    wolfpsa_debug_import_reason("invalid ML-KEM public key bits", &attr,
+                                                data_length);
+                    return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            if (data_length != expected) {
+                wolfpsa_debug_import_reason("ML-KEM public key length mismatch", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    else if (attr.type == PSA_KEY_TYPE_LMS_PUBLIC_KEY) {
+        size_t expected;
+        switch (attr.bits) {
+            case 192: expected = 48; break;
+            case 256: expected = 56; break;
+            default:
+                wolfpsa_debug_import_reason("invalid LMS public key bits", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (data_length != expected) {
+            wolfpsa_debug_import_reason("LMS public key length mismatch", &attr,
+                                        data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    else if (attr.type == PSA_KEY_TYPE_HSS_PUBLIC_KEY) {
+        size_t expected;
+        switch (attr.bits) {
+            case 192: expected = 52; break;
+            case 256: expected = 60; break;
+            default:
+                wolfpsa_debug_import_reason("invalid HSS public key bits", &attr,
+                                            data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (data_length != expected) {
+            wolfpsa_debug_import_reason("HSS public key length mismatch", &attr,
+                                        data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    else if (attr.type == PSA_KEY_TYPE_XMSS_PUBLIC_KEY ||
+             attr.type == PSA_KEY_TYPE_XMSS_MT_PUBLIC_KEY) {
+        size_t expected;
+        switch (attr.bits) {
+            case 192: expected = 52; break;
+            case 256: expected = 68; break;
+            default:
+                wolfpsa_debug_import_reason("invalid XMSS/XMSS^MT public key bits",
+                                            &attr, data_length);
+                return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        if (data_length != expected) {
+            wolfpsa_debug_import_reason("XMSS/XMSS^MT public key length mismatch",
+                                        &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
     /* Check if the key storage is initialized */
     status = psa_key_storage_check_init();
     if (status != PSA_SUCCESS) {
@@ -1089,7 +1265,8 @@ psa_status_t psa_generate_key(
         key_type == PSA_KEY_TYPE_HMAC ||
         key_type == PSA_KEY_TYPE_AES ||
         key_type == PSA_KEY_TYPE_DES ||
-        key_type == PSA_KEY_TYPE_CHACHA20) {
+        key_type == PSA_KEY_TYPE_CHACHA20 ||
+        key_type == PSA_KEY_TYPE_XCHACHA20) {
         key_data_length = PSA_BITS_TO_BYTES(key_bits);
         if (key_data_length == 0) {
             return PSA_ERROR_INVALID_ARGUMENT;
@@ -1266,6 +1443,46 @@ psa_status_t psa_generate_key(
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
     }
+
+#if defined(WOLFSSL_HAVE_MLDSA)
+    if (key_type == PSA_KEY_TYPE_ML_DSA_KEY_PAIR) {
+        uint8_t seed[WOLFPSA_MLDSA_SEED_SIZE];
+
+        if (key_bits != 128 && key_bits != 192 && key_bits != 256) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        status = wolfpsa_mldsa_generate_seed((size_t)key_bits, seed);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(seed, sizeof(seed));
+            return status;
+        }
+
+        status = psa_import_key(attributes, seed, sizeof(seed), key_id);
+        wc_ForceZero(seed, sizeof(seed));
+        return status;
+    }
+#endif /* WOLFSSL_HAVE_MLDSA */
+
+#if defined(WOLFSSL_HAVE_MLKEM)
+    if (key_type == PSA_KEY_TYPE_ML_KEM_KEY_PAIR) {
+        uint8_t seed[WOLFPSA_MLKEM_SEED_SIZE];
+
+        if (key_bits != 512 && key_bits != 768 && key_bits != 1024) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        status = wolfpsa_mlkem_generate_seed((size_t)key_bits, seed);
+        if (status != PSA_SUCCESS) {
+            wc_ForceZero(seed, sizeof(seed));
+            return status;
+        }
+
+        status = psa_import_key(attributes, seed, sizeof(seed), key_id);
+        wc_ForceZero(seed, sizeof(seed));
+        return status;
+    }
+#endif /* WOLFSSL_HAVE_MLKEM */
 
     return PSA_ERROR_NOT_SUPPORTED;
 }
@@ -1463,7 +1680,13 @@ psa_status_t psa_export_public_key(
     }
 
     if (!PSA_KEY_TYPE_IS_RSA(attributes.type) &&
-        !PSA_KEY_TYPE_IS_ECC(attributes.type)) {
+        !PSA_KEY_TYPE_IS_ECC(attributes.type) &&
+        !PSA_KEY_TYPE_IS_ML_DSA(attributes.type) &&
+        !PSA_KEY_TYPE_IS_ML_KEM(attributes.type) &&
+        attributes.type != PSA_KEY_TYPE_LMS_PUBLIC_KEY &&
+        attributes.type != PSA_KEY_TYPE_HSS_PUBLIC_KEY &&
+        attributes.type != PSA_KEY_TYPE_XMSS_PUBLIC_KEY &&
+        attributes.type != PSA_KEY_TYPE_XMSS_MT_PUBLIC_KEY) {
         if (use_volatile) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         }
@@ -1672,6 +1895,66 @@ psa_status_t psa_export_public_key(
     #else
         status = PSA_ERROR_NOT_SUPPORTED;
     #endif
+        /* PQC key types — reached when neither RSA nor ECC matched the type
+         * gate above. */
+#if defined(WOLFSSL_HAVE_MLDSA)
+        if (PSA_KEY_TYPE_IS_ML_DSA(attributes.type)) {
+            if (attributes.type == PSA_KEY_TYPE_ML_DSA_PUBLIC_KEY) {
+                /* Public key already stored as raw bytes — copy directly. */
+                if (data_size < key_data_length) {
+                    status = PSA_ERROR_BUFFER_TOO_SMALL;
+                }
+                else {
+                    XMEMCPY(data, key_data, key_data_length);
+                    *data_length = key_data_length;
+                    status = PSA_SUCCESS;
+                }
+            }
+            else {
+                /* Key pair: stored as 32-byte seed — derive public key. */
+                status = wolfpsa_mldsa_export_public((size_t)attributes.bits,
+                                                     key_data, data, data_size,
+                                                     data_length);
+            }
+        }
+        else
+#endif /* WOLFSSL_HAVE_MLDSA */
+#if defined(WOLFSSL_HAVE_MLKEM)
+        if (PSA_KEY_TYPE_IS_ML_KEM(attributes.type)) {
+            if (attributes.type == PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY) {
+                /* Public key already stored as raw bytes — copy directly. */
+                if (data_size < key_data_length) {
+                    status = PSA_ERROR_BUFFER_TOO_SMALL;
+                }
+                else {
+                    XMEMCPY(data, key_data, key_data_length);
+                    *data_length = key_data_length;
+                    status = PSA_SUCCESS;
+                }
+            }
+            else {
+                /* Key pair: stored as 64-byte seed — derive public key. */
+                status = wolfpsa_mlkem_export_public((size_t)attributes.bits,
+                                                     key_data, data, data_size,
+                                                     data_length);
+            }
+        }
+        else
+#endif /* WOLFSSL_HAVE_MLKEM */
+        if (attributes.type == PSA_KEY_TYPE_LMS_PUBLIC_KEY ||
+            attributes.type == PSA_KEY_TYPE_HSS_PUBLIC_KEY ||
+            attributes.type == PSA_KEY_TYPE_XMSS_PUBLIC_KEY ||
+            attributes.type == PSA_KEY_TYPE_XMSS_MT_PUBLIC_KEY) {
+            /* Public-key-only types: stored bytes are the raw public key. */
+            if (data_size < key_data_length) {
+                status = PSA_ERROR_BUFFER_TOO_SMALL;
+            }
+            else {
+                XMEMCPY(data, key_data, key_data_length);
+                *data_length = key_data_length;
+                status = PSA_SUCCESS;
+            }
+        }
     }
 
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -1890,6 +2173,72 @@ psa_status_t psa_copy_key(
     wolfpsa_forcezero_free_key_data(buffer, key_data_length);
     
     return status;
+}
+
+/* Check whether a key supports a given algorithm and usage combination.
+ *
+ * PSA Crypto API 1.4 semantics:
+ *  - Returns PSA_SUCCESS iff the key exists and its policy permits using
+ *    algorithm 'alg' with ALL of the requested usage flags.
+ *  - alg == PSA_ALG_NONE: skip algorithm check (only usage is validated).
+ *  - Wildcard-hash policy (PSA_ALG_ANY_HASH in key policy) authorises any
+ *    concrete hash-and-sign algorithm of the same base family.
+ *  - No key material is loaded.
+ */
+psa_status_t psa_check_key_usage(psa_key_id_t key,
+                                 psa_algorithm_t alg,
+                                 psa_key_usage_t usage)
+{
+    wolfpsa_trace("psa_check_key_usage(key=%u alg=0x%08x usage=0x%08x)",
+                  (unsigned)key, (unsigned)alg, (unsigned)usage);
+    psa_status_t status;
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_usage_t key_usage;
+    psa_algorithm_t key_alg;
+
+    status = psa_get_key_attributes(key, &attributes);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    key_usage = psa_get_key_usage_flags(&attributes);
+    if ((key_usage & usage) != usage) {
+        psa_reset_key_attributes(&attributes);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    if (alg != PSA_ALG_NONE) {
+        key_alg = psa_get_key_algorithm(&attributes);
+
+        /* A key with no permitted algorithm cannot be used for any
+         * cryptographic operation. */
+        if (key_alg == PSA_ALG_NONE) {
+            psa_reset_key_attributes(&attributes);
+            return PSA_ERROR_NOT_PERMITTED;
+        }
+
+        /* Exact match is always accepted. Otherwise apply the ANY_HASH
+         * wildcard rule: a sign-hash policy using PSA_ALG_ANY_HASH authorises
+         * any concrete hash-and-sign algorithm of the same base family. */
+        if (key_alg != alg) {
+            int alg_ok = 0;
+
+            if (PSA_ALG_IS_SIGN_HASH(alg) &&
+                PSA_ALG_SIGN_GET_HASH(key_alg) == PSA_ALG_ANY_HASH &&
+                PSA_ALG_SIGN_GET_HASH(alg) != PSA_ALG_ANY_HASH &&
+                ((key_alg & ~PSA_ALG_HASH_MASK) == (alg & ~PSA_ALG_HASH_MASK))) {
+                alg_ok = 1;
+            }
+
+            if (!alg_ok) {
+                psa_reset_key_attributes(&attributes);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+        }
+    }
+
+    psa_reset_key_attributes(&attributes);
+    return PSA_SUCCESS;
 }
 
 #endif /* WOLFSSL_PSA_ENGINE */
