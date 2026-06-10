@@ -25,7 +25,10 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && (defined(WOLFSSL_HAVE_KYBER) || defined(WOLFSSL_WC_MLKEM))
+/* Quarantined pending the PSA 1.4 ML-KEM rewrite: this legacy code targets
+ * the removed <wolfssl/wolfcrypt/mlkem.h> API and references
+ * psa_ml_kem_parameter_t, which is not defined by any header. */
+#if 0
 
 #include <psa/crypto.h>
 #include <wolfpsa/psa_engine.h>

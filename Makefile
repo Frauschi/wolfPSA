@@ -21,6 +21,7 @@ OBJ_PIC := $(patsubst src/%.c,$(OBJDIR_PIC)/%.o,$(SRC))
 
 WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/aes.c \
+	$(WOLFSSL_PATH)/wolfcrypt/src/ascon.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/asn.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/chacha.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/chacha20_poly1305.c \

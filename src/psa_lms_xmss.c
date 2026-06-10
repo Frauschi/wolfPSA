@@ -25,7 +25,10 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && (defined(WOLFSSL_HAVE_LMS) || defined(WOLFSSL_HAVE_XMSS))
+/* Quarantined pending the PSA 1.4 LMS/XMSS rewrite: this legacy code targets
+ * the removed <wolfssl/wolfcrypt/lms.h>/<wolfssl/wolfcrypt/xmss.h> headers and
+ * key-generation/sign APIs that do not exist under the verify-only build. */
+#if 0
 
 #include <psa/crypto.h>
 #include "psa_size.h"

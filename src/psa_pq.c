@@ -40,7 +40,7 @@
 psa_status_t psa_pq_check_key_type_supported(psa_key_type_t type)
 {
     switch (type) {
-#if defined(WOLFSSL_HAVE_KYBER) || defined(WOLFSSL_WC_MLKEM)
+#if defined(WOLFSSL_HAVE_MLKEM)
         case PSA_KEY_TYPE_ML_KEM_KEY_PAIR:
         case PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY:
             return PSA_SUCCESS;
@@ -78,7 +78,7 @@ psa_status_t psa_pq_check_key_size_valid(psa_key_type_t type, size_t bits)
     (void)bits;
 
     switch (type) {
-#if defined(WOLFSSL_HAVE_KYBER) || defined(WOLFSSL_WC_MLKEM)
+#if defined(WOLFSSL_HAVE_MLKEM)
         case PSA_KEY_TYPE_ML_KEM_KEY_PAIR:
         case PSA_KEY_TYPE_ML_KEM_PUBLIC_KEY:
             /* ML-KEM key sizes: 512, 768, 1024 */
