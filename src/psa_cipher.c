@@ -1323,6 +1323,7 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
         if (ctx->direction == AES_ENCRYPTION) {
             uint8_t block[AES_BLOCK_SIZE];
             size_t pad_len = block_size - ctx->partial_len;
+            psa_status_t status = PSA_SUCCESS;
 
             if (pad_len == 0) {
                 pad_len = block_size;
@@ -1340,7 +1341,8 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                 ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                         (word32)block_size);
 #else
-                return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                status = PSA_ERROR_NOT_SUPPORTED;
+                goto cbc_pkcs7_encrypt_done;
 #endif
             }
             else {
@@ -1348,10 +1350,17 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
                                        (word32)block_size);
             }
             if (ret != 0) {
-                return wolfpsa_cipher_fail(operation, wc_error_to_psa_status(ret));
+                status = wc_error_to_psa_status(ret);
+                goto cbc_pkcs7_encrypt_done;
             }
             ctx->partial_len = 0;
             *output_length = block_size;
+
+cbc_pkcs7_encrypt_done:
+            wc_ForceZero(block, sizeof(block));
+            if (status != PSA_SUCCESS) {
+                return wolfpsa_cipher_fail(operation, status);
+            }
             psa_cipher_abort(operation);
             return PSA_SUCCESS;
         }
