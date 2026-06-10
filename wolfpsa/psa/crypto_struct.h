@@ -42,6 +42,16 @@ static inline psa_hash_operation_t psa_hash_operation_init(void)
     return v;
 }
 
+typedef struct psa_xof_operation_s {
+    uintptr_t opaque;
+} psa_xof_operation_t;
+#define PSA_XOF_OPERATION_INIT { 0 }
+static inline psa_xof_operation_t psa_xof_operation_init(void)
+{
+    const psa_xof_operation_t v = PSA_XOF_OPERATION_INIT;
+    return v;
+}
+
 typedef struct psa_cipher_operation_s {
     uintptr_t opaque;
 } psa_cipher_operation_t;

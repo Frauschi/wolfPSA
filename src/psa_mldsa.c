@@ -25,7 +25,10 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-#if defined(WOLFSSL_PSA_ENGINE) && defined(WOLFSSL_HAVE_MLDSA)
+/* Quarantined pending the PSA 1.4 ML-DSA rewrite: this legacy code uses the
+ * removed psa_ml_dsa_parameter_t convention (wolfSSL levels 2/3/5) instead of
+ * the spec-mandated seed-based keys with bits 128/192/256. */
+#if 0
 
 #include <psa/crypto.h>
 #include "psa_size.h"

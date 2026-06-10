@@ -5537,6 +5537,10 @@ cleanup:
     return ret;
 }
 
+/* Quarantined: the legacy psa_ml_dsa_* API and PSA_ML_DSA_PARAMETER_*
+ * convention were removed by the PSA 1.4 upgrade. Spec-API ML-DSA coverage
+ * lives in test/psa_mldsa_test.c. */
+#if 0
 static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
     psa_ml_dsa_parameter_t parameter, size_t expected_private_key_length,
     size_t expected_public_key_length, size_t expected_signature_length,
@@ -5614,10 +5618,11 @@ static int test_ml_dsa_verify_rejects_bad_signature_for_parameter(
     return TEST_SKIPPED;
 #endif
 }
+#endif /* 0 */
 
 static int test_ml_dsa_verify_rejects_bad_signature(void)
 {
-#if defined(WOLFSSL_HAVE_MLDSA)
+#if 0 /* legacy psa_ml_dsa_* API removed; see test/psa_mldsa_test.c */
     int ran = 0;
     int skipped = 0;
     int ret;

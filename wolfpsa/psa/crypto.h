@@ -41,6 +41,7 @@ typedef struct psa_hash_operation_s psa_hash_operation_t;
 typedef struct psa_mac_operation_s psa_mac_operation_t;
 typedef struct psa_cipher_operation_s psa_cipher_operation_t;
 typedef struct psa_aead_operation_s psa_aead_operation_t;
+typedef struct psa_xof_operation_s psa_xof_operation_t;
 typedef struct psa_key_derivation_s psa_key_derivation_operation_t;
 typedef struct psa_sign_hash_interruptible_operation_s psa_sign_hash_interruptible_operation_t;
 typedef struct psa_verify_hash_interruptible_operation_s psa_verify_hash_interruptible_operation_t;
@@ -96,6 +97,11 @@ psa_status_t psa_get_key_attributes(psa_key_id_t key,
 void psa_reset_key_attributes(psa_key_attributes_t *attributes);
 
 psa_status_t psa_purge_key(psa_key_id_t key);
+
+/* Check whether a key supports a given algorithm and usage combination. */
+psa_status_t psa_check_key_usage(psa_key_id_t key,
+                                 psa_algorithm_t alg,
+                                 psa_key_usage_t usage);
 
 psa_status_t psa_copy_key(psa_key_id_t source_key,
                           const psa_key_attributes_t *attributes,
@@ -154,6 +160,37 @@ psa_status_t psa_hash_abort(psa_hash_operation_t *operation);
 
 psa_status_t psa_hash_clone(const psa_hash_operation_t *source_operation,
                             psa_hash_operation_t *target_operation);
+
+/* Suspend an in-progress hash operation, saving state to a caller buffer. */
+psa_status_t psa_hash_suspend(psa_hash_operation_t *operation,
+                              uint8_t *hash_state,
+                              size_t hash_state_size,
+                              size_t *hash_state_length);
+
+/* Restore a hash operation from a previously suspended state buffer. */
+psa_status_t psa_hash_resume(psa_hash_operation_t *operation,
+                             const uint8_t *hash_state,
+                             size_t hash_state_length);
+
+/* XOF (extendable-output function) multi-part operation. */
+static psa_xof_operation_t psa_xof_operation_init(void);
+
+psa_status_t psa_xof_setup(psa_xof_operation_t *operation,
+                           psa_algorithm_t alg);
+
+psa_status_t psa_xof_set_context(psa_xof_operation_t *operation,
+                                 const uint8_t *context,
+                                 size_t context_length);
+
+psa_status_t psa_xof_update(psa_xof_operation_t *operation,
+                            const uint8_t *input,
+                            size_t input_length);
+
+psa_status_t psa_xof_output(psa_xof_operation_t *operation,
+                            uint8_t *output,
+                            size_t output_length);
+
+psa_status_t psa_xof_abort(psa_xof_operation_t *operation);
 
 psa_status_t psa_mac_compute(psa_key_id_t key,
                              psa_algorithm_t alg,
@@ -352,44 +389,44 @@ psa_status_t psa_verify_hash(psa_key_id_t key,
                              const uint8_t *signature,
                              size_t signature_length);
 
-psa_status_t psa_ml_dsa_generate_key(psa_ml_dsa_parameter_t parameter,
-                                     uint8_t *private_key,
-                                     size_t private_key_size,
-                                     size_t *private_key_length,
-                                     uint8_t *public_key,
-                                     size_t public_key_size,
-                                     size_t *public_key_length);
+/* PSA 1.4: sign/verify with an explicit context string (e.g. Ed25519ctx). */
+psa_status_t psa_sign_message_with_context(psa_key_id_t key,
+                                           psa_algorithm_t alg,
+                                           const uint8_t *input,
+                                           size_t input_length,
+                                           const uint8_t *context,
+                                           size_t context_length,
+                                           uint8_t *signature,
+                                           size_t signature_size,
+                                           size_t *signature_length);
 
-psa_status_t psa_ml_dsa_sign(psa_ml_dsa_parameter_t parameter,
-                             const uint8_t *private_key,
-                             size_t private_key_size,
-                             const uint8_t *message,
-                             size_t message_length,
-                             uint8_t *signature,
-                             size_t signature_size,
-                             size_t *signature_length);
+psa_status_t psa_verify_message_with_context(psa_key_id_t key,
+                                             psa_algorithm_t alg,
+                                             const uint8_t *input,
+                                             size_t input_length,
+                                             const uint8_t *context,
+                                             size_t context_length,
+                                             const uint8_t *signature,
+                                             size_t signature_length);
 
-psa_status_t psa_ml_dsa_verify(psa_ml_dsa_parameter_t parameter,
-                               const uint8_t *public_key,
-                               size_t public_key_size,
-                               const uint8_t *message,
-                               size_t message_length,
-                               const uint8_t *signature,
-                               size_t signature_length);
+psa_status_t psa_sign_hash_with_context(psa_key_id_t key,
+                                        psa_algorithm_t alg,
+                                        const uint8_t *hash,
+                                        size_t hash_length,
+                                        const uint8_t *context,
+                                        size_t context_length,
+                                        uint8_t *signature,
+                                        size_t signature_size,
+                                        size_t *signature_length);
 
-psa_status_t psa_lms_verify(const uint8_t *public_key,
-                            size_t public_key_size,
-                            const uint8_t *message,
-                            size_t message_length,
-                            const uint8_t *signature,
-                            size_t signature_length);
-
-psa_status_t psa_xmss_verify(const uint8_t *public_key,
-                             size_t public_key_size,
-                             const uint8_t *message,
-                             size_t message_length,
-                             const uint8_t *signature,
-                             size_t signature_length);
+psa_status_t psa_verify_hash_with_context(psa_key_id_t key,
+                                          psa_algorithm_t alg,
+                                          const uint8_t *hash,
+                                          size_t hash_length,
+                                          const uint8_t *context,
+                                          size_t context_length,
+                                          const uint8_t *signature,
+                                          size_t signature_length);
 
 psa_status_t psa_asymmetric_encrypt(psa_key_id_t key,
                                     psa_algorithm_t alg,
@@ -495,6 +532,22 @@ psa_status_t psa_key_agreement(psa_key_id_t private_key,
                                const psa_key_attributes_t *attributes,
                                psa_key_id_t *key);
 
+/* PSA 1.4: KEM encapsulate/decapsulate (e.g. ML-KEM). */
+psa_status_t psa_encapsulate(psa_key_id_t key,
+                             psa_algorithm_t alg,
+                             const psa_key_attributes_t *attributes,
+                             psa_key_id_t *output_key,
+                             uint8_t *ciphertext,
+                             size_t ciphertext_size,
+                             size_t *ciphertext_length);
+
+psa_status_t psa_decapsulate(psa_key_id_t key,
+                             psa_algorithm_t alg,
+                             const uint8_t *ciphertext,
+                             size_t ciphertext_length,
+                             const psa_key_attributes_t *attributes,
+                             psa_key_id_t *output_key);
+
 psa_status_t psa_generate_random(uint8_t *output,
                                  size_t output_size);
 
@@ -507,6 +560,25 @@ psa_status_t psa_generate_key_custom(const psa_key_attributes_t *attributes,
                                      size_t custom_data_length,
                                      psa_key_id_t *key);
 
+/* PSA 1.4: key wrapping and hardware-bound key attachment. */
+psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
+                          psa_algorithm_t alg,
+                          psa_key_id_t key,
+                          uint8_t *data,
+                          size_t data_size,
+                          size_t *data_length);
+
+psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
+                            psa_key_id_t wrapping_key,
+                            psa_algorithm_t alg,
+                            const uint8_t *data,
+                            size_t data_length,
+                            psa_key_id_t *key);
+
+psa_status_t psa_attach_key(const psa_key_attributes_t *attributes,
+                            const uint8_t *label,
+                            size_t label_length,
+                            psa_key_id_t *key);
 
 
 void psa_interruptible_set_max_ops(uint32_t max_ops);
