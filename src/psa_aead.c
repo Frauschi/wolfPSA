@@ -33,6 +33,12 @@
 #include <wolfpsa/psa_chacha20_poly1305.h>
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
+#ifdef HAVE_XCHACHA
+#include <wolfssl/wolfcrypt/chacha20_poly1305.h>
+#endif
+#ifdef HAVE_ASCON
+#include <wolfssl/wolfcrypt/ascon.h>
+#endif
 #include "psa_aead_internal.h"
 #include "psa_size.h"
 
@@ -141,6 +147,9 @@ static psa_status_t wolfpsa_aead_check_key(psa_key_id_t key,
         }
     }
     else {
+        /* XChaCha20-Poly1305 and Ascon-AEAD128 never reach this function:
+         * they are one-shot only and rejected by wolfpsa_aead_setup before
+         * the key is checked; the one-shot paths validate the key inline. */
         wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
         *key_data = NULL;
         *key_data_length = 0;
@@ -222,6 +231,9 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     if (!PSA_ALG_IS_AEAD(alg) || PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM_STAR_NO_TAG)) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if ((alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 #ifndef HAVE_AESGCM
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM)) {
         return PSA_ERROR_NOT_SUPPORTED;
@@ -237,6 +249,12 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
         return PSA_ERROR_NOT_SUPPORTED;
     }
 #endif
+    /* XChaCha20-Poly1305 and Ascon-AEAD128 are one-shot only; wolfCrypt
+     * provides no streaming API for these algorithms. */
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_XCHACHA20_POLY1305) ||
+        PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_ASCON_AEAD128)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
 
     status = wolfpsa_aead_check_key(key, usage, alg, &attributes,
                                     &key_data, &key_data_length);
@@ -622,7 +640,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
             XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return (psa_status_t)ret;
         }
-        if (out_len < ctx->tag_length) {
+        if (out_len < ctx->input_length + ctx->tag_length) {
             wc_ForceZero(tmp, chacha_ciphertext_size);
             XFREE(tmp, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_GENERIC_ERROR;
@@ -837,6 +855,373 @@ psa_status_t psa_aead_verify(psa_aead_operation_t *operation,
     return status;
 }
 
+#ifdef HAVE_XCHACHA
+/* One-shot encrypt for XChaCha20-Poly1305.
+ * ciphertext = plaintext || tag (16-byte Poly1305 tag appended). */
+static psa_status_t wolfpsa_xchacha_oneshot_encrypt(
+    psa_key_id_t key,
+    psa_algorithm_t alg,
+    const uint8_t *nonce, size_t nonce_length,
+    const uint8_t *additional_data, size_t additional_data_length,
+    const uint8_t *plaintext, size_t plaintext_length,
+    uint8_t *ciphertext, size_t ciphertext_size, size_t *ciphertext_length)
+{
+    psa_key_attributes_t attributes;
+    uint8_t *key_data = NULL;
+    size_t key_data_length = 0;
+    psa_status_t status;
+    psa_key_usage_t key_usage;
+    psa_algorithm_t key_alg;
+    int ret;
+    /* Encrypt produces plaintext_length bytes of ciphertext plus 16-byte tag. */
+    size_t out_len;
+
+    if (nonce_length != XCHACHA20_POLY1305_AEAD_NONCE_SIZE) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (ciphertext_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Check for overflow before output-size check. */
+    if (plaintext_length > SIZE_MAX - CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    out_len = plaintext_length + CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+    if (ciphertext_size < out_len) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    if (attributes.type != PSA_KEY_TYPE_XCHACHA20 ||
+        key_data_length != CHACHA20_POLY1305_AEAD_KEYSIZE) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    key_usage = psa_get_key_usage_flags(&attributes);
+    if ((key_usage & PSA_KEY_USAGE_ENCRYPT) == 0) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    key_alg = psa_get_key_algorithm(&attributes);
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, PSA_ALG_XCHACHA20_POLY1305)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, alg)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    ret = wc_XChaCha20Poly1305_Encrypt(
+        ciphertext, ciphertext_size,
+        plaintext, plaintext_length,
+        additional_data, additional_data_length,
+        nonce, nonce_length,
+        key_data, key_data_length);
+
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+
+    if (ret != 0) {
+        return wc_error_to_psa_status(ret);
+    }
+
+    *ciphertext_length = out_len;
+    return PSA_SUCCESS;
+}
+
+/* One-shot decrypt for XChaCha20-Poly1305.
+ * ciphertext = ciphertext_body || tag (16-byte Poly1305 tag appended). */
+static psa_status_t wolfpsa_xchacha_oneshot_decrypt(
+    psa_key_id_t key,
+    psa_algorithm_t alg,
+    const uint8_t *nonce, size_t nonce_length,
+    const uint8_t *additional_data, size_t additional_data_length,
+    const uint8_t *ciphertext, size_t ciphertext_length,
+    uint8_t *plaintext, size_t plaintext_size, size_t *plaintext_length)
+{
+    psa_key_attributes_t attributes;
+    uint8_t *key_data = NULL;
+    size_t key_data_length = 0;
+    psa_status_t status;
+    psa_key_usage_t key_usage;
+    psa_algorithm_t key_alg;
+    int ret;
+    size_t pt_len;
+
+    if (nonce_length != XCHACHA20_POLY1305_AEAD_NONCE_SIZE) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (plaintext_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (ciphertext_length < CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    pt_len = ciphertext_length - CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE;
+    if (plaintext_size < pt_len) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    if (attributes.type != PSA_KEY_TYPE_XCHACHA20 ||
+        key_data_length != CHACHA20_POLY1305_AEAD_KEYSIZE) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    key_usage = psa_get_key_usage_flags(&attributes);
+    if ((key_usage & PSA_KEY_USAGE_DECRYPT) == 0) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    key_alg = psa_get_key_algorithm(&attributes);
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, PSA_ALG_XCHACHA20_POLY1305)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, alg)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    /* wc_XChaCha20Poly1305_Decrypt expects src = ciphertext || tag and
+     * dst_space must accommodate pt_len output bytes. */
+    ret = wc_XChaCha20Poly1305_Decrypt(
+        plaintext, plaintext_size,
+        ciphertext, ciphertext_length,
+        additional_data, additional_data_length,
+        nonce, nonce_length,
+        key_data, key_data_length);
+
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+
+    if (ret == MAC_CMP_FAILED_E) {
+        return PSA_ERROR_INVALID_SIGNATURE;
+    }
+    if (ret != 0) {
+        return wc_error_to_psa_status(ret);
+    }
+
+    *plaintext_length = pt_len;
+    return PSA_SUCCESS;
+}
+#endif /* HAVE_XCHACHA */
+
+#ifdef HAVE_ASCON
+/* One-shot encrypt for Ascon-AEAD128.
+ * ciphertext = encrypted_body || tag (16-byte tag appended). */
+static psa_status_t wolfpsa_ascon_oneshot_encrypt(
+    psa_key_id_t key,
+    psa_algorithm_t alg,
+    const uint8_t *nonce, size_t nonce_length,
+    const uint8_t *additional_data, size_t additional_data_length,
+    const uint8_t *plaintext, size_t plaintext_length,
+    uint8_t *ciphertext, size_t ciphertext_size, size_t *ciphertext_length)
+{
+    psa_key_attributes_t attributes;
+    uint8_t *key_data = NULL;
+    size_t key_data_length = 0;
+    psa_status_t status;
+    psa_key_usage_t key_usage;
+    psa_algorithm_t key_alg;
+    wc_AsconAEAD128 ascon;
+    int ret;
+    size_t out_len;
+
+    if (nonce_length != ASCON_AEAD128_NONCE_SZ) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (ciphertext_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (plaintext_length > SIZE_MAX - ASCON_AEAD128_TAG_SZ) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    out_len = plaintext_length + ASCON_AEAD128_TAG_SZ;
+    if (ciphertext_size < out_len) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    if ((wolfpsa_check_word32_length(plaintext_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(additional_data_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    if (attributes.type != PSA_KEY_TYPE_ASCON ||
+        key_data_length != ASCON_AEAD128_KEY_SZ) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    key_usage = psa_get_key_usage_flags(&attributes);
+    if ((key_usage & PSA_KEY_USAGE_ENCRYPT) == 0) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    key_alg = psa_get_key_algorithm(&attributes);
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, PSA_ALG_ASCON_AEAD128)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, alg)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    ret = wc_AsconAEAD128_Init(&ascon);
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetKey(&ascon, key_data);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetNonce(&ascon, nonce);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetAD(&ascon, additional_data,
+                                    (word32)additional_data_length);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_EncryptUpdate(&ascon, ciphertext,
+                                            plaintext, (word32)plaintext_length);
+    }
+    if (ret == 0) {
+        /* Tag is written to ciphertext + plaintext_length. */
+        ret = wc_AsconAEAD128_EncryptFinal(&ascon,
+                                           ciphertext + plaintext_length);
+    }
+
+    wc_AsconAEAD128_Clear(&ascon);
+    wc_ForceZero(&ascon, sizeof(ascon));
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+
+    if (ret != 0) {
+        return wc_error_to_psa_status(ret);
+    }
+
+    *ciphertext_length = out_len;
+    return PSA_SUCCESS;
+}
+
+/* One-shot decrypt for Ascon-AEAD128.
+ * ciphertext = encrypted_body || tag (16-byte tag appended). */
+static psa_status_t wolfpsa_ascon_oneshot_decrypt(
+    psa_key_id_t key,
+    psa_algorithm_t alg,
+    const uint8_t *nonce, size_t nonce_length,
+    const uint8_t *additional_data, size_t additional_data_length,
+    const uint8_t *ciphertext, size_t ciphertext_length,
+    uint8_t *plaintext, size_t plaintext_size, size_t *plaintext_length)
+{
+    psa_key_attributes_t attributes;
+    uint8_t *key_data = NULL;
+    size_t key_data_length = 0;
+    psa_status_t status;
+    psa_key_usage_t key_usage;
+    psa_algorithm_t key_alg;
+    wc_AsconAEAD128 ascon;
+    int ret;
+    size_t ct_len; /* ciphertext body length (without tag) */
+
+    if (nonce_length != ASCON_AEAD128_NONCE_SZ) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (plaintext_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (ciphertext_length < ASCON_AEAD128_TAG_SZ) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    ct_len = ciphertext_length - ASCON_AEAD128_TAG_SZ;
+    if (plaintext_size < ct_len) {
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    if ((wolfpsa_check_word32_length(ct_len) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(additional_data_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    if (attributes.type != PSA_KEY_TYPE_ASCON ||
+        key_data_length != ASCON_AEAD128_KEY_SZ) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    key_usage = psa_get_key_usage_flags(&attributes);
+    if ((key_usage & PSA_KEY_USAGE_DECRYPT) == 0) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    key_alg = psa_get_key_algorithm(&attributes);
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, PSA_ALG_ASCON_AEAD128)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+    if (!PSA_ALG_AEAD_EQUAL(key_alg, alg)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    ret = wc_AsconAEAD128_Init(&ascon);
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetKey(&ascon, key_data);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetNonce(&ascon, nonce);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_SetAD(&ascon, additional_data,
+                                    (word32)additional_data_length);
+    }
+    if (ret == 0) {
+        ret = wc_AsconAEAD128_DecryptUpdate(&ascon, plaintext,
+                                            ciphertext, (word32)ct_len);
+    }
+    if (ret == 0) {
+        /* Tag is at ciphertext + ct_len. */
+        ret = wc_AsconAEAD128_DecryptFinal(&ascon, ciphertext + ct_len);
+    }
+
+    wc_AsconAEAD128_Clear(&ascon);
+    wc_ForceZero(&ascon, sizeof(ascon));
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+
+    if (ret == MAC_CMP_FAILED_E || ret == ASCON_AUTH_E) {
+        return PSA_ERROR_INVALID_SIGNATURE;
+    }
+    if (ret != 0) {
+        return wc_error_to_psa_status(ret);
+    }
+
+    *plaintext_length = ct_len;
+    return PSA_SUCCESS;
+}
+#endif /* HAVE_ASCON */
+
 psa_status_t psa_aead_encrypt(psa_key_id_t key,
                               psa_algorithm_t alg,
                               const uint8_t *nonce,
@@ -854,6 +1239,22 @@ psa_status_t psa_aead_encrypt(psa_key_id_t key,
     uint8_t tag[PSA_AEAD_TAG_MAX_SIZE];
     size_t tag_length = 0;
     size_t out_len = 0;
+
+    /* One-shot-only algorithms: bypass the multipart state machine. */
+#ifdef HAVE_XCHACHA
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_XCHACHA20_POLY1305)) {
+        return wolfpsa_xchacha_oneshot_encrypt(key, alg, nonce, nonce_length,
+            additional_data, additional_data_length, plaintext, plaintext_length,
+            ciphertext, ciphertext_size, ciphertext_length);
+    }
+#endif /* HAVE_XCHACHA */
+#ifdef HAVE_ASCON
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_ASCON_AEAD128)) {
+        return wolfpsa_ascon_oneshot_encrypt(key, alg, nonce, nonce_length,
+            additional_data, additional_data_length, plaintext, plaintext_length,
+            ciphertext, ciphertext_size, ciphertext_length);
+    }
+#endif /* HAVE_ASCON */
 
     status = psa_aead_encrypt_setup(&operation, key, alg);
     if (status != PSA_SUCCESS) {
@@ -888,6 +1289,15 @@ psa_status_t psa_aead_encrypt(psa_key_id_t key,
         return status;
     }
 
+    {
+        size_t needed_tag_len = wolfpsa_aead_tag_length(alg);
+        if (needed_tag_len > ciphertext_size ||
+            ciphertext_size - needed_tag_len < plaintext_length) {
+            psa_aead_abort(&operation);
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+    }
+
     status = psa_aead_finish(&operation, ciphertext, ciphertext_size,
                              &out_len, tag, sizeof(tag), &tag_length);
     if (status != PSA_SUCCESS) {
@@ -919,6 +1329,22 @@ psa_status_t psa_aead_decrypt(psa_key_id_t key,
     psa_status_t status;
     size_t tag_length;
     size_t ct_len;
+
+    /* One-shot-only algorithms: bypass the multipart state machine. */
+#ifdef HAVE_XCHACHA
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_XCHACHA20_POLY1305)) {
+        return wolfpsa_xchacha_oneshot_decrypt(key, alg, nonce, nonce_length,
+            additional_data, additional_data_length, ciphertext, ciphertext_length,
+            plaintext, plaintext_size, plaintext_length);
+    }
+#endif /* HAVE_XCHACHA */
+#ifdef HAVE_ASCON
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_ASCON_AEAD128)) {
+        return wolfpsa_ascon_oneshot_decrypt(key, alg, nonce, nonce_length,
+            additional_data, additional_data_length, ciphertext, ciphertext_length,
+            plaintext, plaintext_size, plaintext_length);
+    }
+#endif /* HAVE_ASCON */
 
     status = psa_aead_decrypt_setup(&operation, key, alg);
     if (status != PSA_SUCCESS) {

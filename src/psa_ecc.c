@@ -337,7 +337,7 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     }
     
     /* Generate key pair */
-    ret = wc_ecc_make_key_ex(&rng, (int)key_bits / 8, &ecc, curve_id);
+    ret = wc_ecc_make_key_ex(&rng, (int)PSA_BITS_TO_BYTES(key_bits), &ecc, curve_id);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ecc_free(&ecc);
@@ -421,6 +421,9 @@ psa_status_t psa_asymmetric_export_public_key_ecc(psa_key_type_t key_type,
     if (PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
         ret = wc_ecc_import_private_key_ex(key_buffer, (word32)key_buffer_size,
                                          NULL, 0, &ecc, curve_id);
+        if (ret == 0) {
+            ret = wc_ecc_make_pub_ex(&ecc, NULL, NULL);
+        }
     }
     else {
         ret = wc_ecc_import_x963(key_buffer, (word32)key_buffer_size, &ecc);

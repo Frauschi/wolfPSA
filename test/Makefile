@@ -57,7 +57,13 @@ WOLFSSL_LOCAL_SYMBOLS := $(if $(WOLFSSL_LOCAL_LIB),$(shell \
 	$(NM) $(WOLFSSL_LOCAL_LIB) 2>/dev/null))
 WOLFSSL_HAS_PSA_TLS := $(findstring wolfSSL_CTX_psa_enable,$(WOLFSSL_LOCAL_SYMBOLS))
 
-BINARIES = psa_api_test psa_crypto_init_test psa_des3_stack_scrub_test psa_ecc_bit_inference_test psa_ecc_curve_id_test psa_random_size_test psa_rsa_pss_interop_test psa_tls_client wolfcrypt-psa-benchmark
+BINARIES = psa_api_test psa_crypto_init_test psa_des3_stack_scrub_test psa_ecc_bit_inference_test psa_ecc_curve_id_test psa_random_size_test psa_rsa_pss_interop_test psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test psa_sp800_108_test psa_14_misc_test psa_tls_client wolfcrypt-psa-benchmark
+
+# PSA 1.4 coverage tests: one self-contained binary per feature area, all
+# built from psa_server/<name>.c with the default link recipe.
+PSA_14_TESTS = psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test \
+	psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test \
+	psa_sp800_108_test psa_14_misc_test
 
 ifdef WOLFSSL_HAS_PSA_TLS
 BINARIES += psa_tls_server
@@ -104,6 +110,9 @@ psa_random_size_test: require-wolfssl-lib $(PSA_RANDOM_SIZE_TEST_OBJS)
 
 psa_rsa_pss_interop_test: require-wolfssl-lib $(PSA_RSA_PSS_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_RSA_PSS_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+$(PSA_14_TESTS): %: require-wolfssl-lib psa_server/%.o
+	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 ifdef WOLFSSL_HAS_PSA_TLS
 psa_tls_server: psa_server/psa_tls_server.o

@@ -400,6 +400,8 @@
 
 #define PSA_ALG_SHAKE256_512                    ((psa_algorithm_t) 0x02000015)
 
+#define PSA_ALG_ASCON_HASH256                   ((psa_algorithm_t) 0x02000019)
+
 
 #define PSA_ALG_ANY_HASH                        ((psa_algorithm_t) 0x020000ff)
 
@@ -506,6 +508,10 @@
 
 #define PSA_ALG_CHACHA20_POLY1305               ((psa_algorithm_t) 0x05100500)
 
+#define PSA_ALG_XCHACHA20_POLY1305              ((psa_algorithm_t) 0x05100600)
+
+#define PSA_ALG_ASCON_AEAD128                   ((psa_algorithm_t) 0x05100700)
+
 
 #define PSA_ALG_AEAD_TAG_LENGTH_MASK            ((psa_algorithm_t) 0x003f0000)
 #define PSA_AEAD_TAG_LENGTH_OFFSET 16
@@ -531,6 +537,8 @@
         PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, PSA_ALG_CCM) \
         PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, PSA_ALG_GCM) \
         PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, PSA_ALG_CHACHA20_POLY1305) \
+        PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, PSA_ALG_XCHACHA20_POLY1305) \
+        PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, PSA_ALG_ASCON_AEAD128) \
         0)
 #define PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG_CASE(aead_alg, ref)         \
     PSA_ALG_AEAD_WITH_SHORTENED_TAG(aead_alg, 0) ==                      \
@@ -598,6 +606,8 @@
 
 #define PSA_ALG_PURE_EDDSA                      ((psa_algorithm_t) 0x06000800)
 
+#define PSA_ALG_EDDSA_CTX                       ((psa_algorithm_t) 0x06000A00)
+
 #define PSA_ALG_HASH_EDDSA_BASE                 ((psa_algorithm_t) 0x06000900)
 #define PSA_ALG_IS_HASH_EDDSA(alg)              \
     (((alg) & ~PSA_ALG_HASH_MASK) == PSA_ALG_HASH_EDDSA_BASE)
@@ -615,18 +625,18 @@
 
 
 #define PSA_ALG_IS_SIGN_HASH(alg)                                       \
-    (PSA_ALG_IS_RSA_PSS(alg) || PSA_ALG_IS_RSA_PKCS1V15_SIGN(alg) ||    \
-     PSA_ALG_IS_ECDSA(alg) || PSA_ALG_IS_HASH_EDDSA(alg) ||             \
-     PSA_ALG_IS_VENDOR_HASH_AND_SIGN(alg))
+    (PSA_ALG_IS_SIGN(alg) &&                                            \
+     (alg) != PSA_ALG_PURE_EDDSA && (alg) != PSA_ALG_EDDSA_CTX)
 
 
 #define PSA_ALG_IS_SIGN_MESSAGE(alg)                                    \
-    (PSA_ALG_IS_SIGN_HASH(alg) || (alg) == PSA_ALG_PURE_EDDSA)
+    (PSA_ALG_IS_SIGN(alg) &&                                            \
+     (alg) != PSA_ALG_ECDSA_ANY && (alg) != PSA_ALG_RSA_PKCS1V15_SIGN_RAW)
 
 
 #define PSA_ALG_IS_HASH_AND_SIGN(alg)                                   \
-    (PSA_ALG_IS_SIGN_HASH(alg) &&                                       \
-     ((alg) & PSA_ALG_HASH_MASK) != 0)
+    (PSA_ALG_IS_RSA_PSS(alg) || PSA_ALG_IS_RSA_PKCS1V15_SIGN(alg) ||   \
+     PSA_ALG_IS_ECDSA(alg) || PSA_ALG_IS_HASH_EDDSA(alg))
 
 
 #define PSA_ALG_SIGN_GET_HASH(alg)                                     \
@@ -725,6 +735,15 @@
     (PSA_ALG_IS_PBKDF2_HMAC(kdf_alg) || \
      ((kdf_alg) == PSA_ALG_PBKDF2_AES_CMAC_PRF_128))
 
+
+#define PSA_ALG_SP800_108_COUNTER_HMAC(hash_alg) \
+    ((psa_algorithm_t) (0x08000700 | ((hash_alg) & 0x000000ff)))
+
+#define PSA_ALG_SP800_108_COUNTER_CMAC          ((psa_algorithm_t) 0x08000800)
+
+#define PSA_ALG_IS_SP800_108_COUNTER_HMAC(alg) \
+    (((alg) & ~0x000000ff) == 0x08000700)
+
 #define PSA_ALG_KEY_DERIVATION_MASK             ((psa_algorithm_t) 0xfe00ffff)
 #define PSA_ALG_KEY_AGREEMENT_MASK              ((psa_algorithm_t) 0xffff0000)
 
@@ -772,7 +791,7 @@
 
 
 #define PSA_ALG_GET_HASH(alg) \
-    (((alg) & 0x000000ff) == 0 ? ((psa_algorithm_t) 0) : 0x02000000 | ((alg) & 0x000000ff))
+    (((alg) & 0x000000ff) == 0 ? PSA_ALG_NONE : 0x02000000 | ((alg) & 0x000000ff))
 
 
 
@@ -894,6 +913,7 @@ static inline int psa_key_id_is_null(psa_key_id_t key)
 
 
 #define PSA_KEY_DERIVATION_INPUT_LABEL      ((psa_key_derivation_step_t) 0x0201)
+#define PSA_KEY_DERIVATION_INPUT_CONTEXT    ((psa_key_derivation_step_t) 0x0206)
 
 
 #define PSA_KEY_DERIVATION_INPUT_SALT       ((psa_key_derivation_step_t) 0x0202)
@@ -987,7 +1007,8 @@ static inline int psa_key_id_is_null(psa_key_id_t key)
 #define PSA_ALG_IS_SPAKE2P_CMAC(alg) \
     (((alg) & 0xffff0000u) == PSA_ALG_SPAKE2P_CMAC_BASE)
 
-#define PSA_ALG_IS_PAKE(alg) (PSA_ALG_IS_JPAKE(alg) || PSA_ALG_IS_SPAKE2P(alg))
+#define PSA_ALG_IS_PAKE(alg) \
+    (PSA_ALG_IS_JPAKE(alg) || PSA_ALG_IS_SPAKE2P(alg) || PSA_ALG_IS_WPA3_SAE(alg))
 
 #define PSA_KEY_TYPE_SPAKE2P_KEY_PAIR(curve) \
     ((psa_key_type_t) (0x7200u | ((curve) & 0xffu)))
@@ -1008,4 +1029,68 @@ static inline int psa_key_id_is_null(psa_key_id_t key)
     ((psa_ecc_family_t)((type) & 0xffu))
 
 
-#endif 
+/* PSA Crypto API 1.4: XOF algorithms (category 0x0D) */
+
+#define PSA_ALG_SHAKE128                        ((psa_algorithm_t) 0x0D000100)
+
+#define PSA_ALG_SHAKE256                        ((psa_algorithm_t) 0x0D000200)
+
+#define PSA_ALG_ASCON_XOF128                    ((psa_algorithm_t) 0x0D000300)
+
+#define PSA_ALG_ASCON_CXOF128                   ((psa_algorithm_t) 0x0D008300)
+
+#define PSA_ALG_IS_XOF(alg) \
+    (((alg) & 0x7f000000) == 0x0D000000)
+
+#define PSA_ALG_XOF_HAS_CONTEXT(alg) \
+    (((alg) & 0x00008000) != 0)
+
+
+/* PSA Crypto API 1.4: Key wrapping algorithms (category 0x0B) */
+
+#define PSA_ALG_KW                              ((psa_algorithm_t) 0x0B400100)
+
+#define PSA_ALG_KWP                             ((psa_algorithm_t) 0x0BC00200)
+
+#define PSA_ALG_IS_KEY_WRAP(alg) \
+    (((alg) & 0x7f000000) == 0x0b000000)
+
+
+/* PSA Crypto API 1.4: Key encapsulation algorithms (category 0x0C) */
+
+#define PSA_ALG_ECIES_SEC1                      ((psa_algorithm_t) 0x0c000100)
+
+#define PSA_ALG_IS_KEY_ENCAPSULATION(alg) \
+    (((alg) & 0x7f000000) == 0x0c000000)
+
+
+/* PSA Crypto API 1.4: WPA3-SAE PAKE algorithms */
+
+#define PSA_ALG_WPA3_SAE_FIXED(hash_alg) \
+    ((psa_algorithm_t) (0x0a000800 | ((hash_alg) & 0x000000ff)))
+
+#define PSA_ALG_WPA3_SAE_GDH(hash_alg) \
+    ((psa_algorithm_t) (0x0a000900 | ((hash_alg) & 0x000000ff)))
+
+#define PSA_ALG_WPA3_SAE_H2E(hash_alg) \
+    ((psa_algorithm_t) (0x08800400 | ((hash_alg) & 0x000000ff)))
+
+#define PSA_ALG_IS_WPA3_SAE(alg) \
+    (((alg) & ~0x000001ff) == 0x0a000800)
+
+
+/* PSA Crypto API 1.4: new symmetric key types */
+
+#define PSA_KEY_TYPE_XCHACHA20                  ((psa_key_type_t) 0x2007)
+
+#define PSA_KEY_TYPE_ASCON                      ((psa_key_type_t) 0x2008)
+
+
+/* PSA Crypto API 1.4: key wrapping usage flags */
+
+#define PSA_KEY_USAGE_WRAP                      ((psa_key_usage_t) 0x00010000)
+
+#define PSA_KEY_USAGE_UNWRAP                    ((psa_key_usage_t) 0x00020000)
+
+
+#endif

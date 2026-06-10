@@ -131,6 +131,280 @@ psa_status_t psa_purge_key(psa_key_id_t key) {
     return wolfPSA_StubNotSupported();
 }
 
+/* --- Key attachment (hardware-bound keys) --- */
+
+psa_status_t psa_attach_key(const psa_key_attributes_t *attributes,
+                             const uint8_t *label,
+                             size_t label_length,
+                             psa_key_id_t *key) {
+    (void)attributes;
+    (void)label;
+    (void)label_length;
+    (void)key;
+    return wolfPSA_StubNotSupported();
+}
+
+/* --- Hash suspend/resume --- */
+
+psa_status_t psa_hash_suspend(psa_hash_operation_t *operation,
+                               uint8_t *hash_state,
+                               size_t hash_state_size,
+                               size_t *hash_state_length) {
+    (void)operation;
+    (void)hash_state;
+    (void)hash_state_size;
+    (void)hash_state_length;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_hash_resume(psa_hash_operation_t *operation,
+                              const uint8_t *hash_state,
+                              size_t hash_state_length) {
+    (void)operation;
+    (void)hash_state;
+    (void)hash_state_length;
+    return wolfPSA_StubNotSupported();
+}
+
+/* --- Interruptible max-ops configuration --- */
+
+static uint32_t wolfPSA_interruptible_max_ops = PSA_INTERRUPTIBLE_MAX_OPS_UNLIMITED;
+
+void psa_interruptible_set_max_ops(uint32_t max_ops) {
+    wolfPSA_interruptible_max_ops = max_ops;
+}
+
+uint32_t psa_interruptible_get_max_ops(void) {
+    return wolfPSA_interruptible_max_ops;
+}
+
+/* --- Interruptible sign/verify hash --- */
+
+psa_status_t psa_sign_hash_start(
+    psa_sign_hash_interruptible_operation_t *operation,
+    psa_key_id_t key, psa_algorithm_t alg,
+    const uint8_t *hash, size_t hash_length) {
+    (void)operation;
+    (void)key;
+    (void)alg;
+    (void)hash;
+    (void)hash_length;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_sign_hash_complete(
+    psa_sign_hash_interruptible_operation_t *operation,
+    uint8_t *signature, size_t signature_size,
+    size_t *signature_length) {
+    (void)operation;
+    (void)signature;
+    (void)signature_size;
+    (void)signature_length;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_sign_hash_abort(
+    psa_sign_hash_interruptible_operation_t *operation) {
+    (void)operation;
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+uint32_t psa_sign_hash_get_num_ops(
+    const psa_sign_hash_interruptible_operation_t *operation) {
+    (void)operation;
+    return 0;
+}
+
+psa_status_t psa_verify_hash_start(
+    psa_verify_hash_interruptible_operation_t *operation,
+    psa_key_id_t key, psa_algorithm_t alg,
+    const uint8_t *hash, size_t hash_length,
+    const uint8_t *signature, size_t signature_length) {
+    (void)operation;
+    (void)key;
+    (void)alg;
+    (void)hash;
+    (void)hash_length;
+    (void)signature;
+    (void)signature_length;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_verify_hash_complete(
+    psa_verify_hash_interruptible_operation_t *operation) {
+    (void)operation;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_verify_hash_abort(
+    psa_verify_hash_interruptible_operation_t *operation) {
+    (void)operation;
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+uint32_t psa_verify_hash_get_num_ops(
+    const psa_verify_hash_interruptible_operation_t *operation) {
+    (void)operation;
+    return 0;
+}
+
+/* --- Interruptible key agreement (IOP) --- */
+
+psa_status_t psa_key_agreement_iop_setup(
+    psa_key_agreement_iop_t *operation,
+    psa_key_id_t private_key,
+    const uint8_t *peer_key,
+    size_t peer_key_length,
+    psa_algorithm_t alg,
+    const psa_key_attributes_t *attributes) {
+    (void)operation;
+    (void)private_key;
+    (void)peer_key;
+    (void)peer_key_length;
+    (void)alg;
+    (void)attributes;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_key_agreement_iop_complete(
+    psa_key_agreement_iop_t *operation,
+    psa_key_id_t *key) {
+    (void)operation;
+    (void)key;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_key_agreement_iop_abort(
+    psa_key_agreement_iop_t *operation) {
+    (void)operation;
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+uint32_t psa_key_agreement_iop_get_num_ops(psa_key_agreement_iop_t *operation) {
+    (void)operation;
+    return 0;
+}
+
+/* --- Interruptible key generation (IOP) --- */
+
+psa_status_t psa_generate_key_iop_setup(
+    psa_generate_key_iop_t *operation,
+    const psa_key_attributes_t *attributes) {
+    (void)operation;
+    (void)attributes;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_generate_key_iop_complete(
+    psa_generate_key_iop_t *operation,
+    psa_key_id_t *key) {
+    (void)operation;
+    (void)key;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_generate_key_iop_abort(
+    psa_generate_key_iop_t *operation) {
+    (void)operation;
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+uint32_t psa_generate_key_iop_get_num_ops(psa_generate_key_iop_t *operation) {
+    (void)operation;
+    return 0;
+}
+
+/* --- Interruptible export public key (IOP) --- */
+
+psa_status_t psa_export_public_key_iop_setup(
+    psa_export_public_key_iop_t *operation,
+    psa_key_id_t key) {
+    (void)operation;
+    (void)key;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_export_public_key_iop_complete(
+    psa_export_public_key_iop_t *operation,
+    uint8_t *data,
+    size_t data_size,
+    size_t *data_length) {
+    (void)operation;
+    (void)data;
+    (void)data_size;
+    (void)data_length;
+    return wolfPSA_StubNotSupported();
+}
+
+psa_status_t psa_export_public_key_iop_abort(
+    psa_export_public_key_iop_t *operation) {
+    (void)operation;
+    if (!wolfPSA_CryptoIsInitialized()) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+uint32_t psa_export_public_key_iop_get_num_ops(
+    psa_export_public_key_iop_t *operation) {
+    (void)operation;
+    return 0;
+}
+
+/* --- Custom key parameter wrappers (delegating) --- */
+
+psa_status_t psa_generate_key_custom(const psa_key_attributes_t *attributes,
+                                      const psa_custom_key_parameters_t *custom,
+                                      const uint8_t *custom_data,
+                                      size_t custom_data_length,
+                                      psa_key_id_t *key) {
+    if (custom == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (custom->flags != 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (custom_data_length != 0) {
+        (void)custom_data;
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    (void)custom_data;
+    return psa_generate_key(attributes, key);
+}
+
+psa_status_t psa_key_derivation_output_key_custom(
+    const psa_key_attributes_t *attributes,
+    psa_key_derivation_operation_t *operation,
+    const psa_custom_key_parameters_t *custom,
+    const uint8_t *custom_data,
+    size_t custom_data_length,
+    psa_key_id_t *key) {
+    if (custom == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (custom->flags != 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (custom_data_length != 0) {
+        (void)custom_data;
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    (void)custom_data;
+    return psa_key_derivation_output_key(attributes, operation, key);
+}
+
 void psa_reset_key_attributes(psa_key_attributes_t *attributes) {
     if (attributes == NULL) {
         return;

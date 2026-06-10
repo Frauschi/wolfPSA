@@ -34,7 +34,7 @@
 #define INVALID_DEVID -2
 #endif
 
-#define WOLFSSL_CERTS_DIR "../../wolfssl/certs"
+#define WOLFSSL_CERTS_DIR "../wolfssl/certs"
 #define RSA_PRIVATE_KEY_PATH WOLFSSL_CERTS_DIR "/server-key.der"
 
 static int load_file(const char* path, uint8_t** data, size_t* len)

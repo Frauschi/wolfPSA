@@ -19,3 +19,12 @@ wolfcrypt-psa-benchmark
 .store/
 *.log
 .codex
+test/psa_mldsa_test
+test/psa_mlkem_test
+test/psa_xof_test
+test/psa_key_wrap_test
+test/psa_sign_context_test
+test/psa_lms_xmss_verify_test
+test/psa_ascon_xchacha_test
+test/psa_sp800_108_test
+test/psa_14_misc_test

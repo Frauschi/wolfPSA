@@ -78,5 +78,19 @@
 #define HAVE_ED448
 #define WOLFSSL_ED448_STREAMING_VERIFY
 #define WOLFSSL_HAVE_MLDSA
+#define WOLFSSL_HAVE_MLKEM
+#define WOLFSSL_HAVE_LMS
+#define WOLFSSL_LMS_VERIFY_ONLY
+#define WOLFSSL_HAVE_XMSS
+#define WOLFSSL_XMSS_VERIFY_ONLY
+/* Ascon is marked experimental in wolfSSL master and refuses to build
+ * without this opt-in. */
+#define WOLFSSL_EXPERIMENTAL_SETTINGS
+#define HAVE_ASCON
+/* AES key wrap requires the direct (single-block) AES API. */
+#define WOLFSSL_AES_DIRECT
+#define HAVE_AES_KEYWRAP
+#define HAVE_XCHACHA
+#define HAVE_CMAC_KDF
 
 #endif /* WOLFSSL_USER_SETTINGS_H */
