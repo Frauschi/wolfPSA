@@ -337,7 +337,7 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     }
     
     /* Generate key pair */
-    ret = wc_ecc_make_key_ex(&rng, (int)key_bits / 8, &ecc, curve_id);
+    ret = wc_ecc_make_key_ex(&rng, (int)PSA_BITS_TO_BYTES(key_bits), &ecc, curve_id);
     if (ret != 0) {
         wc_FreeRng(&rng);
         wc_ecc_free(&ecc);
