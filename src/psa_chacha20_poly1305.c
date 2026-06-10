@@ -39,40 +39,6 @@
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/chacha20_poly1305.h>
 
-/* Check if ChaCha20-Poly1305 algorithm is supported */
-psa_status_t psa_chacha20_poly1305_check_alg_supported(psa_algorithm_t alg)
-{
-    if (alg == PSA_ALG_CHACHA20_POLY1305) {
-        return PSA_SUCCESS;
-    }
-    
-    return PSA_ERROR_NOT_SUPPORTED;
-}
-
-/* Check if ChaCha20-Poly1305 key type is supported */
-psa_status_t psa_chacha20_poly1305_check_key_type_supported(psa_key_type_t type)
-{
-    if (type == PSA_KEY_TYPE_CHACHA20) {
-        return PSA_SUCCESS;
-    }
-    
-    return PSA_ERROR_NOT_SUPPORTED;
-}
-
-/* Check if ChaCha20-Poly1305 key size is valid */
-psa_status_t psa_chacha20_poly1305_check_key_size_valid(psa_key_type_t type, 
-                                                       size_t bits)
-{
-    if (type == PSA_KEY_TYPE_CHACHA20) {
-        /* ChaCha20 key size is 256 bits (32 bytes) */
-        if (bits == 256) {
-            return PSA_SUCCESS;
-        }
-    }
-    
-    return PSA_ERROR_INVALID_ARGUMENT;
-}
-
 /* Encrypt using ChaCha20-Poly1305 */
 psa_status_t psa_chacha20_poly1305_encrypt(
     const uint8_t *key, size_t key_length,

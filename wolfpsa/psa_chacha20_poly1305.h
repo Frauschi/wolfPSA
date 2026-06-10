@@ -43,18 +43,6 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/visibility.h>
 
-/* Check if ChaCha20-Poly1305 algorithm is supported */
-WOLFSSL_LOCAL psa_status_t psa_chacha20_poly1305_check_alg_supported(
-    psa_algorithm_t alg);
-
-/* Check if ChaCha20-Poly1305 key type is supported */
-WOLFSSL_LOCAL psa_status_t psa_chacha20_poly1305_check_key_type_supported(
-    psa_key_type_t type);
-
-/* Check if ChaCha20-Poly1305 key size is valid */
-WOLFSSL_LOCAL psa_status_t psa_chacha20_poly1305_check_key_size_valid(
-    psa_key_type_t type, size_t bits);
-
 /* Encrypt using ChaCha20-Poly1305 */
 WOLFSSL_LOCAL psa_status_t psa_chacha20_poly1305_encrypt(
     const uint8_t *key, size_t key_length,
