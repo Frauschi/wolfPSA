@@ -222,6 +222,9 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     if (!PSA_ALG_IS_AEAD(alg) || PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM_STAR_NO_TAG)) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
+    if ((alg & PSA_ALG_AEAD_AT_LEAST_THIS_LENGTH_FLAG) != 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 #ifndef HAVE_AESGCM
     if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM)) {
         return PSA_ERROR_NOT_SUPPORTED;
