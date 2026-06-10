@@ -1492,14 +1492,14 @@ psa_status_t psa_cipher_encrypt(psa_key_id_t key,
 
     iv_len = wolfpsa_cipher_iv_length(alg, ctx->key_type);
     if (iv_len != 0) {
+        if (output_size < iv_len) {
+            psa_cipher_abort(&operation);
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
         status = psa_cipher_generate_iv(&operation, iv, sizeof(iv), &iv_len);
         if (status != PSA_SUCCESS) {
             psa_cipher_abort(&operation);
             return status;
-        }
-        if (output_size < iv_len) {
-            psa_cipher_abort(&operation);
-            return PSA_ERROR_BUFFER_TOO_SMALL;
         }
         XMEMCPY(output, iv, iv_len);
         offset = iv_len;
