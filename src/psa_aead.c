@@ -1227,7 +1227,7 @@ static psa_status_t wolfpsa_ascon_oneshot_decrypt(
     wc_ForceZero(&ascon, sizeof(ascon));
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
 
-    if (ret == MAC_CMP_FAILED_E) {
+    if (ret == MAC_CMP_FAILED_E || ret == ASCON_AUTH_E) {
         return PSA_ERROR_INVALID_SIGNATURE;
     }
     if (ret != 0) {
