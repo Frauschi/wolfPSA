@@ -71,17 +71,28 @@ typedef struct wolfpsa_kdf_ctx {
     size_t info_length;
     uint8_t *label;
     size_t label_length;
+    uint8_t *context;
+    size_t context_length;
     uint8_t *seed;
     size_t seed_length;
     uint8_t *password;
     size_t password_length;
     uint32_t cost;
+    size_t sp800_108_L_bytes; /* total output length in bytes, snapshotted at
+                               * first output_bytes() call for SP800-108 */
     int is_key_agreement;
     int is_raw_kdf;
     int output_started;
     uint8_t *output_cache;
     size_t output_cache_length;
 } wolfpsa_kdf_ctx_t;
+
+/* PSA_KEY_DERIVATION_INPUT_CONTEXT (0x0206) is defined in PSA 1.4 but not
+ * yet present in this header set; provide a local fallback so the SP800-108
+ * implementation can refer to it without touching the shared headers. */
+#ifndef PSA_KEY_DERIVATION_INPUT_CONTEXT
+#define PSA_KEY_DERIVATION_INPUT_CONTEXT  ((psa_key_derivation_step_t) 0x0206)
+#endif
 
 #define WOLFPSA_KDF_STEP_SECRET        (1u << 0)
 #define WOLFPSA_KDF_STEP_OTHER_SECRET  (1u << 1)
@@ -91,6 +102,7 @@ typedef struct wolfpsa_kdf_ctx {
 #define WOLFPSA_KDF_STEP_SEED          (1u << 5)
 #define WOLFPSA_KDF_STEP_PASSWORD      (1u << 6)
 #define WOLFPSA_KDF_STEP_COST          (1u << 7)
+#define WOLFPSA_KDF_STEP_CONTEXT       (1u << 8)
 
 static wolfpsa_kdf_ctx_t* wolfpsa_kdf_get_ctx(psa_key_derivation_operation_t *operation)
 {
@@ -177,6 +189,9 @@ static int wolfpsa_hash_type_from_alg(psa_algorithm_t alg)
     else if (PSA_ALG_IS_PBKDF2_HMAC(alg)) {
         hash_alg = PSA_ALG_PBKDF2_HMAC_GET_HASH(alg);
     }
+    else if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(alg)) {
+        hash_alg = PSA_ALG_GET_HASH(alg);
+    }
 
     switch (hash_alg) {
         case PSA_ALG_SHA_1:
@@ -231,6 +246,8 @@ static uint32_t wolfpsa_kdf_step_mask(psa_key_derivation_step_t step)
             return WOLFPSA_KDF_STEP_PASSWORD;
         case PSA_KEY_DERIVATION_INPUT_COST:
             return WOLFPSA_KDF_STEP_COST;
+        case PSA_KEY_DERIVATION_INPUT_CONTEXT:
+            return WOLFPSA_KDF_STEP_CONTEXT;
         default:
             return 0;
     }
@@ -361,6 +378,18 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
         }
         return PSA_SUCCESS;
     }
+    else if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg) ||
+             ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+        /* Allowed steps: SECRET (mandatory), LABEL (optional), CONTEXT
+         * (optional).  SECRET must be provided before output; each step
+         * can only be set once. */
+        if (step != PSA_KEY_DERIVATION_INPUT_SECRET &&
+            step != PSA_KEY_DERIVATION_INPUT_LABEL &&
+            step != PSA_KEY_DERIVATION_INPUT_CONTEXT) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        return PSA_SUCCESS;
+    }
 
     return PSA_ERROR_NOT_SUPPORTED;
 }
@@ -392,6 +421,8 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
 
     if (!(PSA_ALG_IS_ANY_HKDF(kdf_alg) || PSA_ALG_IS_TLS12_PRF(kdf_alg) ||
           PSA_ALG_IS_TLS12_PSK_TO_MS(kdf_alg) || PSA_ALG_IS_PBKDF2(kdf_alg) ||
+          PSA_ALG_IS_SP800_108_COUNTER_HMAC(kdf_alg) ||
+          kdf_alg == PSA_ALG_SP800_108_COUNTER_CMAC ||
           kdf_alg == PSA_ALG_CATEGORY_KEY_DERIVATION)) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -411,9 +442,20 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
         return PSA_ERROR_NOT_SUPPORTED;
     }
 #endif
+#if defined(NO_HMAC)
+    if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(kdf_alg)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
+#if !defined(WOLFSSL_CMAC) || defined(NO_AES)
+    if (kdf_alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
 
     if (PSA_ALG_IS_ANY_HKDF(kdf_alg) || PSA_ALG_IS_TLS12_PRF(kdf_alg) ||
-        PSA_ALG_IS_TLS12_PSK_TO_MS(kdf_alg) || PSA_ALG_IS_PBKDF2_HMAC(kdf_alg)) {
+        PSA_ALG_IS_TLS12_PSK_TO_MS(kdf_alg) || PSA_ALG_IS_PBKDF2_HMAC(kdf_alg) ||
+        PSA_ALG_IS_SP800_108_COUNTER_HMAC(kdf_alg)) {
         hash_type = wolfpsa_hash_type_from_alg(kdf_alg);
         if (hash_type == WC_HASH_TYPE_NONE) {
             return PSA_ERROR_NOT_SUPPORTED;
@@ -449,6 +491,11 @@ psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
             ctx->capacity = 255u * (size_t)hash_len;
         }
     }
+    /* SP 800-108 counter-mode: default capacity is 2^29 - 1 bytes per spec */
+    if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(kdf_alg) ||
+        kdf_alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+        ctx->capacity = (size_t)0x1fffffffu;
+    }
 
     operation->opaque = (uintptr_t)ctx;
     return PSA_SUCCESS;
@@ -468,6 +515,7 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
         wolfpsa_kdf_free_buf(&ctx->salt, &ctx->salt_length);
         wolfpsa_kdf_free_buf(&ctx->info, &ctx->info_length);
         wolfpsa_kdf_free_buf(&ctx->label, &ctx->label_length);
+        wolfpsa_kdf_free_buf(&ctx->context, &ctx->context_length);
         wolfpsa_kdf_free_buf(&ctx->seed, &ctx->seed_length);
         wolfpsa_kdf_free_buf(&ctx->password, &ctx->password_length);
         if (ctx->output_cache != NULL) {
@@ -575,6 +623,10 @@ psa_status_t psa_key_derivation_input_bytes(psa_key_derivation_operation_t *oper
             break;
         case PSA_KEY_DERIVATION_INPUT_LABEL:
             status = wolfpsa_kdf_append(&ctx->label, &ctx->label_length,
+                                        data, data_length);
+            break;
+        case PSA_KEY_DERIVATION_INPUT_CONTEXT:
+            status = wolfpsa_kdf_append(&ctx->context, &ctx->context_length,
                                         data, data_length);
             break;
         case PSA_KEY_DERIVATION_INPUT_SEED:
@@ -1169,6 +1221,295 @@ cleanup:
     return PSA_ERROR_NOT_SUPPORTED;
 }
 
+/*
+ * SP 800-108r1 counter-mode KDF — HMAC variant.
+ *
+ * Fixed-input construction (PSA 1.4 §10.8):
+ *   K(i) = HMAC(K_IN, [i]_4 || Label || 0x00 || Context || [L]_4)
+ *
+ * Where:
+ *   [i]_4   — 4-byte big-endian counter starting at 1
+ *   Label   — PSA_KEY_DERIVATION_INPUT_LABEL bytes (may be zero-length)
+ *   0x00    — single separator byte
+ *   Context — PSA_KEY_DERIVATION_INPUT_CONTEXT bytes (may be zero-length)
+ *   [L]_4   — 4-byte big-endian encoding of total requested output in BITS,
+ *              snapshotted from capacity at first output_bytes() call
+ *
+ * Output stream is K(1) || K(2) || ... truncated to output_length bytes.
+ */
+static psa_status_t wolfpsa_kdf_sp800_108_hmac(wolfpsa_kdf_ctx_t *ctx,
+                                               uint8_t *output,
+                                               size_t output_length)
+{
+#if defined(NO_HMAC)
+    (void)ctx;
+    (void)output;
+    (void)output_length;
+    return PSA_ERROR_NOT_SUPPORTED;
+#else
+    int hash_type;
+    int hmac_len;
+    uint32_t L_bits_hi;
+    uint32_t L_bits_lo;
+    uint32_t counter;
+    size_t offset = 0;
+    uint8_t block[WC_MAX_DIGEST_SIZE];
+    uint8_t counter_buf[4];
+    uint8_t sep = 0x00u;
+    uint8_t L_buf[4];
+    psa_status_t status = PSA_SUCCESS;
+    Hmac hmac;
+    int ret;
+    int hmac_inited = 0;
+
+    hash_type = wolfpsa_hash_type_from_alg(ctx->alg);
+    if (hash_type == WC_HASH_TYPE_NONE) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+    hmac_len = wc_HashGetDigestSize(hash_type);
+    if (hmac_len <= 0 || (size_t)hmac_len > sizeof(block)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    /* L = total derivation length in bits (fits in 32 bits since capacity
+     * <= 2^29-1 bytes, so bits <= 2^32-8 which wraps — use 64-bit arithmetic
+     * to split into hi and lo words for the [L]_4 encoding; the PSA spec
+     * uses a 32-bit field so L must fit in 32 bits of bits, i.e. <= 2^29-1
+     * bytes guarantees L_bits <= (2^29-1)*8 = 2^32-8, which does NOT fit in
+     * 32 bits.  The spec encodes [L]_4 as a 32-bit big-endian value so we
+     * use only the lower 32 bits of (capacity_bytes * 8) — for capacity up
+     * to 2^29-1 bytes the bit count is at most 0xFFFFFFF8, fitting in 32. */
+    {
+        uint64_t L_bits = (uint64_t)ctx->sp800_108_L_bytes * 8u;
+        L_bits_hi = (uint32_t)(L_bits >> 32);
+        L_bits_lo = (uint32_t)(L_bits & 0xffffffffu);
+        (void)L_bits_hi; /* only low 32 bits used per spec [L]_4 */
+    }
+    L_buf[0] = (uint8_t)((L_bits_lo >> 24) & 0xff);
+    L_buf[1] = (uint8_t)((L_bits_lo >> 16) & 0xff);
+    L_buf[2] = (uint8_t)((L_bits_lo >>  8) & 0xff);
+    L_buf[3] = (uint8_t)( L_bits_lo        & 0xff);
+
+    if (ctx->secret_length > (size_t)INT_MAX) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    for (counter = 1u; offset < output_length; counter++) {
+        size_t copy_len;
+
+        counter_buf[0] = (uint8_t)((counter >> 24) & 0xff);
+        counter_buf[1] = (uint8_t)((counter >> 16) & 0xff);
+        counter_buf[2] = (uint8_t)((counter >>  8) & 0xff);
+        counter_buf[3] = (uint8_t)( counter        & 0xff);
+
+        ret = wc_HmacInit(&hmac, NULL, wolfPSA_GetDefaultDevID());
+        if (ret != 0) {
+            status = wc_error_to_psa_status(ret);
+            goto hmac_cleanup;
+        }
+        hmac_inited = 1;
+
+        ret = wc_HmacSetKey(&hmac, hash_type,
+                            ctx->secret, (word32)ctx->secret_length);
+        if (ret != 0) {
+            status = wc_error_to_psa_status(ret);
+            goto hmac_cleanup;
+        }
+
+        /* [i]_4 */
+        ret = wc_HmacUpdate(&hmac, counter_buf, sizeof(counter_buf));
+        if (ret == 0 && ctx->label_length > 0) {
+            /* Label */
+            ret = wc_HmacUpdate(&hmac, ctx->label, (word32)ctx->label_length);
+        }
+        /* 0x00 separator */
+        if (ret == 0) {
+            ret = wc_HmacUpdate(&hmac, &sep, 1u);
+        }
+        if (ret == 0 && ctx->context_length > 0) {
+            /* Context */
+            ret = wc_HmacUpdate(&hmac, ctx->context,
+                                (word32)ctx->context_length);
+        }
+        /* [L]_4 */
+        if (ret == 0) {
+            ret = wc_HmacUpdate(&hmac, L_buf, sizeof(L_buf));
+        }
+        if (ret == 0) {
+            ret = wc_HmacFinal(&hmac, block);
+        }
+
+        wc_HmacFree(&hmac);
+        hmac_inited = 0;
+
+        if (ret != 0) {
+            status = wc_error_to_psa_status(ret);
+            goto hmac_cleanup;
+        }
+
+        copy_len = (size_t)hmac_len;
+        if (offset + copy_len > output_length) {
+            copy_len = output_length - offset;
+        }
+        XMEMCPY(output + offset, block, copy_len);
+        offset += copy_len;
+    }
+
+hmac_cleanup:
+    if (hmac_inited) {
+        wc_HmacFree(&hmac);
+    }
+    wc_ForceZero(block, sizeof(block));
+    return status;
+#endif /* NO_HMAC */
+}
+
+/*
+ * SP 800-108r1 counter-mode KDF — CMAC variant.
+ *
+ * Fixed-input construction (PSA 1.4 §10.8):
+ *   K_0 = CMAC(K_IN, Label || 0x00 || Context || [L]_4)
+ *   K(i) = CMAC(K_IN, [i]_4 || Label || 0x00 || Context || [L]_4 || K_0)
+ *                                                           for i = 1, 2, 3, ...
+ *
+ * K_0 is a robustness-mitigation term specific to the CMAC construction.
+ * The secret (K_IN) must be a valid AES key: 16, 24, or 32 bytes.
+ * Output block size is WC_AES_BLOCK_SIZE (16 bytes).
+ * [L]_4 encodes total output length in bits as 4-byte big-endian.
+ */
+static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
+                                               uint8_t *output,
+                                               size_t output_length)
+{
+#if !defined(WOLFSSL_CMAC) || defined(NO_AES)
+    (void)ctx;
+    (void)output;
+    (void)output_length;
+    return PSA_ERROR_NOT_SUPPORTED;
+#else
+    uint32_t L_bits_lo;
+    uint32_t counter;
+    size_t offset = 0;
+    uint8_t K0[WC_AES_BLOCK_SIZE];
+    uint8_t block[WC_AES_BLOCK_SIZE];
+    uint8_t counter_buf[4];
+    uint8_t sep = 0x00u;
+    uint8_t L_buf[4];
+    word32 out_sz;
+    psa_status_t status = PSA_SUCCESS;
+    Cmac cmac;
+    int ret;
+
+    /* CMAC key must be a valid AES key length */
+    if (ctx->secret_length != 16u &&
+        ctx->secret_length != 24u &&
+        ctx->secret_length != 32u) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    if (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    {
+        uint64_t L_bits = (uint64_t)ctx->sp800_108_L_bytes * 8u;
+        L_bits_lo = (uint32_t)(L_bits & 0xffffffffu);
+    }
+    L_buf[0] = (uint8_t)((L_bits_lo >> 24) & 0xff);
+    L_buf[1] = (uint8_t)((L_bits_lo >> 16) & 0xff);
+    L_buf[2] = (uint8_t)((L_bits_lo >>  8) & 0xff);
+    L_buf[3] = (uint8_t)( L_bits_lo        & 0xff);
+
+    /* --- compute K_0 = CMAC(K_IN, Label || 0x00 || Context || [L]_4) --- */
+    ret = wc_InitCmac(&cmac, ctx->secret, (word32)ctx->secret_length,
+                      WC_CMAC_AES, NULL);
+    if (ret != 0) {
+        status = wc_error_to_psa_status(ret);
+        goto cmac_cleanup;
+    }
+    if (ctx->label_length > 0) {
+        ret = wc_CmacUpdate(&cmac, ctx->label, (word32)ctx->label_length);
+    }
+    if (ret == 0) {
+        ret = wc_CmacUpdate(&cmac, &sep, 1u);
+    }
+    if (ret == 0 && ctx->context_length > 0) {
+        ret = wc_CmacUpdate(&cmac, ctx->context, (word32)ctx->context_length);
+    }
+    if (ret == 0) {
+        ret = wc_CmacUpdate(&cmac, L_buf, sizeof(L_buf));
+    }
+    out_sz = WC_AES_BLOCK_SIZE;
+    if (ret == 0) {
+        ret = wc_CmacFinal(&cmac, K0, &out_sz);
+    }
+    wc_CmacFree(&cmac);
+    if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
+        status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                            wc_error_to_psa_status(ret);
+        goto cmac_cleanup;
+    }
+
+    /* --- K(i) loop --- */
+    for (counter = 1u; offset < output_length; counter++) {
+        size_t copy_len;
+
+        counter_buf[0] = (uint8_t)((counter >> 24) & 0xff);
+        counter_buf[1] = (uint8_t)((counter >> 16) & 0xff);
+        counter_buf[2] = (uint8_t)((counter >>  8) & 0xff);
+        counter_buf[3] = (uint8_t)( counter        & 0xff);
+
+        ret = wc_InitCmac(&cmac, ctx->secret, (word32)ctx->secret_length,
+                          WC_CMAC_AES, NULL);
+        if (ret != 0) {
+            status = wc_error_to_psa_status(ret);
+            goto cmac_cleanup;
+        }
+
+        /* [i]_4 */
+        ret = wc_CmacUpdate(&cmac, counter_buf, sizeof(counter_buf));
+        if (ret == 0 && ctx->label_length > 0) {
+            ret = wc_CmacUpdate(&cmac, ctx->label, (word32)ctx->label_length);
+        }
+        if (ret == 0) {
+            ret = wc_CmacUpdate(&cmac, &sep, 1u);
+        }
+        if (ret == 0 && ctx->context_length > 0) {
+            ret = wc_CmacUpdate(&cmac, ctx->context,
+                                (word32)ctx->context_length);
+        }
+        if (ret == 0) {
+            ret = wc_CmacUpdate(&cmac, L_buf, sizeof(L_buf));
+        }
+        /* K_0 appended (CMAC robustness mitigation) */
+        if (ret == 0) {
+            ret = wc_CmacUpdate(&cmac, K0, WC_AES_BLOCK_SIZE);
+        }
+        out_sz = WC_AES_BLOCK_SIZE;
+        if (ret == 0) {
+            ret = wc_CmacFinal(&cmac, block, &out_sz);
+        }
+        wc_CmacFree(&cmac);
+        if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
+            status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                wc_error_to_psa_status(ret);
+            goto cmac_cleanup;
+        }
+
+        copy_len = WC_AES_BLOCK_SIZE;
+        if (offset + copy_len > output_length) {
+            copy_len = output_length - offset;
+        }
+        XMEMCPY(output + offset, block, copy_len);
+        offset += copy_len;
+    }
+
+cmac_cleanup:
+    wc_ForceZero(K0, sizeof(K0));
+    wc_ForceZero(block, sizeof(block));
+    return status;
+#endif /* WOLFSSL_CMAC && !NO_AES */
+}
+
 static psa_status_t wolfpsa_kdf_compute_output(wolfpsa_kdf_ctx_t *ctx,
                                                uint8_t *output,
                                                size_t output_length)
@@ -1189,6 +1530,12 @@ static psa_status_t wolfpsa_kdf_compute_output(wolfpsa_kdf_ctx_t *ctx,
     }
     if (PSA_ALG_IS_PBKDF2(ctx->alg)) {
         return wolfpsa_kdf_pbkdf2(ctx, output, output_length);
+    }
+    if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg)) {
+        return wolfpsa_kdf_sp800_108_hmac(ctx, output, output_length);
+    }
+    if (ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+        return wolfpsa_kdf_sp800_108_cmac(ctx, output, output_length);
     }
 
     return PSA_ERROR_NOT_SUPPORTED;
@@ -1251,6 +1598,20 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
             (ctx->steps_set & WOLFPSA_KDF_STEP_SALT) == 0 ||
             (ctx->steps_set & WOLFPSA_KDF_STEP_COST) == 0) {
             return PSA_ERROR_BAD_STATE;
+        }
+    }
+    else if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg) ||
+             ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+        if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
+            return PSA_ERROR_BAD_STATE;
+        }
+        /* Snapshot L on the first output call.  L = capacity in bits before
+         * any output has been consumed (spec: PSA 1.4 §10.8, SP800-108
+         * counter mode).  At this point capacity has not yet been decremented
+         * by wolfpsa_kdf_require_output, so capacity + output_length equals
+         * the original capacity set at setup / set_capacity time. */
+        if (!ctx->output_started) {
+            ctx->sp800_108_L_bytes = ctx->capacity;
         }
     }
 

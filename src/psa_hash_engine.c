@@ -71,6 +71,10 @@
 #include <wolfssl/wolfcrypt/ripemd.h>
 #endif
 
+#ifdef HAVE_ASCON
+#include <wolfssl/wolfcrypt/ascon.h>
+#endif
+
 extern int wolfPSA_CryptoIsInitialized(void);
 
 typedef struct psa_hash_operation_ctx {
@@ -104,6 +108,9 @@ typedef struct psa_hash_operation_ctx {
 #endif
 #ifdef WOLFSSL_RIPEMD
         RipeMd ripemd;             /* RIPEMD-160 context */
+#endif
+#ifdef HAVE_ASCON
+        wc_AsconHash256 ascon256;  /* Ascon-Hash256 context */
 #endif
     } ctx;
 } psa_hash_operation_ctx_t;
@@ -203,6 +210,11 @@ static void psa_hash_cleanup_ctx(psa_hash_operation_ctx_t *ctx)
             wc_Shake256_Free((wc_Shake *)&ctx->ctx.sha3);
             break;
 #endif
+#ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            wc_AsconHash256_Clear(&ctx->ctx.ascon256);
+            break;
+#endif
             default:
                 break;
         }
@@ -258,6 +270,10 @@ psa_status_t psa_hash_check_alg_supported(psa_algorithm_t alg)
     #endif
     #ifdef WOLFSSL_SHAKE256
         case PSA_ALG_SHAKE256_512:
+            return PSA_SUCCESS;
+    #endif
+    #ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
             return PSA_SUCCESS;
     #endif
         default:
@@ -318,6 +334,10 @@ static size_t psa_hash_get_size(psa_algorithm_t alg)
     #ifdef WOLFSSL_SHAKE256
         case PSA_ALG_SHAKE256_512:
             return 64u;
+    #endif
+    #ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            return ASCON_HASH256_SZ;
     #endif
         default:
             return 0;
@@ -433,6 +453,11 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
                                   wolfPSA_GetDefaultDevID());
             break;
 #endif
+#ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            ret = wc_AsconHash256_Init(&ctx->ctx.ascon256);
+            break;
+#endif
         default:
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_NOT_SUPPORTED;
@@ -546,6 +571,12 @@ psa_status_t psa_hash_update(psa_hash_operation_t *operation,
                                      (word32)input_length);
             break;
 #endif
+#ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            ret = wc_AsconHash256_Update(&ctx->ctx.ascon256, input,
+                                         (word32)input_length);
+            break;
+#endif
         default:
             return wolfpsa_hash_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
@@ -654,6 +685,11 @@ psa_status_t psa_hash_finish(psa_hash_operation_t *operation,
 #ifdef WOLFSSL_SHAKE256
         case PSA_ALG_SHAKE256_512:
             ret = wc_Shake256_Final((wc_Shake *)&ctx->ctx.sha3, hash, 64u);
+            break;
+#endif
+#ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            ret = wc_AsconHash256_Final(&ctx->ctx.ascon256, hash);
             break;
 #endif
         default:
@@ -848,6 +884,13 @@ psa_status_t psa_hash_clone(const psa_hash_operation_t *source_operation,
         case PSA_ALG_SHAKE256_512:
             ret = wc_Shake256_Copy((wc_Shake *)(uintptr_t)&source_ctx->ctx.sha3,
                                    &target_ctx->ctx.sha3);
+            break;
+#endif
+#ifdef HAVE_ASCON
+        case PSA_ALG_ASCON_HASH256:
+            XMEMCPY(&target_ctx->ctx.ascon256, &source_ctx->ctx.ascon256,
+                    sizeof(wc_AsconHash256));
+            ret = 0;
             break;
 #endif
         default:

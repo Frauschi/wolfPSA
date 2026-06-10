@@ -48,6 +48,7 @@
         PSA_ALG_HMAC_GET_HASH(alg) == PSA_ALG_SHA3_256 ? 32u :      \
         PSA_ALG_HMAC_GET_HASH(alg) == PSA_ALG_SHA3_384 ? 48u :      \
         PSA_ALG_HMAC_GET_HASH(alg) == PSA_ALG_SHA3_512 ? 64u :      \
+        PSA_ALG_HMAC_GET_HASH(alg) == PSA_ALG_ASCON_HASH256 ? 32u : \
         0u)
 
 
@@ -217,10 +218,14 @@
      0u : \
      (key_type) == PSA_KEY_TYPE_CHACHA20 && \
      PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CHACHA20_POLY1305) ? 12u : \
+     (key_type) == PSA_KEY_TYPE_XCHACHA20 && \
+     PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_XCHACHA20_POLY1305) ? 24u : \
+     (key_type) == PSA_KEY_TYPE_ASCON && \
+     PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_ASCON_AEAD128) ? 16u : \
      0u)
 
 
-#define PSA_AEAD_NONCE_MAX_SIZE 13u
+#define PSA_AEAD_NONCE_MAX_SIZE 24u
 
 
 
