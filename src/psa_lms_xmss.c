@@ -90,7 +90,7 @@ psa_status_t wolfpsa_lms_verify(const uint8_t *pub, size_t pub_len,
         return PSA_ERROR_INVALID_SIGNATURE;
     }
     if (ret != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        return wc_error_to_psa_status(ret);
     }
 
     return PSA_SUCCESS;
@@ -176,7 +176,7 @@ psa_status_t wolfpsa_xmss_verify(const uint8_t *pub, size_t pub_len,
         return PSA_ERROR_INVALID_SIGNATURE;
     }
     if (ret != 0) {
-        return PSA_ERROR_INVALID_SIGNATURE;
+        return wc_error_to_psa_status(ret);
     }
 
     return PSA_SUCCESS;

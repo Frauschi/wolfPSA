@@ -396,6 +396,7 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
         /* 2. If caller wants >= one full block, squeeze directly. */
         if (output_length >= (size_t)ctx->block_size) {
             word32 n_blocks = (word32)(output_length / ctx->block_size);
+            word32 produced;
 
             switch (ctx->alg) {
 #ifdef WOLFSSL_SHAKE128
@@ -418,7 +419,7 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
                 return wolfpsa_xof_fail(operation,
                                         wc_error_to_psa_status(ret));
 
-            word32 produced = n_blocks * ctx->block_size;
+            produced = n_blocks * ctx->block_size;
             output        += produced;
             output_length -= produced;
             continue;

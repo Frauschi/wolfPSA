@@ -1826,7 +1826,7 @@ psa_status_t psa_export_public_key(
         status = PSA_ERROR_NOT_SUPPORTED;
     #endif
     }
-    else {
+    else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
     #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && defined(HAVE_ECC_KEY_IMPORT)
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attributes.type)) {
             if (data_size < key_data_length) {
@@ -1895,6 +1895,8 @@ psa_status_t psa_export_public_key(
     #else
         status = PSA_ERROR_NOT_SUPPORTED;
     #endif
+    }
+    else {
         /* PQC key types — reached when neither RSA nor ECC matched the type
          * gate above. */
 #if defined(WOLFSSL_HAVE_MLDSA)
@@ -2189,12 +2191,13 @@ psa_status_t psa_check_key_usage(psa_key_id_t key,
                                  psa_algorithm_t alg,
                                  psa_key_usage_t usage)
 {
-    wolfpsa_trace("psa_check_key_usage(key=%u alg=0x%08x usage=0x%08x)",
-                  (unsigned)key, (unsigned)alg, (unsigned)usage);
     psa_status_t status;
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_key_usage_t key_usage;
     psa_algorithm_t key_alg;
+
+    wolfpsa_trace("psa_check_key_usage(key=%u alg=0x%08x usage=0x%08x)",
+                  (unsigned)key, (unsigned)alg, (unsigned)usage);
 
     status = psa_get_key_attributes(key, &attributes);
     if (status != PSA_SUCCESS) {

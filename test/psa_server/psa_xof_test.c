@@ -583,7 +583,7 @@ static int test_set_context_shake(void)
     st = psa_xof_set_context(&op, ctx_data, sizeof(ctx_data));
     if (expect_status("tc7 shake128 set_context", st,
                       PSA_ERROR_INVALID_ARGUMENT) != 0) return 1;
-    /* operation aborted by the failed call; do not double-abort */
+    (void)psa_xof_abort(&op);
 
     op = psa_xof_operation_init();
     st = psa_xof_setup(&op, PSA_ALG_SHAKE256);
@@ -592,6 +592,7 @@ static int test_set_context_shake(void)
     st = psa_xof_set_context(&op, ctx_data, sizeof(ctx_data));
     if (expect_status("tc7 shake256 set_context", st,
                       PSA_ERROR_INVALID_ARGUMENT) != 0) return 1;
+    (void)psa_xof_abort(&op);
 
     return 0;
 }

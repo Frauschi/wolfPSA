@@ -876,6 +876,61 @@ static int test_hmac_salt_rejected(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Test case 9: SP800-108 steps must not be provided twice.
+ * -------------------------------------------------------------------------*/
+static int test_hmac_duplicate_step_rejected(void)
+{
+    psa_algorithm_t alg = PSA_ALG_SP800_108_COUNTER_HMAC(PSA_ALG_SHA_256);
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    static const uint8_t secret[] = {
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b
+    };
+    static const uint8_t label[] = { 'l', 'a', 'b', 'e', 'l' };
+    psa_status_t st;
+
+    st = psa_key_derivation_setup(&op, alg);
+    if (expect_status("tc9 setup", st, PSA_SUCCESS) != 0) return 1;
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret));
+    if (expect_status("tc9 input SECRET", st, PSA_SUCCESS) != 0) {
+        psa_key_derivation_abort(&op);
+        return 1;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret));
+    if (expect_status("tc9 duplicate SECRET", st,
+                      PSA_ERROR_BAD_STATE) != 0) {
+        psa_key_derivation_abort(&op);
+        return 1;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_LABEL,
+                                        label, sizeof(label));
+    if (expect_status("tc9 input LABEL", st, PSA_SUCCESS) != 0) {
+        psa_key_derivation_abort(&op);
+        return 1;
+    }
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_LABEL,
+                                        label, sizeof(label));
+    if (expect_status("tc9 duplicate LABEL", st,
+                      PSA_ERROR_BAD_STATE) != 0) {
+        psa_key_derivation_abort(&op);
+        return 1;
+    }
+
+    psa_key_derivation_abort(&op);
+    printf("PASS tc9: duplicate SP800-108 steps rejected with "
+           "PSA_ERROR_BAD_STATE\n");
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
  * main
  * -------------------------------------------------------------------------*/
 int main(void)
@@ -896,6 +951,7 @@ int main(void)
     if (test_hmac_output_key()          != 0) return 1;
     if (test_cmac_invalid_key_len()     != 0) return 1;
     if (test_hmac_salt_rejected()       != 0) return 1;
+    if (test_hmac_duplicate_step_rejected() != 0) return 1;
 
     printf("SP800-108 counter-mode KDF test: OK\n");
     return 0;

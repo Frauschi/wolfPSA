@@ -36,8 +36,6 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
 
-#include <string.h>
-
 /* Validate that an output-key attributes type is acceptable for a KEM shared
  * secret (32 bytes of unstructured key material) and that the requested bit
  * size is compatible (0 = let the import infer; 256 = explicit 32-byte key). */
@@ -120,10 +118,6 @@ psa_status_t psa_encapsulate(psa_key_id_t key,
         return status;
     }
 
-    if (ciphertext_size > PSA_ENCAPSULATE_CIPHERTEXT_MAX_SIZE) {
-        /* Oversized buffer is fine; we'll copy the actual length later. */
-    }
-
     /* --- Load the KEM key and check policy --- */
     status = wolfpsa_get_key_data(key, &key_attr, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
@@ -192,7 +186,7 @@ psa_status_t psa_encapsulate(psa_key_id_t key,
     }
 
     /* Only expose the ciphertext to the caller after the key import succeeded. */
-    memcpy(ciphertext, ct_buf, ct_len);
+    XMEMCPY(ciphertext, ct_buf, ct_len);
     *ciphertext_length = ct_len;
 
     return PSA_SUCCESS;

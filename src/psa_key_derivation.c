@@ -388,6 +388,9 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
             step != PSA_KEY_DERIVATION_INPUT_CONTEXT) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
+        if ((ctx->steps_set & wolfpsa_kdf_step_mask(step)) != 0) {
+            return PSA_ERROR_BAD_STATE;
+        }
         return PSA_SUCCESS;
     }
 
