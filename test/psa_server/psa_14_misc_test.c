@@ -828,6 +828,43 @@ static int test_gcm_nonce_lengths(void)
 
     (void)psa_destroy_key(key);
     printf("PASS: GCM nonce length handling\n");
+
+    return 0;
+}
+
+/* psa_purge_key(): a live key purges to PSA_SUCCESS, an absent one to
+ * PSA_ERROR_INVALID_HANDLE (wolfPSA keeps no purgeable persistent-key cache). */
+static int test_purge_key(void)
+{
+    psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t k = PSA_KEY_ID_NULL;
+    const uint8_t key[16] = { 0 };
+    psa_status_t st;
+
+    psa_set_key_usage_flags(&a, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&a, PSA_ALG_GCM);
+    psa_set_key_type(&a, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&a, 128);
+
+    if (psa_import_key(&a, key, sizeof(key), &k) != PSA_SUCCESS) {
+        printf("FAIL psa_purge_key import\n");
+        return 1;
+    }
+    st = psa_purge_key(k);
+    if (st != PSA_SUCCESS) {
+        printf("FAIL psa_purge_key(live) status=%d\n", (int)st);
+        return 1;
+    }
+    if (psa_destroy_key(k) != PSA_SUCCESS) {
+        printf("FAIL psa_purge_key destroy\n");
+        return 1;
+    }
+    st = psa_purge_key(k);
+    if (st != PSA_ERROR_INVALID_HANDLE) {
+        printf("FAIL psa_purge_key(absent) status=%d expected=%d\n",
+               (int)st, (int)PSA_ERROR_INVALID_HANDLE);
+        return 1;
+    }
     return 0;
 }
 
@@ -891,6 +928,10 @@ int main(void)
 
     /* Case 13: GCM nonce-length error codes */
     if (test_gcm_nonce_lengths() != 0)
+        return 1;
+
+    /* Case 14: psa_purge_key live + absent */
+    if (test_purge_key() != 0)
         return 1;
 
     printf("PSA 1.4 misc test: OK\n");
