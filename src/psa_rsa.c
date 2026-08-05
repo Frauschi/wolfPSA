@@ -174,6 +174,14 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                 wc_FreeRsaKey(&rsa_key);
                 return PSA_ERROR_NOT_SUPPORTED;
             }
+            /* wc_EncodeSignature() writes the DER header plus hash_length
+             * bytes into sig_input without bounding the write itself, so
+             * reject a hash that cannot fit before allocating. */
+            if (hash_length > PSA_HASH_MAX_SIZE) {
+                wc_FreeRng(&rng);
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
             sig_input = (byte*)XMALLOC(PSA_HASH_MAX_SIZE + 32, NULL,
                                        DYNAMIC_TYPE_TMP_BUFFER);
             if (sig_input == NULL) {
@@ -297,9 +305,14 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
              * was signed, so it must be compared against a freshly encoded
              * DigestInfo for the caller-supplied hash, not against the raw
              * hash bytes. */
-            byte encoded[RSA_MAX_SIZE/8];
+            byte encoded[PSA_HASH_MAX_SIZE + 32];
             int hash_oid = wc_GetCTC_HashOID(hash_type);
-            int encoded_len = (hash_oid > 0) ?
+            /* wc_EncodeSignature() writes the DER header plus hash_length
+             * bytes with no bound of its own, and hash_length is caller
+             * supplied, so it must be range-checked against the destination
+             * before encoding. */
+            int encoded_len = (hash_oid > 0 &&
+                               hash_length <= PSA_HASH_MAX_SIZE) ?
                 (int)wc_EncodeSignature(encoded, hash, (word32)hash_length,
                                         hash_oid) : 0;
 

@@ -335,7 +335,10 @@ static int test_hash_verify(void)
     st = psa_hash_setup(&op, PSA_ALG_SHA_256);
     if (check_status(st, "psa_hash_setup(verify correct)") != TEST_OK) return TEST_FAIL;
     st = psa_hash_update(&op, msg, sizeof(msg) - 1);
-    if (check_status(st, "psa_hash_update(verify correct)") != TEST_OK) return TEST_FAIL;
+    if (check_status(st, "psa_hash_update(verify correct)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
     st = psa_hash_verify(&op, sha256_abc, sizeof(sha256_abc));
     if (check_status(st, "psa_hash_verify correct") != TEST_OK) return TEST_FAIL;
 
@@ -347,7 +350,10 @@ static int test_hash_verify(void)
     st = psa_hash_setup(&op, PSA_ALG_SHA_256);
     if (check_status(st, "psa_hash_setup(verify mismatch)") != TEST_OK) return TEST_FAIL;
     st = psa_hash_update(&op, msg, sizeof(msg) - 1);
-    if (check_status(st, "psa_hash_update(verify mismatch)") != TEST_OK) return TEST_FAIL;
+    if (check_status(st, "psa_hash_update(verify mismatch)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
     st = psa_hash_verify(&op, bad_hash, sizeof(bad_hash));
     if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
                    "psa_hash_verify mismatch") != TEST_OK) return TEST_FAIL;
@@ -358,7 +364,10 @@ static int test_hash_verify(void)
     st = psa_hash_setup(&op, PSA_ALG_SHA_256);
     if (check_status(st, "psa_hash_setup(verify wrong length)") != TEST_OK) return TEST_FAIL;
     st = psa_hash_update(&op, msg, sizeof(msg) - 1);
-    if (check_status(st, "psa_hash_update(verify wrong length)") != TEST_OK) return TEST_FAIL;
+    if (check_status(st, "psa_hash_update(verify wrong length)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
     st = psa_hash_verify(&op, sha256_abc, sizeof(sha256_abc) - 1);
     if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
                    "psa_hash_verify wrong length") != TEST_OK) return TEST_FAIL;
@@ -5719,6 +5728,75 @@ cleanup:
     return result;
 }
 
+/* psa_sign_hash/psa_verify_hash pass the caller-supplied hash_length straight
+ * through to psa_asymmetric_sign_rsa()/psa_asymmetric_verify_rsa(), which feed
+ * it to wc_EncodeSignature(). That helper writes the DER header plus
+ * hash_length bytes into a fixed-size destination without bounding the write
+ * itself, so an over-long hash_length overruns the buffer (stack on the verify
+ * side, heap on the sign side) before any signature check happens. Pin the
+ * length guards on both entry points. */
+static int test_rsa_pkcs1v15_rejects_oversized_hash_length(void)
+{
+    static uint8_t big_hash[PSA_HASH_MAX_SIZE + 512];
+    uint8_t sig[512];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_algorithm_t alg = PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256);
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    memset(big_hash, 0x41, sizeof(big_hash));
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_KEY_PAIR);
+    psa_set_key_bits(&attrs, 2048);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(RSA oversized hash_length)")
+            != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    /* Sign side: must be refused, not encoded into the temporary buffer. */
+    st = psa_sign_hash(key_id, alg, big_hash, sizeof(big_hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects oversized hash_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Verify side: produce a well-formed signature over a correctly sized
+     * hash first. Without it the bogus signature fails PKCS#1 padding before
+     * the length guard is reached, and the case would pass for the wrong
+     * reason. With valid padding the DigestInfo encode is reached, so the
+     * length guard is what must reject. */
+    st = psa_sign_hash(key_id, alg, big_hash, WC_SHA256_DIGEST_SIZE,
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(valid hash for verify guard)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_verify_hash(key_id, alg, big_hash, sizeof(big_hash),
+                         sig, sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_verify_hash rejects oversized hash_length")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    psa_destroy_key(key_id);
+    return result;
+}
+
 static int test_rsa_verify_rejects_bad_signatures(void)
 {
     static const uint8_t hash_a[WC_SHA256_DIGEST_SIZE] = {
@@ -8942,6 +9020,13 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "rsa_verify_bad_signature") == 0) {
         if (run_named_test("rsa_verify_bad_signature",
                            test_rsa_verify_rejects_bad_signatures) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "rsa_oversized_hash_length") == 0) {
+        if (run_named_test("rsa_oversized_hash_length",
+                           test_rsa_pkcs1v15_rejects_oversized_hash_length)
+                == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
