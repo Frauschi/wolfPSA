@@ -5650,6 +5650,129 @@ static int test_asym_verify_rejects_bad_signatures(void)
     return TEST_OK;
 }
 
+static int test_hash_verify_rejects_substituted_hash(psa_key_type_t type,
+                                                      size_t bits,
+                                                      psa_algorithm_t alg,
+                                                      const uint8_t* hash_a,
+                                                      const uint8_t* hash_b,
+                                                      size_t hash_len,
+                                                      size_t expected_sig_len,
+                                                      const char* label)
+{
+    uint8_t sig[128];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, type);
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, alg, hash_a, hash_len, sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(substituted hash setup)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(sig_len == expected_sig_len,
+                   "psa_sign_hash(substituted hash setup) length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, alg, hash_a, hash_len, sig, sig_len);
+    if (check_status(st, "psa_verify_hash(genuine hash)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* A genuine signature over hash_a must not verify against a different
+     * hash_b: PKCS#1 v1.5 rejection surfaces as PSA_ERROR_INVALID_SIGNATURE,
+     * while RSA-PSS's padding check reports the mismatch as
+     * PSA_ERROR_INVALID_PADDING; either way psa_verify_hash() must not
+     * report success. */
+    st = psa_verify_hash(key_id, alg, hash_b, hash_len, sig, sig_len);
+    if (check_true(st != PSA_SUCCESS,
+                   "psa_verify_hash rejects signature over substituted hash") != TEST_OK) {
+        printf("  %s expected rejection, got PSA_SUCCESS\n", label);
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        psa_status_t destroy_st = psa_destroy_key(key_id);
+        if (result == TEST_OK &&
+            check_status(destroy_st, "psa_destroy_key(substituted hash test)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+    return result;
+}
+
+static int test_rsa_verify_rejects_bad_signatures(void)
+{
+    static const uint8_t hash_a[WC_SHA256_DIGEST_SIZE] = {
+        0x9f,0x86,0xd0,0x81,0x88,0x4c,0x7d,0x65,
+        0x9a,0x2f,0xea,0xa0,0xc5,0x5a,0xd0,0x15,
+        0xa3,0xbf,0x4f,0x1b,0x2b,0x0b,0x82,0x2c,
+        0xd1,0x5d,0x6c,0x15,0xb0,0xf0,0x0a,0x08
+    };
+    static const uint8_t hash_b[WC_SHA256_DIGEST_SIZE] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+    };
+    int result;
+
+    /* RSA signature corruption is exercised generically via the modular
+     * exponentiation input, so a flipped byte usually fails PKCS#1 padding
+     * validation itself (a different, still-safe error) rather than the
+     * hash-binding comparison covered by this finding. The substitution
+     * checks below keep the signature/padding well-formed and only vary
+     * the caller-supplied hash, which is what actually exercises the
+     * hash-binding check at psa_rsa.c's ConstantCompare()/check_padding()
+     * calls. */
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 1024,
+        PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256),
+        hash_a, hash_b, sizeof(hash_a), 128u,
+        "psa_generate_key(RSA PKCS1v15 substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 1024,
+        PSA_ALG_RSA_PKCS1V15_SIGN_RAW,
+        hash_a, hash_b, sizeof(hash_a), 128u,
+        "psa_generate_key(RSA PKCS1v15 raw substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 1024,
+        PSA_ALG_RSA_PSS(PSA_ALG_SHA_256),
+        hash_a, hash_b, sizeof(hash_a), 128u,
+        "psa_generate_key(RSA PSS substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+
+    return TEST_OK;
+}
+
 static int test_asym_requires_verify_usage(void)
 {
     static const uint8_t hash[WC_SHA256_DIGEST_SIZE] = {
@@ -8813,6 +8936,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_verify_bad_signature") == 0) {
         if (run_named_test("asym_verify_bad_signature",
                            test_asym_verify_rejects_bad_signatures) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "rsa_verify_bad_signature") == 0) {
+        if (run_named_test("rsa_verify_bad_signature",
+                           test_rsa_verify_rejects_bad_signatures) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }

@@ -283,19 +283,41 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
             ret = wc_RsaSSL_Verify_ex(signature, (word32)signature_length,
                                       decoded, (word32)sizeof(decoded),
                                       &rsa_key, WC_RSA_PKCSV15_PAD);
+
+            if (ret > 0) {
+                if ((size_t)ret != hash_length ||
+                    ConstantCompare(decoded, hash, (int)hash_length) != 0) {
+                    ret = SIG_VERIFY_E;
+                }
+            }
         }
         else {
+            /* wc_RsaSSL_Verify_ex2() only strips the PKCS#1 v1.5 padding;
+             * the recovered value is still the DER-encoded DigestInfo that
+             * was signed, so it must be compared against a freshly encoded
+             * DigestInfo for the caller-supplied hash, not against the raw
+             * hash bytes. */
+            byte encoded[RSA_MAX_SIZE/8];
+            int hash_oid = wc_GetCTC_HashOID(hash_type);
+            int encoded_len = (hash_oid > 0) ?
+                (int)wc_EncodeSignature(encoded, hash, (word32)hash_length,
+                                        hash_oid) : 0;
+
             ret = wc_RsaSSL_Verify_ex2(signature, (word32)signature_length,
                                        decoded, (word32)sizeof(decoded),
                                        &rsa_key, WC_RSA_PKCSV15_PAD,
                                        hash_type);
-        }
 
-        if (ret > 0) {
-            if ((size_t)ret != hash_length ||
-                ConstantCompare(decoded, hash, (int)hash_length) != 0) {
-                ret = SIG_VERIFY_E;
+            if (ret > 0) {
+                if (encoded_len <= 0 || (size_t)ret != (size_t)encoded_len ||
+                    ConstantCompare(decoded, encoded, encoded_len) != 0) {
+                    ret = SIG_VERIFY_E;
+                }
+                else {
+                    ret = (int)hash_length;
+                }
             }
+            wc_ForceZero(encoded, sizeof(encoded));
         }
         wc_ForceZero(decoded, sizeof(decoded));
     }
