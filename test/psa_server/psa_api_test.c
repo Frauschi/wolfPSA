@@ -2183,6 +2183,121 @@ cleanup:
     return result;
 }
 
+/* F-6970: corrupting a ciphertext byte in the block preceding the final
+ * padding block must flip exactly one recovered padding byte, which the
+ * PKCS7 padding-byte comparison loop in psa_cipher_finish() must catch and
+ * reject with PSA_ERROR_INVALID_PADDING. */
+static int test_cipher_cbc_pkcs7_reject_invalid_padding(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t iv[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    /* Exactly one AES block: encryption appends a full extra block of
+     * 0x10 padding bytes, so ciphertext[16..31] decrypts to sixteen
+     * bytes of value 0x10. */
+    static const uint8_t plaintext[16] = {
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x61,0x62,0x63,0x64,0x65,0x66
+    };
+    uint8_t ciphertext[sizeof(plaintext) + 16];
+    uint8_t decrypted[sizeof(plaintext) + 16];
+    size_t ciphertext_len = 0;
+    size_t part_len = 0;
+    size_t finish_len = 0;
+    size_t dec_part_len = 0;
+    size_t dec_finish_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_PKCS7);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES PKCS7 bad pad)") != TEST_OK) goto cleanup;
+
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        result = TEST_SKIPPED;
+        goto cleanup;
+    }
+    if (check_status(st, "psa_cipher_encrypt_setup(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext),
+                           ciphertext, sizeof(ciphertext), &part_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 bad pad enc)") != TEST_OK) {
+        goto cleanup;
+    }
+    ciphertext_len += part_len;
+    st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
+                           sizeof(ciphertext) - ciphertext_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(PKCS7 bad pad enc)") != TEST_OK) {
+        goto cleanup;
+    }
+    ciphertext_len += finish_len;
+    (void)psa_cipher_abort(&op);
+    if (check_true(ciphertext_len == sizeof(plaintext) + 16,
+                   "psa_cipher_encrypt(PKCS7 bad pad) length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Flip one bit in the block preceding the padding block. Since
+     * P_last = Dec(C_last) XOR C_prev in CBC mode, this changes exactly
+     * one byte of the recovered padding block from 0x10 to 0x11, while
+     * the other fifteen bytes -- including the pad_len byte itself --
+     * stay 0x10. Only the per-byte comparison loop can detect this. */
+    ciphertext[3] ^= 0x01;
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (check_status(st, "psa_cipher_decrypt_setup(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 bad pad dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, ciphertext, ciphertext_len,
+                           decrypted, sizeof(decrypted), &dec_part_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 bad pad dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_finish(&op, decrypted + dec_part_len,
+                           sizeof(decrypted) - dec_part_len, &dec_finish_len);
+    if (check_true(st == PSA_ERROR_INVALID_PADDING,
+                   "psa_cipher_finish(PKCS7 bad pad) status") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_cipher_abort(&op);
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES PKCS7 bad pad)") != TEST_OK) return TEST_FAIL;
+
+    key_id = 0;
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
 static int test_cipher_cbc_pkcs7_decrypt_update_small_output(void)
 {
     static const uint8_t key[16] = {
@@ -8329,6 +8444,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_small_output") == 0) {
         if (run_named_test("cipher_cbc_pkcs7_small_output",
                            test_cipher_cbc_pkcs7_decrypt_update_small_output) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_reject_invalid_padding") == 0) {
+        if (run_named_test("cipher_cbc_pkcs7_reject_invalid_padding",
+                           test_cipher_cbc_pkcs7_reject_invalid_padding) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
