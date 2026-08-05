@@ -38,6 +38,9 @@
  * 6. PSA_ALG_KWP → PSA_ERROR_NOT_SUPPORTED.
  * 7. Corrupted wrapped data (one byte flipped) → PSA_ERROR_INVALID_SIGNATURE.
  * 8. Output buffer one byte too small → PSA_ERROR_BUFFER_TOO_SMALL.
+ * 9. KEK whose permitted algorithm does not authorize PSA_ALG_KW (either
+ *    PSA_ALG_NONE or PSA_ALG_CTR, despite carrying WRAP|UNWRAP usage) →
+ *    PSA_ERROR_NOT_PERMITTED from both psa_wrap_key and psa_unwrap_key.
  */
 
 #include "psa_api_test_user_settings.h"
@@ -569,6 +572,98 @@ done:
 }
 
 /* -------------------------------------------------------------------------
+ * Test 9: KEK permitted-algorithm policy (wrap_alg != alg) →
+ * PSA_ERROR_NOT_PERMITTED
+ *
+ * A KEK carrying PSA_KEY_USAGE_WRAP|UNWRAP but whose permitted algorithm is
+ * not PSA_ALG_KW must be rejected by both psa_wrap_key and psa_unwrap_key,
+ * even though the usage-flag and key-type checks would otherwise pass. This
+ * covers both the "!= alg" mismatch (PSA_ALG_CTR) and the PSA_ALG_NONE case.
+ * ---------------------------------------------------------------------- */
+static int test_wrap_alg_policy(void)
+{
+    psa_key_id_t kek_mismatch = PSA_KEY_ID_NULL;
+    psa_key_id_t kek_none = PSA_KEY_ID_NULL;
+    psa_key_id_t target = PSA_KEY_ID_NULL;
+    psa_key_id_t dummy_key = PSA_KEY_ID_NULL;
+    psa_key_attributes_t tattr = psa_key_attributes_init();
+    psa_key_attributes_t rattr = psa_key_attributes_init();
+    uint8_t wrapped[32];
+    size_t wrapped_len = 0;
+    psa_status_t st;
+    int ret = 0;
+
+    /* KEK permitted for AES-CTR, not PSA_ALG_KW */
+    kek_mismatch = import_aes_key("alg_policy/kek_mismatch",
+                                  kKekRfc3394, sizeof(kKekRfc3394),
+                                  PSA_KEY_USAGE_WRAP | PSA_KEY_USAGE_UNWRAP,
+                                  PSA_ALG_CTR);
+    if (kek_mismatch == PSA_KEY_ID_NULL) { ret = 1; goto done; }
+
+    /* KEK with no permitted algorithm at all */
+    kek_none = import_aes_key("alg_policy/kek_none",
+                              kKekRfc3394, sizeof(kKekRfc3394),
+                              PSA_KEY_USAGE_WRAP | PSA_KEY_USAGE_UNWRAP,
+                              PSA_ALG_NONE);
+    if (kek_none == PSA_KEY_ID_NULL) { ret = 1; goto done; }
+
+    /* Target key */
+    psa_set_key_type(&tattr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&tattr, 128);
+    psa_set_key_usage_flags(&tattr, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&tattr, PSA_ALG_KW);
+
+    st = psa_import_key(&tattr, kPlainRfc3394, sizeof(kPlainRfc3394), &target);
+    if (expect_status("alg_policy/import_target", st, PSA_SUCCESS) != 0) {
+        ret = 1; goto done;
+    }
+
+    /* psa_wrap_key with an AES-CTR-only KEK */
+    st = psa_wrap_key(kek_mismatch, PSA_ALG_KW, target,
+                      wrapped, sizeof(wrapped), &wrapped_len);
+    if (expect_status("alg_policy/wrap_mismatch",
+                      st, PSA_ERROR_NOT_PERMITTED) != 0) {
+        ret = 1; goto done;
+    }
+
+    /* psa_wrap_key with a PSA_ALG_NONE KEK */
+    st = psa_wrap_key(kek_none, PSA_ALG_KW, target,
+                      wrapped, sizeof(wrapped), &wrapped_len);
+    if (expect_status("alg_policy/wrap_none",
+                      st, PSA_ERROR_NOT_PERMITTED) != 0) {
+        ret = 1; goto done;
+    }
+
+    /* psa_unwrap_key with an AES-CTR-only KEK */
+    psa_set_key_type(&rattr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&rattr, 128);
+    psa_set_key_usage_flags(&rattr, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&rattr, PSA_ALG_KW);
+
+    st = psa_unwrap_key(&rattr, kek_mismatch, PSA_ALG_KW,
+                        kCipherRfc3394, sizeof(kCipherRfc3394), &dummy_key);
+    if (expect_status("alg_policy/unwrap_mismatch",
+                      st, PSA_ERROR_NOT_PERMITTED) != 0) {
+        ret = 1; goto done;
+    }
+
+    /* psa_unwrap_key with a PSA_ALG_NONE KEK */
+    st = psa_unwrap_key(&rattr, kek_none, PSA_ALG_KW,
+                        kCipherRfc3394, sizeof(kCipherRfc3394), &dummy_key);
+    if (expect_status("alg_policy/unwrap_none",
+                      st, PSA_ERROR_NOT_PERMITTED) != 0) {
+        ret = 1; goto done;
+    }
+
+done:
+    destroy_if_valid(target);
+    destroy_if_valid(kek_mismatch);
+    destroy_if_valid(kek_none);
+    destroy_if_valid(dummy_key);
+    return ret;
+}
+
+/* -------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------- */
 int main(void)
@@ -589,6 +684,7 @@ int main(void)
     if (test_kwp_not_supported() != 0)   return 1;
     if (test_corrupt_wrapped() != 0)     return 1;
     if (test_buffer_too_small() != 0)    return 1;
+    if (test_wrap_alg_policy() != 0)     return 1;
 
     printf("PSA key wrap test: OK\n");
     return 0;
