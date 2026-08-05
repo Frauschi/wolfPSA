@@ -6987,9 +6987,11 @@ static int test_kdf_verify_key_policy(void)
     uint8_t pbkdf2_expected[16];
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
     psa_key_attributes_t attrs = psa_key_attributes_init();
+    uint8_t hkdf_bad_expected[16];
     psa_key_id_t hkdf_verify_key = 0;
     psa_key_id_t hkdf_no_usage_key = 0;
     psa_key_id_t hkdf_wrong_type_key = 0;
+    psa_key_id_t hkdf_mismatch_key = 0;
     psa_key_id_t pbkdf2_verify_key = 0;
     psa_key_id_t pbkdf2_wrong_type_key = 0;
     psa_status_t st;
@@ -7046,6 +7048,68 @@ static int test_kdf_verify_key_policy(void)
     }
     st = psa_key_derivation_abort(&op);
     if (check_status(st, "psa_key_derivation_abort(HKDF verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    /* Mismatch path: one byte flipped must return PSA_ERROR_INVALID_SIGNATURE.
+     * Catches mutation of the ConstantCompare check in verify_bytes/verify_key. */
+    memcpy(hkdf_bad_expected, hkdf_expected, sizeof(hkdf_bad_expected));
+    hkdf_bad_expected[0] ^= 0x01u;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_bytes(&op, hkdf_bad_expected, sizeof(hkdf_bad_expected));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_key_derivation_verify_bytes rejects mismatched value") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, hkdf_bad_expected, sizeof(hkdf_bad_expected), &hkdf_mismatch_key);
+    if (check_status(st, "psa_import_key(HKDF verify_key mismatch key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_mismatch_key);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_key_derivation_verify_key rejects mismatched value") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify_key mismatch)") != TEST_OK) {
         goto cleanup;
     }
     op = psa_key_derivation_operation_init();
@@ -7228,6 +7292,9 @@ cleanup:
     }
     if (hkdf_wrong_type_key != 0) {
         (void)psa_destroy_key(hkdf_wrong_type_key);
+    }
+    if (hkdf_mismatch_key != 0) {
+        (void)psa_destroy_key(hkdf_mismatch_key);
     }
     if (hkdf_verify_key != 0) {
         (void)psa_destroy_key(hkdf_verify_key);
