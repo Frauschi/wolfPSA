@@ -5712,11 +5712,10 @@ static int test_hash_verify_rejects_substituted_hash(psa_key_type_t type,
     }
 
     /* A genuine signature over hash_a must not verify against a different
-     * hash_b. The exact status is deterministic per algorithm, so pin it:
-     * PKCS#1 v1.5 rejection surfaces as PSA_ERROR_INVALID_SIGNATURE, while
-     * RSA-PSS's padding check reports the mismatch as
-     * PSA_ERROR_INVALID_PADDING. Accepting any non-success status here would
-     * also accept a regression that broke psa_verify_hash outright. */
+     * hash_b. All three algorithms must report PSA_ERROR_INVALID_SIGNATURE,
+     * the only status the PSA spec defines for a signature that does not
+     * verify. Accepting any non-success status here would also accept a
+     * regression that broke psa_verify_hash outright. */
     st = psa_verify_hash(key_id, alg, hash_b, hash_len, sig, sig_len);
     if (check_true(st == expected_st,
                    "psa_verify_hash rejects signature over substituted hash") != TEST_OK) {
@@ -5805,6 +5804,32 @@ static int test_rsa_pkcs1v15_rejects_oversized_hash_length(void)
         goto cleanup;
     }
 
+    /* Under-sized digest: a 20-byte hash under SHA-256 fits every buffer, so
+     * only the exact-length check rejects it. Without that check
+     * wc_EncodeSignature() wraps it in a DigestInfo carrying the SHA-256 OID
+     * around a 20-byte OCTET STRING - malformed per RFC 8017 A.2.4 - and
+     * because verify re-encodes the same way, the pair round-trips to
+     * PSA_SUCCESS instead of being refused. */
+    st = psa_sign_hash(key_id, alg, big_hash, 20u,
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects undersized hash_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_sign_hash(key_id, alg, big_hash, WC_SHA256_DIGEST_SIZE,
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(valid hash for undersized guard)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_verify_hash(key_id, alg, big_hash, 20u, sig, sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_verify_hash rejects undersized hash_length")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
     result = TEST_OK;
 
 cleanup:
@@ -5872,7 +5897,7 @@ static int test_rsa_verify_rejects_substituted_hashes(void)
         PSA_KEY_TYPE_RSA_KEY_PAIR, 2048,
         PSA_ALG_RSA_PSS(PSA_ALG_SHA_256),
         hash_a, hash_b, sizeof(hash_a), 256u,
-        PSA_ERROR_INVALID_PADDING,
+        PSA_ERROR_INVALID_SIGNATURE,
         "psa_generate_key(RSA PSS substituted hash)");
     if (result == TEST_FAIL) {
         return TEST_FAIL;
