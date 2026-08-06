@@ -678,6 +678,59 @@ static int test_missing_usage(void)
 }
 
 /* --------------------------------------------------------------------------
+ * Case 6b: key pair without DECRYPT usage: psa_decapsulate must be rejected
+ * with PSA_ERROR_NOT_PERMITTED, even though the ciphertext itself is valid
+ * (obtained via a successful psa_encapsulate on the same key).
+ * -------------------------------------------------------------------------- */
+static int test_decapsulate_missing_usage(void)
+{
+    psa_key_attributes_t kp_attrs = psa_key_attributes_init();
+    psa_key_attributes_t ss_attrs;
+    psa_key_id_t kp_no_dec = PSA_KEY_ID_NULL;
+    psa_key_id_t ss_enc    = PSA_KEY_ID_NULL;
+    psa_key_id_t ss_dec    = PSA_KEY_ID_NULL;
+    uint8_t ct[768]; /* ML-KEM-512 */
+    size_t ct_len = 0;
+    psa_status_t st;
+
+    /* Generate a key pair WITHOUT PSA_KEY_USAGE_DECRYPT. */
+    psa_set_key_type(&kp_attrs, PSA_KEY_TYPE_ML_KEM_KEY_PAIR);
+    psa_set_key_bits(&kp_attrs, 512);
+    psa_set_key_usage_flags(&kp_attrs,
+        PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&kp_attrs, PSA_ALG_ML_KEM);
+
+    st = psa_generate_key(&kp_attrs, &kp_no_dec);
+    if (check_status(st, "decap-missing-usage generate kp") != 0) return 1;
+
+    ss_attrs = make_ss_attrs();
+    st = psa_encapsulate(kp_no_dec, PSA_ALG_ML_KEM, &ss_attrs,
+                         &ss_enc, ct, sizeof(ct), &ct_len);
+    if (check_status(st, "decap-missing-usage encapsulate") != 0) {
+        (void)psa_destroy_key(kp_no_dec);
+        return 1;
+    }
+
+    ss_attrs = make_ss_attrs();
+    st = psa_decapsulate(kp_no_dec, PSA_ALG_ML_KEM, ct, ct_len,
+                         &ss_attrs, &ss_dec);
+    if (check_status_eq(st, PSA_ERROR_NOT_PERMITTED,
+                        "decapsulate without DECRYPT") != 0) {
+        if (ss_dec != PSA_KEY_ID_NULL)
+            (void)psa_destroy_key(ss_dec);
+        (void)psa_destroy_key(ss_enc);
+        (void)psa_destroy_key(kp_no_dec);
+        return 1;
+    }
+
+    (void)psa_destroy_key(ss_enc);
+    (void)psa_destroy_key(kp_no_dec);
+
+    printf("PASS: test_decapsulate_missing_usage\n");
+    return 0;
+}
+
+/* --------------------------------------------------------------------------
  * Case 7: import a 64-byte seed as ML_KEM_KEY_PAIR.
  *   - bits=0 -> PSA_ERROR_INVALID_ARGUMENT (ambiguous).
  *   - bits=768 -> success; full encap/decap round-trip works.
@@ -860,6 +913,7 @@ int main(void)
     if (test_tampered_ciphertext_implicit_rejection() != 0) return 1;
     if (test_wrong_ciphertext_length() != 0)             return 1;
     if (test_missing_usage() != 0)                       return 1;
+    if (test_decapsulate_missing_usage() != 0)            return 1;
     if (test_import_seed() != 0)                         return 1;
     if (test_buffer_too_small() != 0)                    return 1;
 

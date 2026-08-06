@@ -47,6 +47,25 @@
 int wc_psa_get_rsa_padding(psa_algorithm_t alg);
 int wc_psa_get_hash_type(psa_algorithm_t alg);
 
+/* Scratch size for the PKCS#1 v1.5 DigestInfo that wc_EncodeSignature()
+ * builds: the digest itself plus the DER header prepended to it.
+ *
+ * The digest term is WC_MAX_DIGEST_SIZE rather than PSA_HASH_MAX_SIZE
+ * because wc_GetCTC_HashOID() reflects what wolfCrypt was compiled with,
+ * while PSA_HASH_MAX_SIZE is derived from the PSA_WANT_ALG_SHA* set. The
+ * two can diverge - a Zephyr build selecting only
+ * CONFIG_PSA_WANT_ALG_SHA_256 gets PSA_HASH_MAX_SIZE 32 while wolfCrypt
+ * still returns a valid OID for SHA-512 - and sizing from the PSA constant
+ * would reject digests the implementation can legitimately encode.
+ *
+ * The header term is wolfCrypt's own worst case for the SEQUENCE +
+ * AlgorithmIdentifier + OCTET STRING header, so the bound tracks the
+ * library instead of resting on the overhead the current OID table happens
+ * to produce. wc_EncodeSignature() sizes with SizeASN_Items() and then
+ * writes via SetASN_Items() with no bound of its own, so this buffer is
+ * the only limit on that write. */
+#define WOLFPSA_RSA_DIGESTINFO_MAX (WC_MAX_DIGEST_SIZE + MAX_DER_DIGEST_ASN_SZ)
+
 /* Only the PSS and OAEP paths use MGF1; guard the helper with the same
  * condition as its callers so a config with neither (e.g. RSA sign/verify with
  * PKCS#1 v1.5 only) does not trip -Werror=unused-function. */
@@ -117,6 +136,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     int padding;
     int hash_type;
     int hash_oid;
+    size_t expected_hash_len;
     byte* sig_input = NULL;
     word32 sig_input_len = 0;
     word32 sig_input_alloc_len = 0;
@@ -174,16 +194,42 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
                 wc_FreeRsaKey(&rsa_key);
                 return PSA_ERROR_NOT_SUPPORTED;
             }
-            sig_input = (byte*)XMALLOC(PSA_HASH_MAX_SIZE + 32, NULL,
+            /* PSA requires the digest to be exactly as long as the hash
+             * named by the algorithm; anything else is INVALID_ARGUMENT.
+             * wc_EncodeSignature() would otherwise happily wrap a 20-byte
+             * digest in a SHA-256 DigestInfo, and since the verify path
+             * re-encodes the same way that malformed structure would
+             * round-trip to success in violation of RFC 8017 A.2.4. The
+             * WC_MAX_DIGEST_SIZE term is retained as the buffer
+             * precondition: wc_EncodeSignature() does not bound its own
+             * write, and the two constants can diverge. */
+            expected_hash_len = PSA_HASH_LENGTH(PSA_ALG_SIGN_GET_HASH(alg));
+            if (expected_hash_len == 0 || hash_length != expected_hash_len ||
+                hash_length > WC_MAX_DIGEST_SIZE) {
+                wc_FreeRng(&rng);
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            sig_input = (byte*)XMALLOC(WOLFPSA_RSA_DIGESTINFO_MAX, NULL,
                                        DYNAMIC_TYPE_TMP_BUFFER);
             if (sig_input == NULL) {
                 wc_FreeRng(&rng);
                 wc_FreeRsaKey(&rsa_key);
                 return PSA_ERROR_INSUFFICIENT_MEMORY;
             }
-            sig_input_alloc_len = PSA_HASH_MAX_SIZE + 32;
+            sig_input_alloc_len = WOLFPSA_RSA_DIGESTINFO_MAX;
             sig_input_len = wc_EncodeSignature(sig_input, hash,
                                                (word32)hash_length, hash_oid);
+            /* Unsigned return type, so 0 is the only error indication; it
+             * means the internal allocation failed, not a bad argument.
+             * Mirrors the verify path so both report the same status. */
+            if (sig_input_len == 0) {
+                wc_ForceZero(sig_input, sig_input_alloc_len);
+                XFREE(sig_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                wc_FreeRng(&rng);
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_INSUFFICIENT_MEMORY;
+            }
         }
 
         ret = wc_RsaSSL_Sign(sig_input, sig_input_len, signature,
@@ -234,7 +280,8 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     word32 idx = 0;
     int padding;
     int hash_type;
-    
+    size_t expected_hash_len;
+
     (void)key_bits;
 
     /* Check if key type is RSA public key or key pair */
@@ -283,19 +330,75 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
             ret = wc_RsaSSL_Verify_ex(signature, (word32)signature_length,
                                       decoded, (word32)sizeof(decoded),
                                       &rsa_key, WC_RSA_PKCSV15_PAD);
+
+            if (ret > 0) {
+                if ((size_t)ret != hash_length ||
+                    ConstantCompare(decoded, hash, (int)hash_length) != 0) {
+                    ret = SIG_VERIFY_E;
+                }
+            }
         }
         else {
+            /* wc_RsaSSL_Verify_ex2() only strips the PKCS#1 v1.5 padding;
+             * the recovered value is still the DER-encoded DigestInfo that
+             * was signed, so it must be compared against a freshly encoded
+             * DigestInfo for the caller-supplied hash, not against the raw
+             * hash bytes. */
+            byte encoded[WOLFPSA_RSA_DIGESTINFO_MAX];
+            int hash_oid;
+            int encoded_len;
+
+            /* Report configuration and argument failures as themselves,
+             * matching the sign path, rather than letting them fall through
+             * to SIG_VERIFY_E. An unsupported hash or an unencodable digest
+             * is not a signature mismatch, and folding them together makes a
+             * build problem indistinguishable from an attack. */
+            hash_oid = wc_GetCTC_HashOID(hash_type);
+            if (hash_oid <= 0) {
+                wc_ForceZero(decoded, sizeof(decoded));
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_NOT_SUPPORTED;
+            }
+            /* Same bound as the sign path: PSA requires the digest to match
+             * the length of the hash named by the algorithm, and the
+             * WC_MAX_DIGEST_SIZE term is the buffer precondition for the
+             * unbounded write wc_EncodeSignature() performs. Accepting a
+             * mismatched length here would let a DigestInfo whose OID and
+             * digest length disagree verify successfully. */
+            expected_hash_len = PSA_HASH_LENGTH(PSA_ALG_SIGN_GET_HASH(alg));
+            if (expected_hash_len == 0 || hash_length != expected_hash_len ||
+                hash_length > WC_MAX_DIGEST_SIZE) {
+                wc_ForceZero(decoded, sizeof(decoded));
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
+            encoded_len = (int)wc_EncodeSignature(encoded, hash,
+                                                  (word32)hash_length,
+                                                  hash_oid);
+            /* Unsigned return type, so 0 is the only error indication; it
+             * means the internal allocation failed, not a bad signature. */
+            if (encoded_len <= 0) {
+                wc_ForceZero(encoded, sizeof(encoded));
+                wc_ForceZero(decoded, sizeof(decoded));
+                wc_FreeRsaKey(&rsa_key);
+                return PSA_ERROR_INSUFFICIENT_MEMORY;
+            }
+
             ret = wc_RsaSSL_Verify_ex2(signature, (word32)signature_length,
                                        decoded, (word32)sizeof(decoded),
                                        &rsa_key, WC_RSA_PKCSV15_PAD,
                                        hash_type);
-        }
 
-        if (ret > 0) {
-            if ((size_t)ret != hash_length ||
-                ConstantCompare(decoded, hash, (int)hash_length) != 0) {
-                ret = SIG_VERIFY_E;
+            if (ret > 0) {
+                if ((size_t)ret != (size_t)encoded_len ||
+                    ConstantCompare(decoded, encoded, encoded_len) != 0) {
+                    ret = SIG_VERIFY_E;
+                }
+                else {
+                    ret = (int)hash_length;
+                }
             }
+            wc_ForceZero(encoded, sizeof(encoded));
         }
         wc_ForceZero(decoded, sizeof(decoded));
     }
@@ -327,6 +430,14 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
                                                hash_type, salt_len, &rsa_key);
             if (ret == 0) {
                 ret = (int)hash_length;
+            }
+            else {
+                /* The padding check is the PSS signature check, so a failure
+                 * here is a signature mismatch. Reporting wolfCrypt's
+                 * BAD_PADDING_E verbatim would surface as
+                 * PSA_ERROR_INVALID_PADDING, which psa_verify_hash does not
+                 * define; the spec requires PSA_ERROR_INVALID_SIGNATURE. */
+                ret = SIG_VERIFY_E;
             }
         }
         wc_ForceZero(decoded, sizeof(decoded));

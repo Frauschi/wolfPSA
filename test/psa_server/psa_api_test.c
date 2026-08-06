@@ -315,6 +315,66 @@ static int test_hash_compare(void)
     return TEST_OK;
 }
 
+static int test_hash_verify(void)
+{
+    static const uint8_t msg[] = "abc";
+    /* SHA-256("abc") */
+    static const uint8_t sha256_abc[WC_SHA256_DIGEST_SIZE] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+    };
+    uint8_t bad_hash[WC_SHA256_DIGEST_SIZE];
+    psa_hash_operation_t op;
+    psa_status_t st;
+
+    /* Success path: correct digest via multipart setup/update/verify must
+     * return PSA_SUCCESS. */
+    op = psa_hash_operation_init();
+    st = psa_hash_setup(&op, PSA_ALG_SHA_256);
+    if (check_status(st, "psa_hash_setup(verify correct)") != TEST_OK) return TEST_FAIL;
+    st = psa_hash_update(&op, msg, sizeof(msg) - 1);
+    if (check_status(st, "psa_hash_update(verify correct)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_hash_verify(&op, sha256_abc, sizeof(sha256_abc));
+    if (check_status(st, "psa_hash_verify correct") != TEST_OK) return TEST_FAIL;
+
+    /* Mismatch path: one byte flipped must return PSA_ERROR_INVALID_SIGNATURE.
+     * Catches mutation of the ConstantCompare check. */
+    memcpy(bad_hash, sha256_abc, sizeof(bad_hash));
+    bad_hash[0] ^= 0x01;
+    op = psa_hash_operation_init();
+    st = psa_hash_setup(&op, PSA_ALG_SHA_256);
+    if (check_status(st, "psa_hash_setup(verify mismatch)") != TEST_OK) return TEST_FAIL;
+    st = psa_hash_update(&op, msg, sizeof(msg) - 1);
+    if (check_status(st, "psa_hash_update(verify mismatch)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_hash_verify(&op, bad_hash, sizeof(bad_hash));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_hash_verify mismatch") != TEST_OK) return TEST_FAIL;
+
+    /* Wrong reference length must return PSA_ERROR_INVALID_SIGNATURE.
+     * Catches mutation of the hash_length != computed_hash_length check. */
+    op = psa_hash_operation_init();
+    st = psa_hash_setup(&op, PSA_ALG_SHA_256);
+    if (check_status(st, "psa_hash_setup(verify wrong length)") != TEST_OK) return TEST_FAIL;
+    st = psa_hash_update(&op, msg, sizeof(msg) - 1);
+    if (check_status(st, "psa_hash_update(verify wrong length)") != TEST_OK) {
+        (void)psa_hash_abort(&op);
+        return TEST_FAIL;
+    }
+    st = psa_hash_verify(&op, sha256_abc, sizeof(sha256_abc) - 1);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_hash_verify wrong length") != TEST_OK) return TEST_FAIL;
+
+    return TEST_OK;
+}
+
 static int check_status_or_skip(psa_status_t st, const char* what)
 {
     if (st == PSA_ERROR_NOT_SUPPORTED) {
@@ -2171,6 +2231,121 @@ static int test_cipher_cbc_pkcs7_multipart_decrypt(void)
 
     st = psa_destroy_key(key_id);
     if (check_status(st, "psa_destroy_key(AES PKCS7)") != TEST_OK) return TEST_FAIL;
+
+    key_id = 0;
+    result = TEST_OK;
+
+cleanup:
+    (void)psa_cipher_abort(&op);
+    if (key_id != 0) {
+        (void)psa_destroy_key(key_id);
+    }
+    return result;
+}
+
+/* Corrupting a ciphertext byte in the block preceding the final padding
+ * block must flip exactly one recovered padding byte, which the PKCS7
+ * padding-byte comparison loop in psa_cipher_finish() must catch and
+ * reject with PSA_ERROR_INVALID_PADDING. */
+static int test_cipher_cbc_pkcs7_reject_invalid_padding(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t iv[16] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
+    };
+    /* Exactly one AES block: encryption appends a full extra block of
+     * 0x10 padding bytes, so ciphertext[16..31] decrypts to sixteen
+     * bytes of value 0x10. */
+    static const uint8_t plaintext[16] = {
+        0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+        0x38,0x39,0x61,0x62,0x63,0x64,0x65,0x66
+    };
+    uint8_t ciphertext[sizeof(plaintext) + 16];
+    uint8_t decrypted[sizeof(plaintext) + 16];
+    size_t ciphertext_len = 0;
+    size_t part_len = 0;
+    size_t finish_len = 0;
+    size_t dec_part_len = 0;
+    size_t dec_finish_len = 0;
+    psa_key_id_t key_id = 0;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_cipher_operation_t op = psa_cipher_operation_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attrs, 128);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, PSA_ALG_CBC_PKCS7);
+
+    st = psa_import_key(&attrs, key, sizeof(key), &key_id);
+    if (check_status(st, "psa_import_key(AES PKCS7 bad pad)") != TEST_OK) goto cleanup;
+
+    st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        result = TEST_SKIPPED;
+        goto cleanup;
+    }
+    if (check_status(st, "psa_cipher_encrypt_setup(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, plaintext, sizeof(plaintext),
+                           ciphertext, sizeof(ciphertext), &part_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 bad pad enc)") != TEST_OK) {
+        goto cleanup;
+    }
+    ciphertext_len += part_len;
+    st = psa_cipher_finish(&op, ciphertext + ciphertext_len,
+                           sizeof(ciphertext) - ciphertext_len, &finish_len);
+    if (check_status(st, "psa_cipher_finish(PKCS7 bad pad enc)") != TEST_OK) {
+        goto cleanup;
+    }
+    ciphertext_len += finish_len;
+    (void)psa_cipher_abort(&op);
+    if (check_true(ciphertext_len == sizeof(plaintext) + 16,
+                   "psa_cipher_encrypt(PKCS7 bad pad) length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Flip one bit in the block preceding the padding block. Since
+     * P_last = Dec(C_last) XOR C_prev in CBC mode, this changes exactly
+     * one byte of the recovered padding block from 0x10 to 0x11, while
+     * the other fifteen bytes -- including the pad_len byte itself --
+     * stay 0x10. Only the per-byte comparison loop can detect this. */
+    ciphertext[3] ^= 0x01;
+
+    op = psa_cipher_operation_init();
+    st = psa_cipher_decrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
+    if (check_status(st, "psa_cipher_decrypt_setup(PKCS7 bad pad)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_set_iv(&op, iv, sizeof(iv));
+    if (check_status(st, "psa_cipher_set_iv(PKCS7 bad pad dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_update(&op, ciphertext, ciphertext_len,
+                           decrypted, sizeof(decrypted), &dec_part_len);
+    if (check_status(st, "psa_cipher_update(PKCS7 bad pad dec)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_cipher_finish(&op, decrypted + dec_part_len,
+                           sizeof(decrypted) - dec_part_len, &dec_finish_len);
+    if (check_true(st == PSA_ERROR_INVALID_PADDING,
+                   "psa_cipher_finish(PKCS7 bad pad) status") != TEST_OK) {
+        goto cleanup;
+    }
+    (void)psa_cipher_abort(&op);
+
+    st = psa_destroy_key(key_id);
+    if (check_status(st, "psa_destroy_key(AES PKCS7 bad pad)") != TEST_OK) return TEST_FAIL;
 
     key_id = 0;
     result = TEST_OK;
@@ -5484,6 +5659,256 @@ static int test_asym_verify_rejects_bad_signatures(void)
     return TEST_OK;
 }
 
+static int test_hash_verify_rejects_substituted_hash(psa_key_type_t type,
+                                                      size_t bits,
+                                                      psa_algorithm_t alg,
+                                                      const uint8_t* hash_a,
+                                                      const uint8_t* hash_b,
+                                                      size_t hash_len,
+                                                      size_t expected_sig_len,
+                                                      psa_status_t expected_st,
+                                                      const char* label)
+{
+    uint8_t sig[PSA_SIGNATURE_MAX_SIZE];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    psa_set_key_type(&attrs, type);
+    psa_set_key_bits(&attrs, bits);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, label) != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    st = psa_sign_hash(key_id, alg, hash_a, hash_len, sig, sizeof(sig), &sig_len);
+    /* Key generation succeeds for any RSA algorithm, so an algorithm the
+     * build does not implement (RSA-PSS without WC_RSA_PSS) only surfaces
+     * here. That is a skip, not a failure. */
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        result = TEST_SKIPPED;
+        goto cleanup;
+    }
+    if (check_status(st, "psa_sign_hash(substituted hash setup)") != TEST_OK) {
+        goto cleanup;
+    }
+    if (check_true(sig_len == expected_sig_len,
+                   "psa_sign_hash(substituted hash setup) length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_verify_hash(key_id, alg, hash_a, hash_len, sig, sig_len);
+    if (check_status(st, "psa_verify_hash(genuine hash)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* A genuine signature over hash_a must not verify against a different
+     * hash_b. All three algorithms must report PSA_ERROR_INVALID_SIGNATURE,
+     * the only status the PSA spec defines for a signature that does not
+     * verify. Accepting any non-success status here would also accept a
+     * regression that broke psa_verify_hash outright. */
+    st = psa_verify_hash(key_id, alg, hash_b, hash_len, sig, sig_len);
+    if (check_true(st == expected_st,
+                   "psa_verify_hash rejects signature over substituted hash") != TEST_OK) {
+        printf("  %s expected 0x%08x, got 0x%08x\n", label,
+               (unsigned)expected_st, (unsigned)st);
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    if (key_id != PSA_KEY_ID_NULL) {
+        psa_status_t destroy_st = psa_destroy_key(key_id);
+        if (result != TEST_FAIL &&
+            check_status(destroy_st, "psa_destroy_key(substituted hash test)") != TEST_OK) {
+            result = TEST_FAIL;
+        }
+    }
+    return result;
+}
+
+/* psa_sign_hash/psa_verify_hash pass the caller-supplied hash_length straight
+ * through to psa_asymmetric_sign_rsa()/psa_asymmetric_verify_rsa(), which feed
+ * it to wc_EncodeSignature(). That helper writes the DER header plus
+ * hash_length bytes into a fixed-size destination without bounding the write
+ * itself, so an over-long hash_length overruns the buffer (stack on the verify
+ * side, heap on the sign side) before any signature check happens. Pin the
+ * length guards on both entry points. */
+static int test_rsa_pkcs1v15_rejects_oversized_hash_length(void)
+{
+    static uint8_t big_hash[WC_MAX_DIGEST_SIZE + 512];
+    uint8_t sig[PSA_SIGNATURE_MAX_SIZE];
+    size_t sig_len = 0;
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    psa_algorithm_t alg = PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256);
+    psa_status_t st;
+    int result = TEST_FAIL;
+
+    memset(big_hash, 0x41, sizeof(big_hash));
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_KEY_PAIR);
+    psa_set_key_bits(&attrs, 2048);
+    psa_set_key_usage_flags(&attrs,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attrs, alg);
+
+    st = psa_generate_key(&attrs, &key_id);
+    if (st == PSA_ERROR_NOT_SUPPORTED) {
+        return TEST_SKIPPED;
+    }
+    if (check_status(st, "psa_generate_key(RSA oversized hash_length)")
+            != TEST_OK) {
+        return TEST_FAIL;
+    }
+
+    /* Sign side: must be refused, not encoded into the temporary buffer. */
+    st = psa_sign_hash(key_id, alg, big_hash, sizeof(big_hash),
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects oversized hash_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Verify side: sign a correctly sized hash first, so the signature is
+     * one that would otherwise verify. The guard must still reject on
+     * hash_length alone, and must do so with the same status as the sign
+     * path rather than folding into a signature mismatch.
+     *
+     * PSA_ERROR_INVALID_ARGUMENT is what makes this assertion discriminating.
+     * Deleting the guard lets wc_EncodeSignature() overrun the DigestInfo
+     * buffer and then yields PSA_ERROR_INVALID_SIGNATURE from the following
+     * length comparison, so asserting INVALID_SIGNATURE here would pass
+     * against the vulnerable implementation in a build without a sanitizer. */
+    st = psa_sign_hash(key_id, alg, big_hash, WC_SHA256_DIGEST_SIZE,
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(valid hash for verify guard)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_verify_hash(key_id, alg, big_hash, sizeof(big_hash),
+                         sig, sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_verify_hash rejects oversized hash_length")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    /* Under-sized digest: a 20-byte hash under SHA-256 fits every buffer, so
+     * only the exact-length check rejects it. Without that check
+     * wc_EncodeSignature() wraps it in a DigestInfo carrying the SHA-256 OID
+     * around a 20-byte OCTET STRING - malformed per RFC 8017 A.2.4 - and
+     * because verify re-encodes the same way, the pair round-trips to
+     * PSA_SUCCESS instead of being refused. */
+    st = psa_sign_hash(key_id, alg, big_hash, 20u,
+                       sig, sizeof(sig), &sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_sign_hash rejects undersized hash_length") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_sign_hash(key_id, alg, big_hash, WC_SHA256_DIGEST_SIZE,
+                       sig, sizeof(sig), &sig_len);
+    if (check_status(st, "psa_sign_hash(valid hash for undersized guard)")
+            != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_verify_hash(key_id, alg, big_hash, 20u, sig, sig_len);
+    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
+                   "psa_verify_hash rejects undersized hash_length")
+            != TEST_OK) {
+        goto cleanup;
+    }
+
+    result = TEST_OK;
+
+cleanup:
+    psa_destroy_key(key_id);
+    return result;
+}
+
+static int test_rsa_verify_rejects_substituted_hashes(void)
+{
+    static const uint8_t hash_a[WC_SHA256_DIGEST_SIZE] = {
+        0x9f,0x86,0xd0,0x81,0x88,0x4c,0x7d,0x65,
+        0x9a,0x2f,0xea,0xa0,0xc5,0x5a,0xd0,0x15,
+        0xa3,0xbf,0x4f,0x1b,0x2b,0x0b,0x82,0x2c,
+        0xd1,0x5d,0x6c,0x15,0xb0,0xf0,0x0a,0x08
+    };
+    static const uint8_t hash_b[WC_SHA256_DIGEST_SIZE] = {
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+        0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+    };
+    int result;
+    int ran = 0;
+
+    /* RSA signature corruption is exercised generically via the modular
+     * exponentiation input, so a flipped byte usually fails PKCS#1 padding
+     * validation itself (a different, still-safe error) rather than the
+     * hash-binding comparison covered by this finding. The substitution
+     * checks below keep the signature/padding well-formed and only vary
+     * the caller-supplied hash, which is what actually exercises the
+     * hash-binding check at psa_rsa.c's ConstantCompare()/check_padding()
+     * calls.
+     *
+     * Each sub-case can skip independently (no RSA key generation, or a
+     * build without WC_RSA_PSS), so count what actually ran: reporting
+     * TEST_OK when every case skipped would silently disable exactly the
+     * regression this test exists to catch. */
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 2048,
+        PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256),
+        hash_a, hash_b, sizeof(hash_a), 256u,
+        PSA_ERROR_INVALID_SIGNATURE,
+        "psa_generate_key(RSA PKCS1v15 substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    if (result == TEST_OK) {
+        ran++;
+    }
+
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 2048,
+        PSA_ALG_RSA_PKCS1V15_SIGN_RAW,
+        hash_a, hash_b, sizeof(hash_a), 256u,
+        PSA_ERROR_INVALID_SIGNATURE,
+        "psa_generate_key(RSA PKCS1v15 raw substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    if (result == TEST_OK) {
+        ran++;
+    }
+
+    result = test_hash_verify_rejects_substituted_hash(
+        PSA_KEY_TYPE_RSA_KEY_PAIR, 2048,
+        PSA_ALG_RSA_PSS(PSA_ALG_SHA_256),
+        hash_a, hash_b, sizeof(hash_a), 256u,
+        PSA_ERROR_INVALID_SIGNATURE,
+        "psa_generate_key(RSA PSS substituted hash)");
+    if (result == TEST_FAIL) {
+        return TEST_FAIL;
+    }
+    if (result == TEST_OK) {
+        ran++;
+    }
+
+    return (ran > 0) ? TEST_OK : TEST_SKIPPED;
+}
+
 static int test_asym_requires_verify_usage(void)
 {
     static const uint8_t hash[WC_SHA256_DIGEST_SIZE] = {
@@ -6821,9 +7246,11 @@ static int test_kdf_verify_key_policy(void)
     uint8_t pbkdf2_expected[16];
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
     psa_key_attributes_t attrs = psa_key_attributes_init();
+    uint8_t hkdf_bad_expected[16];
     psa_key_id_t hkdf_verify_key = 0;
     psa_key_id_t hkdf_no_usage_key = 0;
     psa_key_id_t hkdf_wrong_type_key = 0;
+    psa_key_id_t hkdf_mismatch_key = 0;
     psa_key_id_t pbkdf2_verify_key = 0;
     psa_key_id_t pbkdf2_wrong_type_key = 0;
     psa_status_t st;
@@ -6880,6 +7307,69 @@ static int test_kdf_verify_key_policy(void)
     }
     st = psa_key_derivation_abort(&op);
     if (check_status(st, "psa_key_derivation_abort(HKDF verify key)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    /* Mismatch path: one byte flipped must return PSA_ERROR_INVALID_SIGNATURE.
+     * Catches mutation of the ConstantCompare check in verify_bytes/verify_key. */
+    memcpy(hkdf_bad_expected, hkdf_expected, sizeof(hkdf_bad_expected));
+    hkdf_bad_expected[0] ^= 0x01u;
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_bytes(&op, hkdf_bad_expected, sizeof(hkdf_bad_expected));
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_key_derivation_verify_bytes rejects mismatched value") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify_bytes mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    op = psa_key_derivation_operation_init();
+
+    psa_reset_key_attributes(&attrs);
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_DERIVATION);
+    st = psa_import_key(&attrs, hkdf_bad_expected, sizeof(hkdf_bad_expected), &hkdf_mismatch_key);
+    if (check_status(st, "psa_import_key(HKDF verify_key mismatch key)") != TEST_OK) {
+        goto cleanup;
+    }
+
+    st = psa_key_derivation_setup(&op, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+    if (check_status(st, "psa_key_derivation_setup(HKDF verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        hkdf_secret, sizeof(hkdf_secret));
+    if (check_status(st, "psa_key_derivation_input_bytes(SECRET verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                        hkdf_info, sizeof(hkdf_info) - 1u);
+    if (check_status(st, "psa_key_derivation_input_bytes(INFO verify_key mismatch)") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_verify_key(&op, hkdf_mismatch_key);
+    if (check_true(st == PSA_ERROR_INVALID_SIGNATURE,
+                   "psa_key_derivation_verify_key rejects mismatched value") != TEST_OK) {
+        goto cleanup;
+    }
+    st = psa_key_derivation_abort(&op);
+    if (check_status(st, "psa_key_derivation_abort(HKDF verify_key mismatch)") != TEST_OK) {
         goto cleanup;
     }
     op = psa_key_derivation_operation_init();
@@ -7062,6 +7552,9 @@ cleanup:
     }
     if (hkdf_wrong_type_key != 0) {
         (void)psa_destroy_key(hkdf_wrong_type_key);
+    }
+    if (hkdf_mismatch_key != 0) {
+        (void)psa_destroy_key(hkdf_mismatch_key);
     }
     if (hkdf_verify_key != 0) {
         (void)psa_destroy_key(hkdf_verify_key);
@@ -8195,6 +8688,9 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "hash_compare") == 0) {
         if (run_named_test("hash_compare", test_hash_compare) == TEST_FAIL) return TEST_FAIL;
     }
+    if (only == NULL || strcmp(only, "hash_verify") == 0) {
+        if (run_named_test("hash_verify", test_hash_verify) == TEST_FAIL) return TEST_FAIL;
+    }
     if (only == NULL || strcmp(only, "hash_error_state") == 0) {
         if (run_named_test("hash_error_state",
                            test_hash_error_aborts_operation) == TEST_FAIL) {
@@ -8329,6 +8825,12 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_small_output") == 0) {
         if (run_named_test("cipher_cbc_pkcs7_small_output",
                            test_cipher_cbc_pkcs7_decrypt_update_small_output) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "cipher_cbc_pkcs7_reject_invalid_padding") == 0) {
+        if (run_named_test("cipher_cbc_pkcs7_reject_invalid_padding",
+                           test_cipher_cbc_pkcs7_reject_invalid_padding) == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
@@ -8571,6 +9073,19 @@ int main(int argc, char** argv)
     if (only == NULL || strcmp(only, "asym_verify_bad_signature") == 0) {
         if (run_named_test("asym_verify_bad_signature",
                            test_asym_verify_rejects_bad_signatures) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "rsa_verify_substituted_hash") == 0) {
+        if (run_named_test("rsa_verify_substituted_hash",
+                           test_rsa_verify_rejects_substituted_hashes) == TEST_FAIL) {
+            return TEST_FAIL;
+        }
+    }
+    if (only == NULL || strcmp(only, "rsa_oversized_hash_length") == 0) {
+        if (run_named_test("rsa_oversized_hash_length",
+                           test_rsa_pkcs1v15_rejects_oversized_hash_length)
+                == TEST_FAIL) {
             return TEST_FAIL;
         }
     }
