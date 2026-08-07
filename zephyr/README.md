@@ -36,16 +36,21 @@ auto-selects it (it defaults `y`). It is the symbol that gates every wolfPSA
 source, so it is the one to reference from your own Kconfig (`depends on WOLFPSA`)
 if needed.
 
-`CONFIG_ENTROPY_GENERATOR=y` is enough to have wolfPSA seed the DRBG from the
-platform CSPRNG (`sys_csrand_get`): it pulls in the entropy driver, and
-`CONFIG_CSPRNG_ENABLED` is then `default y`. Avoid `CONFIG_CSPRNG_NEEDED` -- that
-request symbol only exists in Zephyr 4.4+ and aborts the Kconfig parse on 4.3.
+`CONFIG_ENTROPY_GENERATOR=y` pulls in the platform entropy driver, which is what
+the DRBG is seeded from (see below). It also makes `CONFIG_CSPRNG_ENABLED`
+`default y`. Avoid `CONFIG_CSPRNG_NEEDED` -- that request symbol only exists in
+Zephyr 4.4+ and aborts the Kconfig parse on 4.3.
 
 RNG interplay with the wolfSSL module: wolfPSA reuses the single wolfCrypt core
-built by the wolfSSL module, so there is ONE wolfCrypt HashDRBG shared by both --
-not a separate wolfPSA RNG. wolfPSA's boot init registers the Zephyr-CSPRNG seed
-callback so that shared DRBG is seeded from Zephyr's entropy source (the
-platform's hardware TRNG / entropy driver via `sys_csrand_get`).
+built by the wolfSSL module, so there is ONE wolfCrypt Hash-DRBG shared by both --
+not a separate wolfPSA RNG. wolfPSA registers no seed callback and installs no
+boot-time seed hook. The shared Hash-DRBG is seeded on demand by wolfCrypt's own
+`wc_GenerateSeed()`, which on Zephyr reads the hardware entropy driver
+**directly** (`entropy_get_entropy()` on the `zephyr,entropy` chosen node) and
+falls back to `sys_rand_get()` on boards with no chosen node. A dead entropy
+source fails `wc_InitRng()` with `RNG_FAILURE_E` rather than yielding weak
+output. wolfPSA requires the Hash-DRBG itself: `zephyr/zephyr_init.c` has a
+build-time `#error` if `HAVE_HASHDRBG` is missing from your wolfCrypt config.
 
 ## Configuring which crypto wolfPSA exposes
 
@@ -68,13 +73,16 @@ at `zephyr/user_settings_example.h` (opt in with
 it. (Realistic reductions -- dropping asymmetric families, PQC, curves, or
 RSA/ECC -- are supported; dropping the symmetric core is not yet guarded.)
 
-The only wolfCrypt profile wolfPSA imposes is structural, and it is applied
-through generic wolfSSL Kconfig knobs the wolfPSA Kconfig `select`s
-(`WOLFSSL_HASH_DRBG`, `WOLFSSL_RNG_SEED_CB`, and `WOLFSSL_SINGLE_THREADED` on a
-no-threads kernel) -- the wolfSSL module stays entirely wolfPSA-unaware, and
-`WOLFSSL_PSA_ENGINE` is defined only for wolfPSA's own sources. `WOLFSSL_CRYPTO_ONLY`
-is NOT among them: crypto-only versus TLS coexistence is a user choice (see below),
-not a wolfPSA requirement.
+wolfPSA imposes **no** wolfCrypt feature knobs of its own: its Kconfig `select`s
+nothing crypto-config-wise, and the structural profile it needs (a Hash-DRBG, and
+single-threaded wolfCrypt on a no-threads kernel) already comes from the wolfSSL
+module's own Kconfig and `user_settings.h` defaults. The wolfSSL module stays
+entirely wolfPSA-unaware, and `WOLFSSL_PSA_ENGINE` is defined only for wolfPSA's
+own sources. `WOLFCRYPT_ONLY` is likewise untouched: crypto-only versus TLS
+coexistence is a user choice (see below), not a wolfPSA requirement. The one hard
+requirement, `HAVE_HASHDRBG`, is enforced by a build-time `#error` rather than by
+a `select`, so a config missing it fails loudly instead of being silently
+overridden.
 
 ### Coexisting with the wolfSSL TLS stack
 
