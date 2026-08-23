@@ -120,6 +120,7 @@ jobs:
           psa_cipher_oneshot_len_test
           psa_pqc_export_seed_test
           psa_key_declared_bits_test
+          psa_devid_cryptocb_test
 
       - name: Run PSA API tests
         env:
@@ -161,7 +162,8 @@ jobs:
                    psa_key_infer_bits_test \
                    psa_cipher_oneshot_len_test \
                    psa_pqc_export_seed_test \
-                   psa_key_declared_bits_test; do
+                   psa_key_declared_bits_test \
+                   psa_devid_cryptocb_test; do
             echo "=== $t ==="
             rm -rf test/.store
             ./test/$t

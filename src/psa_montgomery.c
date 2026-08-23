@@ -76,17 +76,29 @@ psa_status_t psa_asymmetric_generate_key_x25519(psa_key_type_t key_type,
     priv_len = (word32)private_key_size;
     pub_len = (word32)public_key_size;
 
-    ret = wc_curve25519_init(&key);
+    ret = wc_curve25519_init_ex(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&key);
         return wc_error_to_psa_status(ret);
     }
 
     ret = wc_curve25519_make_key(&rng, CURVE25519_KEYSIZE, &key);
+    /* An offload device may report success while keeping the scalar, which
+     * leaves privSet clear. wc_curve25519_export_private_raw_ex() refuses
+     * that, but only as ECC_BAD_ARG_E, which maps to
+     * PSA_ERROR_INVALID_ARGUMENT and blames the caller for a device fault.
+     * Report it the way the ECC path does. The device still holds a key this
+     * path cannot reclaim, so an integrator whose backend keeps the scalar
+     * has to free the backend slot itself. */
+    if ((ret == 0) && (!key.privSet)) {
+        wc_FreeRng(&rng);
+        wc_curve25519_free(&key);
+        return PSA_ERROR_HARDWARE_FAILURE;
+    }
     if (ret == 0) {
         ret = wc_curve25519_export_private_raw_ex(&key, private_key,
                                                   &priv_len,
@@ -196,17 +208,17 @@ psa_status_t psa_asymmetric_key_agreement_x25519(
     }
     out_len = (word32)output_size;
 
-    ret = wc_curve25519_init(&priv);
+    ret = wc_curve25519_init_ex(&priv, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_curve25519_init(&pub);
+    ret = wc_curve25519_init_ex(&pub, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&priv);
         return wc_error_to_psa_status(ret);
     }
 #ifdef WOLFSSL_CURVE25519_BLINDING
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&pub);
         wc_curve25519_free(&priv);
@@ -287,7 +299,7 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve448_free(&key);
         return wc_error_to_psa_status(ret);

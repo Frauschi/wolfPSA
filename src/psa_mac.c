@@ -294,15 +294,19 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_HmacSetKey(&ctx->ctx.hmac, hash_type, key_data,
-                            (word32)key_data_length);
+        ret = wc_HmacInit(&ctx->ctx.hmac, NULL, wolfPSA_GetDefaultDevID());
+        if (ret == 0) {
+            ret = wc_HmacSetKey(&ctx->ctx.hmac, hash_type, key_data,
+                                (word32)key_data_length);
+        }
         ctx->type = WOLFPSA_MAC_HMAC;
     }
 #ifdef WOLFSSL_CMAC
     else if (PSA_ALG_IS_BLOCK_CIPHER_MAC(alg) &&
              PSA_ALG_FULL_LENGTH_MAC(alg) == PSA_ALG_CMAC) {
-        ret = wc_InitCmac(&ctx->ctx.cmac, key_data, (word32)key_data_length,
-                          WC_CMAC_AES, NULL);
+        ret = wc_InitCmac_ex(&ctx->ctx.cmac, key_data,
+                             (word32)key_data_length, WC_CMAC_AES, NULL, NULL,
+                             wolfPSA_GetDefaultDevID());
         ctx->type = WOLFPSA_MAC_CMAC;
     }
 #endif

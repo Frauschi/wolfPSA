@@ -1405,12 +1405,12 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         }
     }
 
-    ret = wc_ecc_init(&priv);
+    ret = wc_ecc_init_ex(&priv, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_ecc_init(&pub);
+    ret = wc_ecc_init_ex(&pub, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ecc_free(&priv);
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);

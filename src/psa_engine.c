@@ -34,18 +34,33 @@
 #include <wolfssl/wolfcrypt/cryptocb.h>
 
 /* Runtime-settable devId threaded through every wolfPSA-internal
- * wc_*Init()/wc_NewRsaKey() call. INVALID_DEVID (the default) keeps
- * the original behaviour: wolfCrypt runs the operation locally. */
+ * wc_*Init()/wc_NewRsaKey() call. INVALID_DEVID means no wolfPSA-specific
+ * choice has been made, which defers to wolfCrypt's own device selection. */
 static int wolfPSA_default_devid = INVALID_DEVID;
+
+/* Distinguishes "never configured", which defers to wolfCrypt, from an
+ * explicit INVALID_DEVID, which is how a caller forces local execution. */
+static int wolfPSA_devid_configured = 0;
 
 int wolfPSA_SetDefaultDevID(int devId)
 {
     wolfPSA_default_devid = devId;
+    wolfPSA_devid_configured = 1;
     return 0;
 }
 
 int wolfPSA_GetDefaultDevID(void)
 {
+#ifdef WOLF_CRYPTO_CB
+    /* Several wolfCrypt initializers (the SHA-2 family, and wc_ecc_init or
+     * wc_InitCmac on CAAM targets) pick a device themselves rather than
+     * defaulting to INVALID_DEVID. Deferring to the same selection keeps a
+     * caller that never sets a wolfPSA devId on the behaviour it had before
+     * wolfPSA started passing one. */
+    if (!wolfPSA_devid_configured) {
+        return wc_CryptoCb_DefaultDevID();
+    }
+#endif
     return wolfPSA_default_devid;
 }
 
