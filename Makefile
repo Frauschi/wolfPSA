@@ -28,6 +28,7 @@ WOLFCRYPT_SRC := \
 	$(WOLFSSL_PATH)/wolfcrypt/src/cmac.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/coding.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/cpuid.c \
+	$(WOLFSSL_PATH)/wolfcrypt/src/cryptocb.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/curve25519.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/curve448.c \
 	$(WOLFSSL_PATH)/wolfcrypt/src/des3.c \
@@ -86,6 +87,7 @@ ifneq ($(strip $(PSA_INCLUDE)),)
 CPPFLAGS += -I$(PSA_INCLUDE)
 endif
 
+DEPFLAGS := -MMD -MP
 CFLAGS ?= -O2
 WARNFLAGS ?= -Wall -Wextra -Werror
 CFLAGS += $(WARNFLAGS)
@@ -119,19 +121,22 @@ $(SHLIBNAME): $(OBJ_PIC) $(WOLFCRYPT_OBJ_PIC) $(EXPORT_MAP)
 
 $(OBJDIR)/%.o: src/%.c
 	@mkdir -p $(OBJDIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 	@mkdir -p $(OBJDIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR_PIC)/%.o: src/%.c
 	@mkdir -p $(OBJDIR_PIC)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
 
 $(OBJDIR_PIC)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 	@mkdir -p $(OBJDIR_PIC)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
 
 clean:
 	rm -rf $(BUILD_DIR) $(LIBNAME) $(SHLIBNAME)
+
+-include $(OBJ:.o=.d) $(WOLFCRYPT_OBJ:.o=.d)
+-include $(OBJ_PIC:.o=.d) $(WOLFCRYPT_OBJ_PIC:.o=.d)

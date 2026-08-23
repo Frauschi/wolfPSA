@@ -35,3 +35,6 @@ CLAUDE.md
 # Real-hardware board configs are kept local, not in-tree (CI is native_sim only)
 zephyr/**/boards/nucleo_*.conf
 zephyr/**/boards/nucleo_*.overlay
+/test/psa_devid_cryptocb_test
+/test/build-cryptocb
+/test/build-cryptocb-asan

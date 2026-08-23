@@ -65,6 +65,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     size_t raw_sig_len;
     byte* der_sig = NULL;
     byte* rs = NULL;
+    int devId;
     
     /* Check if key type is ECC key pair */
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
@@ -89,14 +90,32 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     
+    /* wc_ecc_set_deterministic_ex() only steers the software signer, and the
+     * crypto callback contract carries no deterministic flag, so an offloaded
+     * sign would silently return a randomized signature. Keep the RFC 6979
+     * guarantee PSA_ALG_DETERMINISTIC_ECDSA makes and stay local. */
+    devId = wolfPSA_GetDefaultDevID();
+    if (PSA_ALG_IS_DETERMINISTIC_ECDSA(alg)) {
+#ifdef WOLF_CRYPTO_CB_ONLY_ECC
+        /* No software signer to stay local on, so the guarantee cannot be
+         * met at all. Say so rather than fail later as NO_VALID_DEVID. */
+        return PSA_ERROR_NOT_SUPPORTED;
+#else
+        devId = INVALID_DEVID;
+#endif
+    }
+
     /* Initialize ECC key */
-    ret = wc_ecc_init(&ecc);
+    ret = wc_ecc_init_ex(&ecc, NULL, devId);
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
     
-    /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    /* Initialize RNG. The same devId as the signer: k is already derived by
+     * the time any signer runs, so this RNG only blinds, but a deterministic
+     * sign should not depend on a device RNG the pin above just opted out
+     * of. */
+    ret = wc_InitRng_ex(&rng, NULL, devId);
     if (ret != 0) {
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
@@ -238,7 +257,7 @@ psa_status_t psa_asymmetric_verify_ecc(psa_key_type_t key_type,
     }
     
     /* Initialize ECC key */
-    ret = wc_ecc_init(&ecc);
+    ret = wc_ecc_init_ex(&ecc, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -336,13 +355,13 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
     }
     
     /* Initialize ECC key */
-    ret = wc_ecc_init(&ecc);
+    ret = wc_ecc_init_ex(&ecc, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
     
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ecc_free(&ecc);
         return wc_error_to_psa_status(ret);
@@ -368,6 +387,19 @@ psa_status_t psa_asymmetric_generate_key_ecc(psa_key_type_t key_type,
         wc_FreeRng(&rng);
         wc_ecc_free(&ecc);
         return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
+    /* An offload device may keep the scalar and leave ecc.k at zero, which
+     * mp_to_unsigned_bin_len() would happily export as an all-zero private
+     * key. wolfCrypt's own exporters reject that, so check the same way.
+     * wc_ecc_make_key_ex() has already succeeded here, so a device holds a
+     * key this path cannot reclaim: wc_ecc_free() releases the software
+     * struct only, and wolfPSA has no opaque-key model to destroy the device
+     * copy through. An integrator whose backend keeps the scalar has to free
+     * the backend slot itself. */
+    if (ecc.type != ECC_PRIVATEKEY) {
+        wc_FreeRng(&rng);
+        wc_ecc_free(&ecc);
+        return PSA_ERROR_HARDWARE_FAILURE;
     }
     ret = mp_to_unsigned_bin_len(ecc.k, private_key, priv_len);
     if (ret != MP_OKAY) {
@@ -424,7 +456,7 @@ psa_status_t psa_asymmetric_export_public_key_ecc(psa_key_type_t key_type,
     }
     
     /* Initialize ECC key */
-    ret = wc_ecc_init(&ecc);
+    ret = wc_ecc_init_ex(&ecc, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

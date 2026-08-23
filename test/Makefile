@@ -120,7 +120,7 @@ PSA_ECC_CURVE_ID_TEST_DEPS = $(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_asymmetric.o \
 	$(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_pq.o
 PSA_RSA_PSS_TEST_OBJS = psa_server/psa_rsa_pss_interop_test.o
 
-.PHONY: all clean rebuild-wolfssl-psa require-wolfssl-lib
+.PHONY: all clean rebuild-wolfssl-psa require-wolfssl-lib FORCE
 
 all: info $(BINARIES)
 
@@ -174,6 +174,36 @@ psa_tls_client:
 	make -C psa_server/tls_client
 	cp psa_server/tls_client/psa_tls_client ./psa_tls_client
 
+# devId crypto-callback coverage. wolfCrypt compiles its callback dispatch out
+# unless WOLF_CRYPTO_CB is defined, and this test reads wolfCrypt structures
+# directly, so it links against a dedicated library built from the repository
+# user_settings.h with that knob enabled instead of the shared libwolfpsa.
+CRYPTOCB_BUILD_DIR := $(abspath .)/build-cryptocb$(if $(SANITIZE_FLAGS),-asan)
+CRYPTOCB_LIB := $(CRYPTOCB_BUILD_DIR)/libwolfpsa-cryptocb.a
+CRYPTOCB_CPPFLAGS := -DWOLFSSL_USER_SETTINGS -DWOLF_CRYPTO_CB \
+	-I$(abspath $(WOLFSSL_PATH)) -I$(WOLFPSA_ABS) -I$(WOLFPSA_ABS)/wolfpsa \
+	-I$(WOLFPSA_ABS)/src
+
+# FORCE, because only the sub-make knows whether a library source changed.
+# Without it make treats the existing archive as permanently up to date and
+# the test relinks against a stale copy of the code it is meant to guard.
+$(CRYPTOCB_LIB): FORCE
+	$(MAKE) -C $(WOLFPSA_PATH) $@ \
+		LIBNAME=$@ \
+		BUILD_DIR=$(CRYPTOCB_BUILD_DIR) \
+		WOLFSSL_PATH=$(abspath $(WOLFSSL_PATH)) \
+		WOLFSSL_CPPFLAGS="-DWOLFSSL_USER_SETTINGS -DWOLF_CRYPTO_CB" \
+		CFLAGS="$(CFLAGS)" \
+		LDFLAGS="$(SANITIZE_FLAGS)"
+
+FORCE:
+
+# FORCE here too: the archive is scoped per sanitizer setting but this binary
+# is not, so without it an ASAN build left behind stays "up to date".
+psa_devid_cryptocb_test: psa_server/psa_devid_cryptocb_test.c $(CRYPTOCB_LIB) FORCE
+	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
+		$(SANITIZE_FLAGS) -lpthread -lm
+
 wolfcrypt-psa-benchmark:
 	make -C wolfcrypt-benchmark
 	cp wolfcrypt-benchmark/wolfcrypt-psa-benchmark ./wolfcrypt-psa-benchmark
@@ -198,10 +228,10 @@ rebuild-wolfssl-psa: $(WOLFPSA_PATH)/libwolfpsa.so
 		--with-psa-include="$(WOLFPSA_ABS)/wolfpsa" \
 		--with-psa-lib="$(WOLFPSA_ABS)" \
 		--with-psa-lib-name=wolfpsa \
-		CFLAGS="$(DEBUG_FLAGS) $(SANITIZE_FLAGS)" \
+		CFLAGS="-O2 $(DEBUG_FLAGS) $(SANITIZE_FLAGS)" \
 		CPPFLAGS="-DWOLFSSL_PSA_NO_RNG -DWOLFSSL_PSA_NO_HASH -DWOLFSSL_PSA_NO_AES" \
 		LDFLAGS="$(SANITIZE_FLAGS) -Wl,-rpath,$(WOLFPSA_ABS) -Wl,-rpath-link,$(WOLFPSA_ABS)"
-	$(MAKE) -C "$(WOLFSSL_PATH)" CFLAGS="$(DEBUG_FLAGS) $(SANITIZE_FLAGS)" LDFLAGS="$(SANITIZE_FLAGS) -Wl,-rpath,$(WOLFPSA_ABS) -Wl,-rpath-link,$(WOLFPSA_ABS)" src/libwolfssl.la
+	$(MAKE) -C "$(WOLFSSL_PATH)" CFLAGS="-O2 $(DEBUG_FLAGS) $(SANITIZE_FLAGS)" LDFLAGS="$(SANITIZE_FLAGS) -Wl,-rpath,$(WOLFPSA_ABS) -Wl,-rpath-link,$(WOLFPSA_ABS)" src/libwolfssl.la
 
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
@@ -210,4 +240,5 @@ clean:
 	make -C psa_server/tls_client clean
 	make -C wolfcrypt-benchmark clean
 	rm -f psa_server/*.o
-	rm -f $(BINARIES) *.o *.log
+	rm -rf $(abspath .)/build-cryptocb $(abspath .)/build-cryptocb-asan
+	rm -f $(BINARIES) psa_devid_cryptocb_test *.o *.log

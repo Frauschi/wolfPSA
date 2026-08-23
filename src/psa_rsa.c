@@ -155,7 +155,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -168,7 +168,7 @@ psa_status_t psa_asymmetric_sign_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_FreeRsaKey(&rsa_key);
         return wc_error_to_psa_status(ret);
@@ -296,7 +296,7 @@ psa_status_t psa_asymmetric_verify_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -500,7 +500,7 @@ psa_status_t psa_asymmetric_encrypt_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -520,7 +520,7 @@ psa_status_t psa_asymmetric_encrypt_rsa(psa_key_type_t key_type,
     }
 
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_FreeRsaKey(&rsa_key);
         return wc_error_to_psa_status(ret);
@@ -610,7 +610,7 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
     }
 
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -625,7 +625,7 @@ psa_status_t psa_asymmetric_decrypt_rsa(psa_key_type_t key_type,
 #ifdef WC_RSA_BLINDING
     /* RSA blinding requires an RNG associated with the key. Unlike the signing
      * routines, wc_RsaPrivateDecrypt() takes no RNG argument, so set it here. */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_FreeRsaKey(&rsa_key);
         return wc_error_to_psa_status(ret);
@@ -722,13 +722,13 @@ psa_status_t psa_asymmetric_generate_key_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
     
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_FreeRsaKey(&rsa_key);
         return wc_error_to_psa_status(ret);
@@ -801,7 +801,7 @@ psa_status_t psa_asymmetric_export_public_key_rsa(psa_key_type_t key_type,
     }
     
     /* Initialize RSA key */
-    ret = wc_InitRsaKey(&rsa_key, NULL);
+    ret = wc_InitRsaKey_ex(&rsa_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

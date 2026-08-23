@@ -104,7 +104,7 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -205,7 +205,7 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -283,13 +283,13 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     }
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
 
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ed25519_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -301,6 +301,19 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
         wc_FreeRng(&rng);
         wc_ed25519_free(&ed_key);
         return wc_error_to_psa_status(ret);
+    }
+
+    /* An offload device may report success while keeping the scalar, which
+     * leaves privKeySet clear. wc_ed25519_export_private_only() refuses that,
+     * but only as BAD_FUNC_ARG, which maps to PSA_ERROR_INVALID_ARGUMENT and
+     * blames the caller for a device fault. Report it the way the ECC path
+     * does. The device still holds a key this path cannot reclaim, so an
+     * integrator whose backend keeps the scalar has to free the backend slot
+     * itself. */
+    if (!ed_key.privKeySet) {
+        wc_FreeRng(&rng);
+        wc_ed25519_free(&ed_key);
+        return PSA_ERROR_HARDWARE_FAILURE;
     }
 
     /* Export private key */
@@ -355,7 +368,7 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
     }
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -447,7 +460,7 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -541,7 +554,7 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -615,13 +628,13 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     }
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
 
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ed448_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -634,6 +647,13 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
         wc_ed448_free(&ed_key);
         return wc_error_to_psa_status(ret);
     }
+
+    /* Deliberately no privKeySet check here, unlike the Ed25519 path above.
+     * ed448.c dispatches Sign and Verify only, so wc_ed448_make_key() has no
+     * crypto callback to offload to and always sets privKeySet on success.
+     * Passing a devId to wc_ed448_init_ex() does not change that: an
+     * initializer that accepts a devId is not the same as a dispatch. Add the
+     * check if wolfCrypt ever gains a WC_PK_TYPE_ED448_KEYGEN. */
 
     /* Export private key */
     priv_len32 = (word32)private_key_size;
@@ -687,7 +707,7 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
     }
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

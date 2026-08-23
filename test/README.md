@@ -13,6 +13,15 @@ This directory contains standalone tests and demos for wolfPSA integration.
     PSA-backed code paths via `WOLFSSL_HAVE_PSA`.
   - Source: `wolfcrypt-benchmark/main.c` (build uses local wolfCrypt sources).
 
+- `psa_devid_cryptocb_test`
+  - Checks that every algorithm family reaches a registered crypto callback,
+    both through wolfCrypt's own device selection and through an explicit
+    `wolfPSA_SetDefaultDevID()`, and that an explicit `INVALID_DEVID` keeps
+    every operation local.
+  - Links against its own `WOLF_CRYPTO_CB` build of the library, so it needs no
+    prebuilt wolfSSL.
+  - Source: `psa_server/psa_devid_cryptocb_test.c`
+
 - `psa_tls_server` + `psa_tls_client`
   - TLS server built with wolfPSA, and a static client built from wolfSSL
     sources (`psa_server/tls_client`).

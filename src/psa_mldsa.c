@@ -305,7 +305,7 @@ psa_status_t wolfpsa_mldsa_sign(size_t bits, const uint8_t *key_data,
         /* Signing over the raw message. */
         if (alg == PSA_ALG_ML_DSA) {
             /* Hedged: requires an RNG. */
-            ret = wc_InitRng(&rng);
+            ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
             if (ret != 0) {
                 wc_MlDsaKey_Free(&key);
                 return wc_error_to_psa_status(ret);
@@ -351,7 +351,7 @@ psa_status_t wolfpsa_mldsa_sign(size_t bits, const uint8_t *key_data,
                 wc_MlDsaKey_Free(&key);
                 return PSA_ERROR_NOT_SUPPORTED;
             }
-            ret = wc_InitRng(&rng);
+            ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
             if (ret != 0) {
                 wc_MlDsaKey_Free(&key);
                 return wc_error_to_psa_status(ret);

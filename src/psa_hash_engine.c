@@ -400,36 +400,43 @@ psa_status_t psa_hash_setup(psa_hash_operation_t *operation,
 #endif
 #ifndef NO_SHA
         case PSA_ALG_SHA_1:
-            ret = wc_InitSha(&ctx->ctx.sha1);
+            ret = wc_InitSha_ex(&ctx->ctx.sha1, NULL,
+                                wolfPSA_GetDefaultDevID());
             break;
 #endif
 #ifndef NO_SHA256
         case PSA_ALG_SHA_256:
-            ret = wc_InitSha256(&ctx->ctx.sha256);
+            ret = wc_InitSha256_ex(&ctx->ctx.sha256, NULL,
+                                   wolfPSA_GetDefaultDevID());
             break;
 #endif
 #ifdef WOLFSSL_SHA224
         case PSA_ALG_SHA_224:
-            ret = wc_InitSha224(&ctx->ctx.sha224);
+            ret = wc_InitSha224_ex(&ctx->ctx.sha224, NULL,
+                                   wolfPSA_GetDefaultDevID());
             break;
 #endif
 #ifdef WOLFSSL_SHA384
         case PSA_ALG_SHA_384:
-            ret = wc_InitSha384(&ctx->ctx.sha384);
+            ret = wc_InitSha384_ex(&ctx->ctx.sha384, NULL,
+                                   wolfPSA_GetDefaultDevID());
             break;
 #endif
 #ifdef WOLFSSL_SHA512
         case PSA_ALG_SHA_512:
-            ret = wc_InitSha512(&ctx->ctx.sha512);
+            ret = wc_InitSha512_ex(&ctx->ctx.sha512, NULL,
+                                   wolfPSA_GetDefaultDevID());
             break;
 #if !defined(WOLFSSL_NOSHA512_224)
         case PSA_ALG_SHA_512_224:
-            ret = wc_InitSha512_224(&ctx->ctx.sha512);
+            ret = wc_InitSha512_224_ex(&ctx->ctx.sha512, NULL,
+                                       wolfPSA_GetDefaultDevID());
             break;
 #endif
 #if !defined(WOLFSSL_NOSHA512_256)
         case PSA_ALG_SHA_512_256:
-            ret = wc_InitSha512_256(&ctx->ctx.sha512);
+            ret = wc_InitSha512_256_ex(&ctx->ctx.sha512, NULL,
+                                       wolfPSA_GetDefaultDevID());
             break;
 #endif
 #endif
