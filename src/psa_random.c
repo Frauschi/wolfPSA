@@ -61,7 +61,7 @@ psa_status_t psa_generate_random(uint8_t *output, size_t output_size)
     wolfpsa_trace("psa_generate_random(%zu)", output_size);
     
     /* Initialize the RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

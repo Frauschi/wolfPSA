@@ -104,7 +104,7 @@ psa_status_t psa_asymmetric_sign_ed25519(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -205,7 +205,7 @@ psa_status_t psa_asymmetric_verify_ed25519(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -283,13 +283,13 @@ psa_status_t psa_asymmetric_generate_key_ed25519(psa_key_type_t key_type,
     }
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
 
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ed25519_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -355,7 +355,7 @@ psa_status_t psa_asymmetric_export_public_key_ed25519(psa_key_type_t key_type,
     }
 
     /* Initialize ED25519 key */
-    ret = wc_ed25519_init(&ed_key);
+    ret = wc_ed25519_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -447,7 +447,7 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -541,7 +541,7 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
     ctx_len = (byte)context_length;
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -615,13 +615,13 @@ psa_status_t psa_asymmetric_generate_key_ed448(psa_key_type_t key_type,
     }
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
 
     /* Initialize RNG */
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_ed448_free(&ed_key);
         return wc_error_to_psa_status(ret);
@@ -687,7 +687,7 @@ psa_status_t psa_asymmetric_export_public_key_ed448(psa_key_type_t key_type,
     }
 
     /* Initialize ED448 key */
-    ret = wc_ed448_init(&ed_key);
+    ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }

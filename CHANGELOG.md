@@ -56,6 +56,24 @@ wolfSSL master.
 - `psa_purge_key()`: confirms a key exists and reports its status (wolfPSA
   keeps no in-RAM cache of persistent key material, so there is nothing to
   evict).
+- Crypto callback offload: `wolfPSA_SetDefaultDevID()` now reaches every
+  algorithm whose wolfCrypt initializer accepts a devId, adding RSA, ECC,
+  Ed25519, Ed448, X25519, AES-KW, CMAC, HKDF, PBKDF2, the RNG and the
+  SHA-1/SHA-2 families to the coverage. X448, RIPEMD-160, MD5, Ascon and
+  ChaCha20-Poly1305 stay local, either because wolfCrypt exposes no devId
+  for them or because it ignores the one it accepts. Leaving the default at
+  INVALID_DEVID now defers to `wc_CryptoCb_DefaultDevID()`, so a build that
+  relied on wolfCrypt selecting a device by itself (CAAM, `WC_USE_DEVID`, or
+  the first registered device) keeps that behaviour; calling
+  `wolfPSA_SetDefaultDevID(INVALID_DEVID)` explicitly forces local execution
+  instead. PSA_ALG_DETERMINISTIC_ECDSA always signs locally, because the
+  crypto callback contract cannot express the RFC 6979 requirement.
+  `cryptocb.c` is part of the build so a library can be compiled with
+  `WOLF_CRYPTO_CB`.
+- Fixed: the HMAC path of `psa_mac_*` never called `wc_HmacInit()`, so the
+  operation ran with devId 0 instead of the configured default. A crypto
+  callback registered on device 0 captured wolfPSA's HMACs while every
+  other algorithm stayed local.
 - Optional thread-safe key store: with `WOLFPSA_THREAD_SAFE` a single mutex
   built on wolfCrypt's portable `wc_*Mutex` API (created in `psa_crypto_init()`)
   guards the volatile-key list and id counter for concurrent PSA callers; a

@@ -44,6 +44,7 @@ jobs:
           psa_ascon_xchacha_test
           psa_sp800_108_test
           psa_14_misc_test
+          psa_devid_cryptocb_test
 
       - name: Run PSA API tests
         env:
@@ -63,7 +64,8 @@ jobs:
                    psa_lms_xmss_verify_test \
                    psa_ascon_xchacha_test \
                    psa_sp800_108_test \
-                   psa_14_misc_test; do
+                   psa_14_misc_test \
+                   psa_devid_cryptocb_test; do
             echo "=== $t ==="
             rm -rf test/.store
             ./test/$t

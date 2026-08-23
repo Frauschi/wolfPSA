@@ -57,7 +57,7 @@ WOLFSSL_LOCAL_SYMBOLS := $(if $(WOLFSSL_LOCAL_LIB),$(shell \
 	$(NM) $(WOLFSSL_LOCAL_LIB) 2>/dev/null))
 WOLFSSL_HAS_PSA_TLS := $(findstring wolfSSL_CTX_psa_enable,$(WOLFSSL_LOCAL_SYMBOLS))
 
-BINARIES = psa_api_test psa_crypto_init_test psa_des3_stack_scrub_test psa_ecc_bit_inference_test psa_ecc_curve_id_test psa_random_size_test psa_rsa_pss_interop_test psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test psa_sp800_108_test psa_14_misc_test psa_tls_client wolfcrypt-psa-benchmark
+BINARIES = psa_api_test psa_crypto_init_test psa_des3_stack_scrub_test psa_ecc_bit_inference_test psa_ecc_curve_id_test psa_random_size_test psa_rsa_pss_interop_test psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test psa_sp800_108_test psa_14_misc_test psa_devid_cryptocb_test psa_tls_client wolfcrypt-psa-benchmark
 
 # PSA 1.4 coverage tests: one self-contained binary per feature area, all
 # built from psa_server/<name>.c with the default link recipe.
@@ -123,6 +123,32 @@ psa_tls_client:
 	make -C psa_server/tls_client
 	cp psa_server/tls_client/psa_tls_client ./psa_tls_client
 
+# devId crypto-callback coverage. wolfCrypt compiles its callback dispatch out
+# unless WOLF_CRYPTO_CB is defined, and this test reads wolfCrypt structures
+# directly, so it links against a dedicated library built from the repository
+# user_settings.h with that knob enabled instead of the shared libwolfpsa.
+CRYPTOCB_BUILD_DIR := $(abspath .)/build-cryptocb
+CRYPTOCB_LIB := $(CRYPTOCB_BUILD_DIR)/libwolfpsa-cryptocb.a
+CRYPTOCB_CPPFLAGS := -DWOLFSSL_USER_SETTINGS -DWOLF_CRYPTO_CB \
+	-I$(abspath $(WOLFSSL_PATH)) -I$(WOLFPSA_ABS) -I$(WOLFPSA_ABS)/wolfpsa \
+	-I$(WOLFPSA_ABS)/src
+
+# FORCE, because only the sub-make knows whether a library source changed.
+# Without it make treats the existing archive as permanently up to date and
+# the test relinks against a stale copy of the code it is meant to guard.
+$(CRYPTOCB_LIB): FORCE
+	$(MAKE) -C $(WOLFPSA_PATH) $@ \
+		LIBNAME=$@ \
+		BUILD_DIR=$(CRYPTOCB_BUILD_DIR) \
+		WOLFSSL_PATH=$(abspath $(WOLFSSL_PATH)) \
+		WOLFSSL_CPPFLAGS="-DWOLFSSL_USER_SETTINGS -DWOLF_CRYPTO_CB"
+
+FORCE:
+
+psa_devid_cryptocb_test: psa_server/psa_devid_cryptocb_test.c $(CRYPTOCB_LIB)
+	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
+		$(SANITIZE_FLAGS) -lpthread -lm
+
 wolfcrypt-psa-benchmark:
 	make -C wolfcrypt-benchmark
 	cp wolfcrypt-benchmark/wolfcrypt-psa-benchmark ./wolfcrypt-psa-benchmark
@@ -159,4 +185,5 @@ clean:
 	make -C psa_server/tls_client clean
 	make -C wolfcrypt-benchmark clean
 	rm -f psa_server/*.o
+	rm -rf $(CRYPTOCB_BUILD_DIR)
 	rm -f $(BINARIES) *.o *.log

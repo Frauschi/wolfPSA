@@ -873,20 +873,22 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
         }
         if (output_length < (size_t)hash_len) {
             uint8_t tmp[WC_MAX_DIGEST_SIZE];
-            ret = wc_HKDF_Extract(hash_type,
-                                  ctx->salt, (word32)ctx->salt_length,
-                                  ctx->secret, (word32)ctx->secret_length,
-                                  tmp);
+            ret = wc_HKDF_Extract_ex(hash_type,
+                                     ctx->salt, (word32)ctx->salt_length,
+                                     ctx->secret, (word32)ctx->secret_length,
+                                     tmp, NULL,
+                                     wolfPSA_GetDefaultDevID());
             if (ret == 0) {
                 XMEMCPY(output, tmp, output_length);
             }
             wc_ForceZero(tmp, sizeof(tmp));
             return ret == 0 ? PSA_SUCCESS : wc_error_to_psa_status(ret);
         }
-        ret = wc_HKDF_Extract(hash_type,
-                              ctx->salt, (word32)ctx->salt_length,
-                              ctx->secret, (word32)ctx->secret_length,
-                              prk);
+        ret = wc_HKDF_Extract_ex(hash_type,
+                                 ctx->salt, (word32)ctx->salt_length,
+                                 ctx->secret, (word32)ctx->secret_length,
+                                 prk, NULL,
+                                 wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             wc_ForceZero(prk, (size_t)hash_len);
             return wc_error_to_psa_status(ret);
@@ -903,10 +905,11 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
             (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        ret = wc_HKDF_Expand(hash_type,
-                             ctx->secret, (word32)ctx->secret_length,
-                             ctx->info, (word32)ctx->info_length,
-                             output, (word32)output_length);
+        ret = wc_HKDF_Expand_ex(hash_type,
+                                ctx->secret, (word32)ctx->secret_length,
+                                ctx->info, (word32)ctx->info_length,
+                                output, (word32)output_length, NULL,
+                                wolfPSA_GetDefaultDevID());
         return ret == 0 ? PSA_SUCCESS : wc_error_to_psa_status(ret);
     }
 
@@ -924,20 +927,22 @@ static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
             (wolfpsa_check_word32_length(output_length) != PSA_SUCCESS)) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        ret = wc_HKDF_Extract(hash_type,
-                              ctx->salt, (word32)ctx->salt_length,
-                              ctx->secret, (word32)ctx->secret_length,
-                              prk);
+        ret = wc_HKDF_Extract_ex(hash_type,
+                                 ctx->salt, (word32)ctx->salt_length,
+                                 ctx->secret, (word32)ctx->secret_length,
+                                 prk, NULL,
+                                 wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             status = wc_error_to_psa_status(ret);
             wc_ForceZero(prk, sizeof(prk));
             return status;
         }
 
-        ret = wc_HKDF_Expand(hash_type,
-                             prk, (word32)hash_len,
-                             ctx->info, (word32)ctx->info_length,
-                             output, (word32)output_length);
+        ret = wc_HKDF_Expand_ex(hash_type,
+                                prk, (word32)hash_len,
+                                ctx->info, (word32)ctx->info_length,
+                                output, (word32)output_length, NULL,
+                                wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             status = wc_error_to_psa_status(ret);
             wc_ForceZero(prk, sizeof(prk));
@@ -1083,9 +1088,10 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             output_length > (size_t)INT_MAX) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        ret = wc_PBKDF2(output, password, (int)ctx->password_length,
-                        salt, (int)ctx->salt_length,
-                        (int)ctx->cost, (int)output_length, hash_type);
+        ret = wc_PBKDF2_ex(output, password, (int)ctx->password_length,
+                           salt, (int)ctx->salt_length,
+                           (int)ctx->cost, (int)output_length, hash_type,
+                           NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -1115,9 +1121,11 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         }
 
         XMEMSET(zero_key, 0, sizeof(zero_key));
-        ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
-                          WC_CMAC_AES, NULL);
+        ret = wc_InitCmac_ex(&cmac, zero_key, (word32)sizeof(zero_key),
+                             WC_CMAC_AES, NULL, NULL,
+                             wolfPSA_GetDefaultDevID());
         if (ret != 0) {
+            wc_CmacFree(&cmac);
             status = wc_error_to_psa_status(ret);
             goto cleanup;
         }
@@ -1155,9 +1163,11 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             block_input[ctx->salt_length + 2] = (uint8_t)((i >> 8) & 0xff);
             block_input[ctx->salt_length + 3] = (uint8_t)(i & 0xff);
 
-            ret = wc_InitCmac(&cmac, prf_key, (word32)sizeof(prf_key),
-                              WC_CMAC_AES, NULL);
+            ret = wc_InitCmac_ex(&cmac, prf_key, (word32)sizeof(prf_key),
+                                 WC_CMAC_AES, NULL, NULL,
+                                 wolfPSA_GetDefaultDevID());
             if (ret != 0) {
+                wc_CmacFree(&cmac);
                 status = wc_error_to_psa_status(ret);
                 goto cleanup;
             }
@@ -1175,9 +1185,11 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
 
             XMEMCPY(t_block, u_block, WC_AES_BLOCK_SIZE);
             for (j = 1; j < ctx->cost; j++) {
-                ret = wc_InitCmac(&cmac, prf_key, (word32)sizeof(prf_key),
-                                  WC_CMAC_AES, NULL);
+                ret = wc_InitCmac_ex(&cmac, prf_key, (word32)sizeof(prf_key),
+                                     WC_CMAC_AES, NULL, NULL,
+                                     wolfPSA_GetDefaultDevID());
                 if (ret != 0) {
+                    wc_CmacFree(&cmac);
                     status = wc_error_to_psa_status(ret);
                     goto cleanup;
                 }
@@ -1441,9 +1453,11 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
     L_buf[3] = (uint8_t)( L_bits_lo        & 0xff);
 
     /* --- compute K_0 = CMAC(K_IN, Label || 0x00 || Context || [L]_4) --- */
-    ret = wc_InitCmac(&cmac, ctx->secret, (word32)ctx->secret_length,
-                      WC_CMAC_AES, NULL);
+    ret = wc_InitCmac_ex(&cmac, ctx->secret, (word32)ctx->secret_length,
+                         WC_CMAC_AES, NULL, NULL,
+                         wolfPSA_GetDefaultDevID());
     if (ret != 0) {
+        wc_CmacFree(&cmac);
         status = wc_error_to_psa_status(ret);
         goto cmac_cleanup;
     }
@@ -1479,9 +1493,11 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
         counter_buf[2] = (uint8_t)((counter >>  8) & 0xff);
         counter_buf[3] = (uint8_t)( counter        & 0xff);
 
-        ret = wc_InitCmac(&cmac, ctx->secret, (word32)ctx->secret_length,
-                          WC_CMAC_AES, NULL);
+        ret = wc_InitCmac_ex(&cmac, ctx->secret, (word32)ctx->secret_length,
+                             WC_CMAC_AES, NULL, NULL,
+                             wolfPSA_GetDefaultDevID());
         if (ret != 0) {
+            wc_CmacFree(&cmac);
             status = wc_error_to_psa_status(ret);
             goto cmac_cleanup;
         }

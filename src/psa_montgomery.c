@@ -76,11 +76,11 @@ psa_status_t psa_asymmetric_generate_key_x25519(psa_key_type_t key_type,
     priv_len = (word32)private_key_size;
     pub_len = (word32)public_key_size;
 
-    ret = wc_curve25519_init(&key);
+    ret = wc_curve25519_init_ex(&key, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&key);
         return wc_error_to_psa_status(ret);
@@ -196,17 +196,17 @@ psa_status_t psa_asymmetric_key_agreement_x25519(
     }
     out_len = (word32)output_size;
 
-    ret = wc_curve25519_init(&priv);
+    ret = wc_curve25519_init_ex(&priv, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_curve25519_init(&pub);
+    ret = wc_curve25519_init_ex(&pub, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&priv);
         return wc_error_to_psa_status(ret);
     }
 #ifdef WOLFSSL_CURVE25519_BLINDING
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve25519_free(&pub);
         wc_curve25519_free(&priv);
@@ -287,7 +287,7 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_InitRng(&rng);
+    ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve448_free(&key);
         return wc_error_to_psa_status(ret);

@@ -39,7 +39,7 @@
  *
  * Exports the target key's raw material via psa_export_key() (which itself
  * enforces PSA_KEY_USAGE_EXPORT on the target key), then encrypts it with
- * the wrapping key using wc_AesKeyWrap().
+ * the wrapping key using wc_AesKeyWrap_ex().
  */
 psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
                            psa_algorithm_t alg,
@@ -61,6 +61,7 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
     size_t plain_max;
     size_t exported_len = 0;
     int wret;
+    Aes aes;
 #endif
 
     wolfpsa_trace("psa_wrap_key(wrapping_key=%u alg=0x%08x key=%u)",
@@ -161,10 +162,16 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
     }
 
     /* Perform RFC 3394 key wrap; pass iv=NULL to use the default IV */
-    wret = wc_AesKeyWrap(kek, (word32)kek_len,
-                         plaintext, (word32)exported_len,
-                         data, (word32)data_size,
-                         NULL);
+    wret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+    if (wret == 0) {
+        wret = wc_AesSetKey(&aes, kek, (word32)kek_len, NULL, AES_ENCRYPTION);
+        if (wret == 0) {
+            wret = wc_AesKeyWrap_ex(&aes, plaintext, (word32)exported_len,
+                                    data, (word32)data_size, NULL);
+        }
+        wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
+    }
 
     wc_ForceZero(plaintext, plain_max);
     XFREE(plaintext, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -172,6 +179,11 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
 
     if (wret < 0) {
         return wc_error_to_psa_status(wret);
+    }
+    if (wret == 0) {
+        /* The software path always returns inSz + 8, so a zero length means
+         * an offload device reported success without producing output. */
+        return PSA_ERROR_HARDWARE_FAILURE;
     }
 
     *data_length = (size_t)wret;
@@ -191,8 +203,8 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
 /*
  * psa_unwrap_key: RFC 3394 AES Key Unwrap (PSA_ALG_KW).
  *
- * Decrypts the wrapped blob with wc_AesKeyUnWrap() and imports the recovered
- * plaintext as a new key via psa_import_key().
+ * Decrypts the wrapped blob with wc_AesKeyUnWrap_ex() and imports the
+ * recovered plaintext as a new key via psa_import_key().
  */
 psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
                              psa_key_id_t wrapping_key,
@@ -212,6 +224,7 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
     uint8_t *plaintext = NULL;
     size_t plain_len;
     int wret;
+    Aes aes;
 #endif
 
     wolfpsa_trace("psa_unwrap_key(wrapping_key=%u alg=0x%08x data_len=%zu)",
@@ -280,14 +293,20 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
     }
 
     /* Perform RFC 3394 key unwrap; pass iv=NULL for the default IV */
-    wret = wc_AesKeyUnWrap(kek, (word32)kek_len,
-                            data, (word32)data_length,
-                            plaintext, (word32)plain_len,
-                            NULL);
+    wret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+    if (wret == 0) {
+        wret = wc_AesSetKey(&aes, kek, (word32)kek_len, NULL, AES_DECRYPTION);
+        if (wret == 0) {
+            wret = wc_AesKeyUnWrap_ex(&aes, data, (word32)data_length,
+                                      plaintext, (word32)plain_len, NULL);
+        }
+        wc_AesFree(&aes);
+        wc_ForceZero(&aes, sizeof(aes));
+    }
 
     wolfpsa_forcezero_free_key_data(kek, kek_len);
 
-    if (wret < 0) {
+    if (wret <= 0) {
         wc_ForceZero(plaintext, plain_len);
         XFREE(plaintext, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         /*
@@ -297,6 +316,12 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
          */
         if (wret == BAD_KEYWRAP_IV_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
+        }
+        if (wret == 0) {
+            /* The software path always returns inSz - 8, so a zero length
+             * means an offload device reported success without producing
+             * output. */
+            return PSA_ERROR_HARDWARE_FAILURE;
         }
         return wc_error_to_psa_status(wret);
     }

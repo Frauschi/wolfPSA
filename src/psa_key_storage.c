@@ -520,6 +520,9 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         int ret;
         int size;
 
+        /* Parse-only key: no devId, because wc_RsaEncryptSize() answers a
+         * hard-coded 2048 bits for a device that declines the call, which
+         * would let a zero-modulus key past the size check below. */
         ret = wc_InitRsaKey(&rsa, NULL);
         if (ret != 0) {
             return psa_wc_error_to_psa_status(ret);
