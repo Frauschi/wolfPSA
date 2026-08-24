@@ -58,8 +58,8 @@ wolfSSL master.
   evict).
 - Crypto callback offload: `wolfPSA_SetDefaultDevID()` now reaches every
   algorithm whose wolfCrypt initializer accepts a devId, adding RSA, ECC,
-  Ed25519, Ed448, X25519, AES-KW, CMAC, HKDF, PBKDF2, the RNG and the
-  SHA-1/SHA-2 families to the coverage. X448, RIPEMD-160, MD5, Ascon and
+  Ed25519, Ed448, X25519, X448, AES-KW, CMAC, HKDF, PBKDF2, the RNG and the
+  SHA-1/SHA-2 families to the coverage. RIPEMD-160, MD5, Ascon and
   ChaCha20-Poly1305 stay local, either because wolfCrypt exposes no devId
   for them or because it ignores the one it accepts. Leaving the default at
   INVALID_DEVID now defers to `wc_CryptoCb_DefaultDevID()`, so a build that
@@ -69,7 +69,16 @@ wolfSSL master.
   instead. PSA_ALG_DETERMINISTIC_ECDSA always signs locally, because the
   crypto callback contract cannot express the RFC 6979 requirement.
   `cryptocb.c` is part of the build so a library can be compiled with
-  `WOLF_CRYPTO_CB`.
+  `WOLF_CRYPTO_CB`. The default devId lives in one atomic, so setting it
+  while other threads issue PSA calls is defined behaviour, and the setter
+  reports NOT_COMPILED_IN for a real devId in a library built without
+  `WOLF_CRYPTO_CB` rather than accepting an offload it cannot perform.
+  `WOLFPSA_DEVID_DEFAULT` hands the choice back to wolfCrypt, so neither an
+  explicit devId nor the INVALID_DEVID opt-out is a one-way door. Two cases
+  sit outside that control: deriving an X25519 public key reaches whichever
+  device registered first, because wolfCrypt derives it through a keyless
+  entry point that carries no devId, and a `WOLF_CRYPTO_CB_FIND` build
+  consults its find callback whatever the devId says.
 - Fixed: the HMAC path of `psa_mac_*` never called `wc_HmacInit()`, so the
   operation ran with devId 0 instead of the configured default. A crypto
   callback registered on device 0 captured wolfPSA's HMACs while every

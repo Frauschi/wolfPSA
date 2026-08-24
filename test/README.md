@@ -16,8 +16,8 @@ This directory contains standalone tests and demos for wolfPSA integration.
 - `psa_devid_cryptocb_test`
   - Checks that every algorithm family reaches a registered crypto callback,
     both through wolfCrypt's own device selection and through an explicit
-    `wolfPSA_SetDefaultDevID()`, and that an explicit `INVALID_DEVID` keeps
-    every operation local.
+    `wolfPSA_SetDefaultDevID()`, that an explicit `INVALID_DEVID` keeps every
+    operation local, and that `WOLFPSA_DEVID_DEFAULT` hands the choice back.
   - Links against its own `WOLF_CRYPTO_CB` build of the library, so it needs no
     prebuilt wolfSSL.
   - Source: `psa_server/psa_devid_cryptocb_test.c`

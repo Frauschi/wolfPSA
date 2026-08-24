@@ -70,3 +70,12 @@ jobs:
             rm -rf test/.store
             ./test/$t
           done
+
+      # The crypto callback reads the HMAC key out of Hmac.keyRaw, which
+      # wolfCrypt borrows rather than copies. Only a sanitizer notices when
+      # the operation outlives that buffer.
+      - name: Run the devId test under AddressSanitizer
+        run: |
+          make -C test clean
+          make -C test psa_devid_cryptocb_test ASAN=1
+          ./test/psa_devid_cryptocb_test

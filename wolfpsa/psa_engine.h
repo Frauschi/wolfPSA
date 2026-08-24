@@ -47,9 +47,18 @@
 #include <wolfssl/wolfcrypt/aes.h>
 #endif
 
+#include <limits.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Pass this to wolfPSA_SetDefaultDevID() to hand the choice back to
+ * wolfCrypt, which is where wolfPSA starts before anything configures it.
+ * It is deliberately not a devId any device can register under, and it is
+ * distinct from INVALID_DEVID because that value means something else
+ * here: forcing local execution. */
+#define WOLFPSA_DEVID_DEFAULT INT_MIN
 
 /* wolfCrypt error code to PSA status code conversion */
 WOLFSSL_LOCAL psa_status_t wc_error_to_psa_status(int ret);
@@ -67,13 +76,16 @@ WOLFSSL_LOCAL psa_status_t wc_error_to_psa_status(int ret);
  * the build sets WC_NO_DEFAULT_DEVID). Any explicit devId wins over that
  * selection, INVALID_DEVID included: passing it forces every wolfPSA
  * operation to run locally even when other devices are registered.
+ * WOLFPSA_DEVID_DEFAULT goes back to letting wolfCrypt choose, so no
+ * setting is a one-way door.
  *
  * Coverage: every algorithm whose wolfCrypt init function accepts a devId,
- * which is AES, 3DES, AES-KW, RSA, ECC, Ed25519, Ed448, X25519, ML-DSA,
- * ML-KEM, LMS, XMSS, SHA-1, the SHA-2 and SHA-3 families, SHAKE, HMAC,
- * CMAC, HKDF, PBKDF2 and the RNG. X448, RIPEMD-160, MD5, Ascon and
- * ChaCha20-Poly1305 always run locally, either because wolfCrypt exposes no
- * devId for them or because it accepts one and ignores it.
+ * which is AES, 3DES, AES-KW, RSA, ECC, Ed25519, Ed448, X25519, X448,
+ * ML-DSA, ML-KEM, LMS, XMSS, SHA-1, the SHA-2 and SHA-3 families, SHAKE,
+ * HMAC, CMAC, HKDF, PBKDF2 and the RNG, subject to the X25519 caveat
+ * below. RIPEMD-160, MD5, Ascon and ChaCha20-Poly1305 always run locally,
+ * either because wolfCrypt exposes no devId for them or because it accepts
+ * one and ignores it.
  *
  * A callback that does not implement a given algorithm returns
  * CRYPTOCB_UNAVAILABLE and wolfCrypt falls back to software. One case needs
@@ -82,20 +94,54 @@ WOLFSSL_LOCAL psa_status_t wc_error_to_psa_status(int ret);
  * psa_hash_clone() duplicates the handle and psa_hash_abort() never
  * releases it.
  *
- * Threading: the default devId is held in a process-global variable read
- * by every wolfPSA-internal wc_*Init() invocation. Callers must set it
- * during single-threaded initialisation (before any PSA operation is
- * issued) or otherwise serialise the setter with external synchronisation;
- * concurrent calls to wolfPSA_SetDefaultDevID() while PSA operations are
- * in flight are not supported.
+ * Two exceptions to the paragraphs above, both outside wolfPSA's control:
  *
- * Returns 0 on success. */
+ * Deriving an X25519 public key from its private scalar reaches whichever
+ * device is registered first, whatever this devId says, including the
+ * INVALID_DEVID opt-out. wolfCrypt derives it through
+ * wc_curve25519_make_pub(), which takes raw buffers rather than a key and
+ * carries no devId (wc_CryptoCb_Curve25519MakePub() falls back to the
+ * device at index 0); wc_curve25519_export_public_ex() routes there too, so
+ * there is no key-bound path to use instead. Curve448 took a devId in the
+ * equivalent call and is unaffected, as are X25519 key generation and key
+ * agreement.
+ *
+ * A build that defines WOLF_CRYPTO_CB_FIND makes wolfCrypt consult its find
+ * callback for every operation regardless of devId, so INVALID_DEVID stops
+ * meaning local execution there.
+ *
+ * Threading: the value is held in one atomic process-global, so calling
+ * this while other threads issue PSA operations is defined behaviour. It
+ * is not a barrier, and the granularity is finer than it looks: the value
+ * is read once per wolfCrypt object, not once per PSA operation. A single
+ * ECDSA signature reads it twice, for the key and for the RNG, and an X448
+ * agreement three times, so an operation running across the change can
+ * take one devId for part of its work and another for the rest. Callers
+ * that need a definite point of switch have to quiesce their own PSA
+ * traffic around the call.
+ *
+ * Restoring a previous setting: use WOLFPSA_DEVID_DEFAULT, never a value
+ * read back from wolfPSA_GetDefaultDevID(). The getter resolves the
+ * deferred state rather than reporting it, so saving and restoring its
+ * result turns "let wolfCrypt choose" into a hard pin on whatever device
+ * happened to be selected, or into forced local execution if none was.
+ *
+ * Returns 0 on success, or NOT_COMPILED_IN when a real devId is given to a
+ * library built without WOLF_CRYPTO_CB, where no dispatch exists to honour
+ * it. INVALID_DEVID and WOLFPSA_DEVID_DEFAULT are accepted by every build,
+ * because neither asks for an offload.
+ *
+ * These two functions speak wolfCrypt, not PSA: they take and return the
+ * int devId and the wolfCrypt error codes from error-crypt.h, unlike every
+ * psa_* entry point, which returns psa_status_t. Do not feed the result to
+ * a PSA status mapper. */
 WOLFSSL_API int wolfPSA_SetDefaultDevID(int devId);
 
 /* Returns the devId wolfPSA passes to wolfCrypt: the value given to
- * wolfPSA_SetDefaultDevID(), or wolfCrypt's own selection when that was
- * never called. It is therefore not a test for whether a devId was
- * configured, and it can name a device nobody asked wolfPSA to use. */
+ * wolfPSA_SetDefaultDevID(), or wolfCrypt's own selection while the
+ * setting is WOLFPSA_DEVID_DEFAULT. It is therefore not a test for whether
+ * a devId was configured, and it can name a device nobody asked wolfPSA to
+ * use. It never returns WOLFPSA_DEVID_DEFAULT itself. */
 WOLFSSL_API int wolfPSA_GetDefaultDevID(void);
 
 #ifdef __cplusplus
