@@ -222,12 +222,16 @@ static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
         return (PSA_ALG_SIGN_GET_HASH(alg) != PSA_ALG_ANY_HASH) &&
                ((key_alg & ~PSA_ALG_HASH_MASK) == (alg & ~PSA_ALG_HASH_MASK));
     }
-    /* PSA_ALG_ANY_HASH wildcard for HashML-DSA and DeterministicHashML-DSA */
-    if (PSA_ALG_IS_HASH_ML_DSA(alg) &&
-        PSA_ALG_IS_HASH_ML_DSA(key_alg) &&
+    /* PSA_ALG_ANY_HASH wildcard for HashML-DSA and DeterministicHashML-DSA.
+     * PSA_ALG_IS_HASH_ML_DSA matches both families (its mask covers the
+     * 0x100 family selector bit), so gate on the hedged predicate and
+     * compare with the hash-only mask: a wildcard policy must not cross
+     * the hedged/deterministic boundary. */
+    if (PSA_ALG_IS_HEDGED_HASH_ML_DSA(alg) &&
+        PSA_ALG_IS_HEDGED_HASH_ML_DSA(key_alg) &&
         PSA_ALG_GET_HASH(key_alg) == PSA_ALG_ANY_HASH) {
         return (PSA_ALG_GET_HASH(alg) != PSA_ALG_ANY_HASH) &&
-               ((key_alg & ~0x000001ffU) == (alg & ~0x000001ffU));
+               ((key_alg & ~0x000000ffU) == (alg & ~0x000000ffU));
     }
     if (PSA_ALG_IS_DETERMINISTIC_HASH_ML_DSA(alg) &&
         PSA_ALG_IS_DETERMINISTIC_HASH_ML_DSA(key_alg) &&
