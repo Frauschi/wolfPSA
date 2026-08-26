@@ -1273,6 +1273,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     int ret;
     ecc_key priv;
     ecc_key pub;
+    WC_RNG rng;
     int curve_id;
     word32 out_len;
 #endif
@@ -1376,15 +1377,34 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         return wc_error_to_psa_status(ret);
     }
 
+    ret = wc_InitRng(&rng);
+    if (ret != 0) {
+        wc_ecc_free(&pub);
+        wc_ecc_free(&priv);
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return wc_error_to_psa_status(ret);
+    }
+
     ret = wc_ecc_import_private_key_ex(key_data, (word32)key_data_length,
                                        NULL, 0, &priv, curve_id);
+    if (ret == 0) {
+        /* The ECDH scalar multiplication uses the key's RNG for blinding
+         * under ECC_TIMING_RESISTANT, so the imported private key needs
+         * one attached. */
+        ret = wc_ecc_set_rng(&priv, &rng);
+    }
     if (ret == 0) {
         ret = wc_ecc_make_pub_ex(&priv, NULL, NULL);
     }
     if (ret == 0) {
-        ret = wc_ecc_import_x963(peer_key, (word32)peer_key_length, &pub);
+        /* Pin the peer point to the local key's curve: a point that is
+         * not on this curve must fail, not be reinterpreted on the
+         * default curve for the coordinate size. */
+        ret = wc_ecc_import_x963_ex(peer_key, (word32)peer_key_length,
+                                    &pub, curve_id);
     }
     if (ret != 0) {
+        wc_FreeRng(&rng);
         wc_ecc_free(&pub);
         wc_ecc_free(&priv);
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -1393,6 +1413,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
 
     out_len = (word32)output_size;
     ret = wc_ecc_shared_secret(&priv, &pub, output, &out_len);
+    wc_FreeRng(&rng);
     wc_ecc_free(&pub);
     wc_ecc_free(&priv);
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
