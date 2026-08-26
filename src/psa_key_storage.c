@@ -1953,7 +1953,10 @@ psa_status_t psa_export_public_key(
     #endif
     }
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-    #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && defined(HAVE_ECC_KEY_IMPORT)
+        /* Standalone EdDSA and Montgomery exporters compile without generic
+         * Weierstrass ECC, so only the default (Weierstrass) key-pair arm
+         * below is gated on HAVE_ECC + the ECC key import/export macros; the
+         * stored-public-key copy needs no backend at all. */
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attributes.type)) {
             if (data_size < key_data_length) {
                 status = PSA_ERROR_BUFFER_TOO_SMALL;
@@ -2013,14 +2016,16 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
+#if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && \
+    defined(HAVE_ECC_KEY_IMPORT)
                 status = psa_asymmetric_export_public_key_ecc(
                     attributes.type, attributes.bits, key_data,
                     key_data_length, data, data_size, data_length);
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
+#endif
             }
         }
-    #else
-        status = PSA_ERROR_NOT_SUPPORTED;
-    #endif
     }
     else {
         /* PQC key types — reached when neither RSA nor ECC matched the type
