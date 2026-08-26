@@ -336,7 +336,11 @@ psa_status_t wolfpsa_mldsa_sign(size_t bits, const uint8_t *key_data,
         psa_algorithm_t hash_alg;
         int wc_hash;
 
-        if (PSA_ALG_IS_HASH_ML_DSA(alg)) {
+        /* PSA_ALG_IS_HASH_ML_DSA matches both the hedged and the
+         * deterministic family (its mask covers the family selector
+         * bit); test the hedged predicate first so the deterministic
+         * branch below stays reachable. */
+        if (PSA_ALG_IS_HEDGED_HASH_ML_DSA(alg)) {
             hash_alg = PSA_ALG_GET_HASH(alg);
             wc_hash  = mldsa_psa_hash_to_wc(hash_alg);
             if (wc_hash == WC_HASH_TYPE_NONE) {
