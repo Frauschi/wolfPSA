@@ -698,13 +698,21 @@ int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits)
                 #endif
                 
                 case 256:
+                    /* Honour the compile-time capability flags so
+                     * callers can rely on ECC_CURVE_INVALID to reject
+                     * unsupported curves. */
+                #if defined(HAVE_ECC_KOBLITZ)
                     return ECC_SECP256K1;
+                #else
+                    return ECC_CURVE_INVALID;
+                #endif
                 
                 default:
                     return ECC_CURVE_INVALID;
             }
         
         case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
+        #if defined(HAVE_ECC_BRAINPOOL)
             switch (bits) {
                 case 256:
                     return ECC_BRAINPOOLP256R1;
@@ -718,6 +726,9 @@ int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits)
                 default:
                     return ECC_CURVE_INVALID;
             }
+        #else
+            return ECC_CURVE_INVALID;
+        #endif
 
         case PSA_ECC_FAMILY_MONTGOMERY:
             switch (bits) {
