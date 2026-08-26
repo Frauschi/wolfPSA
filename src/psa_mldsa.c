@@ -397,9 +397,10 @@ psa_status_t wolfpsa_mldsa_sign(size_t bits, const uint8_t *key_data,
  *
  * Verify an ML-DSA signature.  Accepts both key-pair (seed) and bare public
  * key material.  The algorithm dispatch mirrors wolfpsa_mldsa_sign; hedged
- * and deterministic variants produce identical signatures and verify the
- * same way, so PSA_ALG_ML_DSA and PSA_ALG_DETERMINISTIC_ML_DSA both map to
- * wc_MlDsaKey_VerifyCtx, and the Hash variants both map to
+ * and deterministic variants use the same signature format and verify the
+ * same way (hedged signing draws fresh randomness, so its signature bytes
+ * differ across calls), so PSA_ALG_ML_DSA and PSA_ALG_DETERMINISTIC_ML_DSA
+ * both map to wc_MlDsaKey_VerifyCtx, and the Hash variants both map to
  * wc_MlDsaKey_VerifyCtxHash.
  */
 psa_status_t wolfpsa_mldsa_verify(size_t bits, psa_key_type_t key_type,
