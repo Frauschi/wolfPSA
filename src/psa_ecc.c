@@ -261,9 +261,11 @@ psa_status_t psa_asymmetric_verify_ecc(psa_key_type_t key_type,
 
     key_bytes = PSA_BITS_TO_BYTES(key_bits);
     raw_sig_len = key_bytes * 2u;
+    /* A wrong-length raw signature is malformed peer signature data,
+     * not an API argument error. */
     if (signature_length != raw_sig_len) {
         wc_ecc_free(&ecc);
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return PSA_ERROR_INVALID_SIGNATURE;
     }
 
     der_len = wc_ecc_sig_size(&ecc);
