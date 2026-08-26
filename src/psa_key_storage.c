@@ -1439,7 +1439,12 @@ psa_status_t psa_generate_key(
     }
 
     if (PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
-#ifdef HAVE_ECC
+#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
+    defined(HAVE_CURVE25519) || defined(HAVE_CURVE448)
+        /* Standalone EdDSA and Montgomery backends compile without generic
+         * Weierstrass ECC, so only the default (Weierstrass) dispatch below
+         * is gated on HAVE_ECC; each EdDSA/Montgomery arm is gated on its
+         * own backend macros. */
         psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(key_type);
         size_t priv_buf_size = PSA_KEY_EXPORT_ECC_KEY_PAIR_MAX_SIZE(key_bits);
         size_t pub_buf_size = PSA_KEY_EXPORT_ECC_PUBLIC_KEY_MAX_SIZE(key_bits);
@@ -1539,11 +1544,15 @@ psa_status_t psa_generate_key(
             }
         }
         else {
+#ifdef HAVE_ECC
             status = psa_asymmetric_generate_key_ecc(key_type, key_bits,
                                                      key_data, priv_buf_size,
                                                      &priv_len,
                                                      pub_buf, pub_buf_size,
                                                      &pub_len);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
         }
         XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (status != PSA_SUCCESS) {
