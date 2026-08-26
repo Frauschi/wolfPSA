@@ -473,6 +473,66 @@ psa_status_t psa_xof_abort(psa_xof_operation_t *operation)
     return PSA_SUCCESS;
 }
 
+#else /* !WOLFSSL_SHAKE128 && !WOLFSSL_SHAKE256 */
+
+/*
+ * No SHAKE backend in this build.  The XOF API is declared in
+ * crypto.h and exported in wolfpsa.map, so the symbols must exist in
+ * every configuration: report PSA_ERROR_NOT_SUPPORTED at run time
+ * instead of failing at link time.
+ */
+
+psa_status_t psa_xof_setup(psa_xof_operation_t *operation,
+                           psa_algorithm_t alg)
+{
+    (void)alg;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_xof_set_context(psa_xof_operation_t *operation,
+                                 const uint8_t *context,
+                                 size_t context_length)
+{
+    (void)context;
+    (void)context_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    /* No backend: no operation can ever be active. */
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_update(psa_xof_operation_t *operation,
+                            const uint8_t *input,
+                            size_t input_length)
+{
+    (void)input;
+    (void)input_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_output(psa_xof_operation_t *operation,
+                            uint8_t *output,
+                            size_t output_length)
+{
+    (void)output;
+    (void)output_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_abort(psa_xof_operation_t *operation)
+{
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    /* No backend: no active operation can exist, nothing to release. */
+    return PSA_SUCCESS;
+}
+
 #endif /* WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
 
 #endif /* WOLFSSL_PSA_ENGINE */
