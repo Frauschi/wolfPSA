@@ -740,6 +740,17 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
         return wolfpsa_cipher_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
     }
 
+    /* The block-cipher paths write completed blocks to the output before
+     * all of the input has been read (the partial-block assembly reads
+     * only the first bytes of the input, then the full-block pass reads
+     * the rest), so overlapping input and output ranges would corrupt
+     * unread input. Overlap is not supported; reject it. */
+    if (input != NULL && output != NULL && input_length > 0 &&
+        output_size > 0 &&
+        input < output + output_size && output < input + input_length) {
+        return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+    }
+
     if (input_length == 0) {
         return PSA_SUCCESS;
     }
