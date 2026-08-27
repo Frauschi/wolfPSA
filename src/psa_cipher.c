@@ -783,6 +783,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
             if (ctx->partial_len > 0) {
                 size_t needed = block_size - ctx->partial_len;
                 uint8_t block[AES_BLOCK_SIZE];
+                psa_status_t status = PSA_SUCCESS;
 
                 XMEMCPY(block, ctx->partial, ctx->partial_len);
                 XMEMCPY(block + ctx->partial_len, input, needed);
@@ -798,7 +799,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                    goto cbc_nopad_partial_done;
 #endif
                 }
                 else {
@@ -812,13 +814,18 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                     }
                 }
                 if (ret != 0) {
-                    return wolfpsa_cipher_fail(operation,
-                                               wc_error_to_psa_status(ret));
+                    status = wc_error_to_psa_status(ret);
+                    goto cbc_nopad_partial_done;
                 }
-                wc_ForceZero(block, sizeof(block));
                 output_offset += block_size;
                 input_offset += needed;
                 ctx->partial_len = 0;
+
+cbc_nopad_partial_done:
+                wc_ForceZero(block, sizeof(block));
+                if (status != PSA_SUCCESS) {
+                    return wolfpsa_cipher_fail(operation, status);
+                }
             }
 
             if (input_length > input_offset) {
@@ -907,6 +914,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                 if (ctx->partial_len > 0) {
                     size_t needed = block_size - ctx->partial_len;
                     uint8_t block[AES_BLOCK_SIZE];
+                    psa_status_t status = PSA_SUCCESS;
 
                     XMEMCPY(block, ctx->partial, ctx->partial_len);
                     XMEMCPY(block + ctx->partial_len, input, needed);
@@ -916,8 +924,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                         ret = wc_Des3_CbcEncrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        return wolfpsa_cipher_fail(operation,
-                                                   PSA_ERROR_NOT_SUPPORTED);
+                        status = PSA_ERROR_NOT_SUPPORTED;
+                        goto pkcs7_enc_partial_done;
 #endif
                     }
                     else {
@@ -925,13 +933,18 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                (word32)block_size);
                     }
                     if (ret != 0) {
-                        return wolfpsa_cipher_fail(operation,
-                                                   wc_error_to_psa_status(ret));
+                        status = wc_error_to_psa_status(ret);
+                        goto pkcs7_enc_partial_done;
                     }
-                    wc_ForceZero(block, sizeof(block));
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
+
+pkcs7_enc_partial_done:
+                    wc_ForceZero(block, sizeof(block));
+                    if (status != PSA_SUCCESS) {
+                        return wolfpsa_cipher_fail(operation, status);
+                    }
                 }
 
                 if (input_length > input_offset) {
@@ -1117,6 +1130,7 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
             if (ctx->partial_len > 0) {
                 size_t needed = block_size - ctx->partial_len;
                 uint8_t block[AES_BLOCK_SIZE];
+                psa_status_t status = PSA_SUCCESS;
 
                 XMEMCPY(block, ctx->partial, ctx->partial_len);
                 XMEMCPY(block + ctx->partial_len, input, needed);
@@ -1132,7 +1146,8 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                 (word32)block_size);
                     }
 #else
-                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                    goto ecb_partial_done;
 #endif
                 }
                 else {
@@ -1146,17 +1161,23 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
                                                (word32)block_size);
                     }
 #else
-                    return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                    goto ecb_partial_done;
 #endif
                 }
                 if (ret != 0) {
-                    return wolfpsa_cipher_fail(operation,
-                                               wc_error_to_psa_status(ret));
+                    status = wc_error_to_psa_status(ret);
+                    goto ecb_partial_done;
                 }
-                wc_ForceZero(block, sizeof(block));
                 output_offset += block_size;
                 input_offset += needed;
                 ctx->partial_len = 0;
+
+ecb_partial_done:
+                wc_ForceZero(block, sizeof(block));
+                if (status != PSA_SUCCESS) {
+                    return wolfpsa_cipher_fail(operation, status);
+                }
             }
 
             if (input_length > input_offset) {
