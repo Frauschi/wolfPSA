@@ -264,23 +264,24 @@ psa_status_t psa_xof_set_context(psa_xof_operation_t *operation,
     wolfpsa_trace("psa_xof_set_context(context_length=%zu)", context_length);
 
     if (ctx == NULL)
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_BAD_STATE);
 
     /*
      * PSA 1.4: set_context is only valid for algorithms where
      * PSA_ALG_XOF_HAS_CONTEXT is true.  Neither SHAKE128 nor SHAKE256
      * has a context field, so always return INVALID_ARGUMENT here.
+     * A rejected context aborts the operation like any other error.
      */
     if (!PSA_ALG_XOF_HAS_CONTEXT(ctx->alg))
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 
     /* Unreachable for SHAKE (kept for future context-supporting algs) */
     if (ctx->squeezing || ctx->ibuf_len > 0)
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_BAD_STATE);
 
     (void)context;
     (void)context_length;
-    return PSA_ERROR_INVALID_ARGUMENT;
+    return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 }
 
 /* ========================================================= psa_xof_update */
