@@ -28,8 +28,17 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
+# Mirror the library build so the test translation units see the same
+# user_settings.h (and therefore the same wolfCrypt feature macros) as
+# libwolfpsa. USER_SETTINGS_PATH takes the same value as the library
+# build; by default it resolves to the repository root, which ships the
+# baseline user_settings.h.
+USER_SETTINGS_PATH ?= $(WOLFPSA_PATH)
+WOLFSSL_CPPFLAGS ?= -DWOLFSSL_USER_SETTINGS
+
 CPPFLAGS += -DHAVE_CONFIG_H -DWOLFSSL_HAVE_PSA -DHAVE_PK_CALLBACKS
-CPPFLAGS += -I$(WOLFSSL_PATH) -I$(WOLFSSL_PATH)/wolfssl
+CPPFLAGS += $(WOLFSSL_CPPFLAGS)
+CPPFLAGS += -I$(WOLFSSL_PATH) -I$(USER_SETTINGS_PATH) -I$(WOLFSSL_PATH)/wolfssl
 ifneq ($(WOLFSSL_BUILD_DIR),)
 CPPFLAGS += -I$(WOLFSSL_BUILD_DIR)
 endif

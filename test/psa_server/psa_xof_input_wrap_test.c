@@ -62,6 +62,15 @@ int main(void)
     expect(status, PSA_SUCCESS, "setup");
 
     status = psa_xof_update(&op, in1, U1_LEN);
+    if (status == PSA_ERROR_INSUFFICIENT_MEMORY) {
+        /* The update copies the input into the operation's own buffer;
+         * without room for it on top of the two test buffers, skip. */
+        printf("ibuf-wrap tests: skipped (out of memory)\n");
+        free(in1);
+        free(in2);
+        psa_xof_abort(&op);
+        return 0;
+    }
     expect(status, PSA_SUCCESS, "first update (2 GiB)");
 
     /* Combined length 0x100000100 wraps the word32 sizing: must be

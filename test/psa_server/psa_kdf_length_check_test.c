@@ -32,6 +32,28 @@ static int expect_status(const char *label, psa_status_t status,
     return 0;
 }
 
+/* Classify an oversized-input derivation. The oversized label or
+ * context is copied into the operation inside the library before the
+ * length check runs, so a machine that cannot hold the two 4 GiB test
+ * buffers plus that copy gets PSA_ERROR_INSUFFICIENT_MEMORY from the
+ * copy and must skip, not fail.
+ *
+ * Returns 0 when rejected as expected, 1 when the run must skip, 2 on
+ * any other status (a real failure). */
+static int check_rejected(const char *label, psa_status_t status)
+{
+    if (status == PSA_ERROR_INVALID_ARGUMENT) {
+        return 0;
+    }
+    if (status == PSA_ERROR_INSUFFICIENT_MEMORY) {
+        printf("SKIP: %s: library out of memory\n", label);
+        return 1;
+    }
+    printf("FAIL %s: status 0x%08x want 0x%08x\n", label,
+           (unsigned)status, (unsigned)PSA_ERROR_INVALID_ARGUMENT);
+    return 2;
+}
+
 static uint8_t *alloc_big(const char *what)
 {
     uint8_t *p = (uint8_t *)malloc(BIG_LEN);
@@ -135,20 +157,38 @@ int main(void)
         skipped++;
 
     if (skipped == 0) {
-        if (expect_status("HMAC oversized label", derive_hmac(big_label, NULL,
-                                                              dk),
-                          PSA_ERROR_INVALID_ARGUMENT) != 0)
+        int rc;
+
+        rc = check_rejected("HMAC oversized label",
+                            derive_hmac(big_label, NULL, dk));
+        if (rc == 1) {
+            skipped = 1;
+        }
+        else if (rc == 2) {
             failures++;
-        if (expect_status("HMAC oversized context",
-                          derive_hmac(NULL, big_context, dk),
-                          PSA_ERROR_INVALID_ARGUMENT) != 0)
-            failures++;
-        if (expect_status("CMAC oversized context",
-                          derive_cmac(big_context, dk),
-                          PSA_ERROR_INVALID_ARGUMENT) != 0)
-            failures++;
+        }
+        if (skipped == 0) {
+            rc = check_rejected("HMAC oversized context",
+                                derive_hmac(NULL, big_context, dk));
+            if (rc == 1) {
+                skipped = 1;
+            }
+            else if (rc == 2) {
+                failures++;
+            }
+        }
+        if (skipped == 0) {
+            rc = check_rejected("CMAC oversized context",
+                                derive_cmac(big_context, dk));
+            if (rc == 1) {
+                skipped = 1;
+            }
+            else if (rc == 2) {
+                failures++;
+            }
+        }
     }
-    else {
+    if (skipped != 0) {
         printf("length-check tests: skipped (out of memory)\n");
         free(big_label);
         free(big_context);

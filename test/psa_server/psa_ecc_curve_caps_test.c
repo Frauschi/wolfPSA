@@ -9,12 +9,13 @@
  * Each gate is only exercised when the matching flag is absent; in a
  * build with both families compiled in this test is a no-op.
  *
- * Build against the same configuration as the library: compile with
- * -DWOLFSSL_USER_SETTINGS and put the feature shim's include path
- * before the repository root, so HAVE_ECC_KOBLITZ / HAVE_ECC_BRAINPOOL
- * match the libwolfpsa build (the repository root ships its own
- * user_settings.h). The user_settings.h include below makes the
- * flags visible to the case selection.
+ * test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the same
+ * USER_SETTINGS_PATH as the library build, so HAVE_ECC_KOBLITZ /
+ * HAVE_ECC_BRAINPOOL below track the libwolfpsa configuration (the
+ * repository root ships the baseline user_settings.h; a build with a
+ * feature shim passes the shim's path as USER_SETTINGS_PATH to both
+ * make invocations). The user_settings.h include makes the flags
+ * visible to the case selection.
  */
 
 #include <psa/crypto.h>

@@ -1277,7 +1277,12 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     int ret;
     ecc_key priv;
     ecc_key pub;
+#if defined(ECC_TIMING_RESISTANT) && !defined(WC_NO_RNG)
+    /* Attached to the private key for blinding in wc_ecc_shared_secret;
+     * only needed when wolfCrypt blinding is compiled in and an RNG
+     * exists. */
     WC_RNG rng;
+#endif
     int curve_id;
     word32 out_len;
 #endif
@@ -1381,6 +1386,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         return wc_error_to_psa_status(ret);
     }
 
+#if defined(ECC_TIMING_RESISTANT) && !defined(WC_NO_RNG)
     ret = wc_InitRng(&rng);
     if (ret != 0) {
         wc_ecc_free(&pub);
@@ -1388,15 +1394,18 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return wc_error_to_psa_status(ret);
     }
+#endif
 
     ret = wc_ecc_import_private_key_ex(key_data, (word32)key_data_length,
                                        NULL, 0, &priv, curve_id);
+#if defined(ECC_TIMING_RESISTANT) && !defined(WC_NO_RNG)
     if (ret == 0) {
         /* The ECDH scalar multiplication uses the key's RNG for blinding
          * under ECC_TIMING_RESISTANT, so the imported private key needs
          * one attached. */
         ret = wc_ecc_set_rng(&priv, &rng);
     }
+#endif
     if (ret == 0) {
         ret = wc_ecc_make_pub_ex(&priv, NULL, NULL);
     }
@@ -1408,7 +1417,9 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
                                     &pub, curve_id);
     }
     if (ret != 0) {
+#if defined(ECC_TIMING_RESISTANT) && !defined(WC_NO_RNG)
         wc_FreeRng(&rng);
+#endif
         wc_ecc_free(&pub);
         wc_ecc_free(&priv);
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -1417,7 +1428,9 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
 
     out_len = (word32)output_size;
     ret = wc_ecc_shared_secret(&priv, &pub, output, &out_len);
+#if defined(ECC_TIMING_RESISTANT) && !defined(WC_NO_RNG)
     wc_FreeRng(&rng);
+#endif
     wc_ecc_free(&pub);
     wc_ecc_free(&priv);
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);

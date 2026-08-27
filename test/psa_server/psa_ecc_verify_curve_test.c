@@ -7,10 +7,15 @@
  * verification of a valid signature failed.
  *
  * Requires a build with HAVE_ECC_KOBLITZ; without it this test is a
- * no-op.
+ * no-op. test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the
+ * same USER_SETTINGS_PATH as the library build, so the gate below
+ * tracks the libwolfpsa configuration.
  */
 
 #include <psa/crypto.h>
+#ifdef WOLFSSL_USER_SETTINGS
+#include <user_settings.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
