@@ -1340,6 +1340,13 @@ static psa_status_t wolfpsa_kdf_sp800_108_hmac(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    /* The label and context are passed to wc_HmacUpdate, which takes
+     * word32 lengths; reject lengths that would truncate. */
+    if ((wolfpsa_check_word32_length(ctx->label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->context_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     for (counter = 1u; offset < output_length; counter++) {
         size_t copy_len;
 
@@ -1455,6 +1462,13 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     if (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* The label and context are passed to wc_CmacUpdate, which takes
+     * word32 lengths; reject lengths that would truncate. */
+    if ((wolfpsa_check_word32_length(ctx->label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->context_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
