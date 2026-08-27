@@ -2068,10 +2068,18 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
-                /* Key pair: stored as 32-byte seed — derive public key. */
-                status = wolfpsa_mldsa_export_public((size_t)attributes.bits,
-                                                     key_data, data, data_size,
-                                                     data_length);
+                /* Key pair: stored as 32-byte seed — derive public key.
+                 * The expansion helper reads exactly
+                 * WOLFPSA_MLDSA_SEED_SIZE bytes, so a corrupted record
+                 * with a shorter seed would read out of bounds. */
+                if (key_data_length != WOLFPSA_MLDSA_SEED_SIZE) {
+                    status = PSA_ERROR_DATA_INVALID;
+                }
+                else {
+                    status = wolfpsa_mldsa_export_public(
+                        (size_t)attributes.bits, key_data, data, data_size,
+                        data_length);
+                }
             }
         }
         else
@@ -2090,10 +2098,18 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
-                /* Key pair: stored as 64-byte seed — derive public key. */
-                status = wolfpsa_mlkem_export_public((size_t)attributes.bits,
-                                                     key_data, data, data_size,
-                                                     data_length);
+                /* Key pair: stored as 64-byte seed — derive public key.
+                 * The expansion helper reads exactly
+                 * WOLFPSA_MLKEM_SEED_SIZE bytes, so a corrupted record
+                 * with a shorter seed would read out of bounds. */
+                if (key_data_length != WOLFPSA_MLKEM_SEED_SIZE) {
+                    status = PSA_ERROR_DATA_INVALID;
+                }
+                else {
+                    status = wolfpsa_mlkem_export_public(
+                        (size_t)attributes.bits, key_data, data, data_size,
+                        data_length);
+                }
             }
         }
         else
