@@ -185,7 +185,10 @@ static psa_status_t wolfpsa_cipher_check_key(
         }
     }
     else if (attributes->type == PSA_KEY_TYPE_DES) {
-        if (alg != PSA_ALG_CBC_NO_PADDING && alg != PSA_ALG_ECB_NO_PADDING) {
+        /* The update/finish block and padding logic is generic over
+         * block_size, so CBC_PKCS7 works for DES exactly as for AES. */
+        if (alg != PSA_ALG_CBC_NO_PADDING && alg != PSA_ALG_ECB_NO_PADDING &&
+            alg != PSA_ALG_CBC_PKCS7) {
             wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
             *key_data = NULL;
             *key_data_length = 0;
