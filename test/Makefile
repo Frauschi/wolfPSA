@@ -65,6 +65,32 @@ PSA_14_TESTS = psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test \
 	psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test \
 	psa_sp800_108_test psa_14_misc_test
 
+# Regression tests: one self-contained binary per finding, all
+# built from psa_server/<name>.c with the default link recipe.
+PSA_REGRESSION_TESTS = psa_xof_input_wrap_test \
+	psa_pbkdf2_cmac_test \
+	psa_kdf_input_key_test \
+	psa_ecc_verify_curve_test \
+	psa_ecc_ecdh_curve_test \
+	psa_xof_output_wrap_test \
+	psa_kdf_length_check_test \
+	psa_mldsa_det_sign_test \
+	psa_mldsa_any_hash_test \
+	psa_ecc_curve_caps_test \
+	psa_xof_no_backend_test \
+	psa_ecc_sig_len_test \
+	psa_xof_set_context_test \
+	psa_cipher_inplace_test \
+	psa_cipher_overlap_test \
+	psa_des3_pkcs7_test \
+	psa_eddsa_mont_export_test \
+	psa_eddsa_mont_gen_test \
+	psa_key_infer_bits_test \
+	psa_cipher_oneshot_len_test \
+	psa_pqc_export_seed_test \
+	psa_key_declared_bits_test
+BINARIES += $(PSA_REGRESSION_TESTS)
+
 ifdef WOLFSSL_HAS_PSA_TLS
 BINARIES += psa_tls_server
 endif
@@ -112,6 +138,9 @@ psa_rsa_pss_interop_test: require-wolfssl-lib $(PSA_RSA_PSS_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_RSA_PSS_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 $(PSA_14_TESTS): %: require-wolfssl-lib psa_server/%.o
+	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+$(PSA_REGRESSION_TESTS): %: require-wolfssl-lib psa_server/%.o
 	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 ifdef WOLFSSL_HAS_PSA_TLS
