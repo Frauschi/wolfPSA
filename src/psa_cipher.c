@@ -1511,6 +1511,10 @@ psa_status_t psa_cipher_encrypt(psa_key_id_t key,
     size_t offset = 0;
     wolfpsa_cipher_ctx_t *ctx;
 
+    if (output_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* The generated IV is written to the output before the input is
      * consumed, so overlapping input and output buffers would clobber
      * unread plaintext. Overlap is not supported; reject it. */
@@ -1581,6 +1585,10 @@ psa_status_t psa_cipher_decrypt(psa_key_id_t key,
     size_t iv_len = 0;
     size_t offset = 0;
     wolfpsa_cipher_ctx_t *ctx;
+
+    if (output_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     status = psa_cipher_decrypt_setup(&operation, key, alg);
     if (status != PSA_SUCCESS) {
