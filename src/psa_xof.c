@@ -87,10 +87,12 @@ typedef struct psa_xof_operation_ctx {
     word32          buf_off; /* next unread byte in buf */
     word32          buf_len; /* valid bytes in buf (== block_size once filled) */
 
-    /* accumulated input buffer (absorb-once strategy) */
+    /* accumulated input buffer (absorb-once strategy); the backend
+     * Absorb() takes word32 lengths, so ibuf_len stays <= UINT32_MAX
+     * and size_t keeps the grow arithmetic overflow-free */
     uint8_t        *ibuf;
-    word32          ibuf_len;  /* bytes written */
-    word32          ibuf_cap;  /* bytes allocated */
+    size_t          ibuf_len;  /* bytes written */
+    size_t          ibuf_cap;  /* bytes allocated */
 } psa_xof_operation_ctx_t;
 
 /* ------------------------------------------------------------------ helpers */
@@ -125,7 +127,7 @@ static void psa_xof_free_ctx(psa_xof_operation_ctx_t *ctx)
 
     /* free input accumulation buffer */
     if (ctx->ibuf != NULL) {
-        wc_ForceZero(ctx->ibuf, ctx->ibuf_cap);
+        wc_ForceZero(ctx->ibuf, (word32)ctx->ibuf_cap);
         XFREE(ctx->ibuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         ctx->ibuf = NULL;
     }
@@ -135,18 +137,24 @@ static void psa_xof_free_ctx(psa_xof_operation_ctx_t *ctx)
  * Grow the input accumulation buffer to hold at least need_cap bytes total.
  * Returns 0 on success, -1 on allocation failure.
  */
-static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, word32 need_cap)
+static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, size_t need_cap)
 {
     uint8_t *newbuf;
-    word32   new_cap;
+    size_t   new_cap;
 
     if (need_cap <= ctx->ibuf_cap)
         return 0;
 
-    /* double-or-fit growth */
+    /* double-or-fit growth; stop doubling once past half of UINT32_MAX
+     * so the multiply cannot wrap (need_cap is <= UINT32_MAX) */
     new_cap = ctx->ibuf_cap ? ctx->ibuf_cap : 256u;
-    while (new_cap < need_cap)
+    while (new_cap < need_cap) {
+        if (new_cap > ((size_t)UINT32_MAX) / 2u) {
+            new_cap = (size_t)UINT32_MAX;
+            break;
+        }
         new_cap *= 2u;
+    }
 
     newbuf = (uint8_t *)XMALLOC(new_cap, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (newbuf == NULL)
@@ -156,7 +164,7 @@ static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, word32 need_cap)
         XMEMCPY(newbuf, ctx->ibuf, ctx->ibuf_len);
 
     if (ctx->ibuf != NULL) {
-        wc_ForceZero(ctx->ibuf, ctx->ibuf_cap);
+        wc_ForceZero(ctx->ibuf, (word32)ctx->ibuf_cap);
         XFREE(ctx->ibuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 
@@ -282,6 +290,7 @@ psa_status_t psa_xof_update(psa_xof_operation_t *operation,
                              size_t               input_length)
 {
     psa_xof_operation_ctx_t *ctx = psa_xof_get_ctx(operation);
+    size_t need;
 
     if (operation == NULL || (input == NULL && input_length > 0))
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
@@ -300,12 +309,18 @@ psa_status_t psa_xof_update(psa_xof_operation_t *operation,
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 
-    /* accumulate input for the deferred single Absorb() call */
-    if (psa_xof_ibuf_grow(ctx, ctx->ibuf_len + (word32)input_length) != 0)
+    /* accumulate input for the deferred single Absorb() call; do the
+     * sizing in size_t (the word32 sum wraps past 2^32) and keep the
+     * total within the word32 range the backend Absorb() takes */
+    need = ctx->ibuf_len + input_length;
+    if (need > (size_t)UINT32_MAX)
+        return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
+
+    if (psa_xof_ibuf_grow(ctx, need) != 0)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INSUFFICIENT_MEMORY);
 
     XMEMCPY(ctx->ibuf + ctx->ibuf_len, input, input_length);
-    ctx->ibuf_len += (word32)input_length;
+    ctx->ibuf_len += input_length;
 
     return PSA_SUCCESS;
 }
@@ -340,7 +355,8 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
     if (!ctx->squeezing) {
         const uint8_t *absorb_data = (ctx->ibuf != NULL) ? ctx->ibuf
                                                           : (const uint8_t *)"";
-        word32 absorb_len = ctx->ibuf_len;
+        /* ibuf_len is kept <= UINT32_MAX by psa_xof_update */
+        word32 absorb_len = (word32)ctx->ibuf_len;
 
         switch (ctx->alg) {
 #ifdef WOLFSSL_SHAKE128
