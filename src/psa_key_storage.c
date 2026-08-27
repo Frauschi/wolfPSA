@@ -479,10 +479,12 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         attr->type == PSA_KEY_TYPE_PASSWORD ||
         attr->type == PSA_KEY_TYPE_PASSWORD_HASH ||
         attr->type == PSA_KEY_TYPE_PEPPER) {
-        /* psa_key_bits_t is 16-bit: reject data lengths whose bit count
-         * would wrap on the narrowing cast below (e.g. 8192 bytes is
-         * 65536 bits, which truncates to 0). */
-        if (data_length * 8U > PSA_MAX_KEY_BITS) {
+        /* Byte-string keys have no size of their own: the size is the
+         * data length in bits. A zero-length import therefore has no
+         * valid size, and the bit count must fit the 16-bit
+         * psa_key_bits_t (e.g. 8192 bytes is 65536 bits, which would
+         * truncate to 0). */
+        if (data_length == 0 || data_length * 8U > PSA_MAX_KEY_BITS) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
         attr->bits = (psa_key_bits_t)(data_length * 8U);
@@ -1116,6 +1118,22 @@ psa_status_t psa_import_key(
         }
         if (attr.bits != (psa_key_bits_t)(data_length * 8U)) {
             wolfpsa_debug_import_reason("DES bits/length mismatch", &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    else if (attr.type == PSA_KEY_TYPE_HMAC ||
+             attr.type == PSA_KEY_TYPE_RAW_DATA ||
+             attr.type == PSA_KEY_TYPE_DERIVE ||
+             attr.type == PSA_KEY_TYPE_PASSWORD ||
+             attr.type == PSA_KEY_TYPE_PASSWORD_HASH ||
+             attr.type == PSA_KEY_TYPE_PEPPER) {
+        /* Raw byte-string keys: the size is the data length in bits, so
+         * the declared size must equal it, and it must fit the 16-bit
+         * size type. */
+        if (data_length * 8U > PSA_MAX_KEY_BITS ||
+            attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("unstructured bits/length mismatch",
+                                        &attr, data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
