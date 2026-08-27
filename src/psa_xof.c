@@ -409,36 +409,48 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
         ctx->buf_off = 0;
         ctx->buf_len = 0;
 
-        /* 2. If caller wants >= one full block, squeeze directly. */
+        /* 2. If caller wants >= one full block, squeeze directly.
+         * The backend takes a word32 block count and the byte product
+         * must not wrap either, so squeeze in chunks for requests
+         * whose block count exceeds that range. */
         if (output_length >= (size_t)ctx->block_size) {
-            word32 n_blocks = (word32)(output_length / ctx->block_size);
-            word32 produced;
+            size_t max_blocks = ((size_t)UINT32_MAX) / ctx->block_size;
 
-            switch (ctx->alg) {
+            while (output_length >= (size_t)ctx->block_size) {
+                size_t n_blocks = output_length / ctx->block_size;
+                size_t produced;
+
+                if (n_blocks > max_blocks)
+                    n_blocks = max_blocks;
+
+                switch (ctx->alg) {
 #ifdef WOLFSSL_SHAKE128
-                case PSA_ALG_SHAKE128:
-                    ret = wc_Shake128_SqueezeBlocks(&ctx->shake, output,
-                                                    n_blocks);
-                    break;
+                    case PSA_ALG_SHAKE128:
+                        ret = wc_Shake128_SqueezeBlocks(&ctx->shake, output,
+                                                        (word32)n_blocks);
+                        break;
 #endif
 #ifdef WOLFSSL_SHAKE256
-                case PSA_ALG_SHAKE256:
-                    ret = wc_Shake256_SqueezeBlocks(&ctx->shake, output,
-                                                    n_blocks);
-                    break;
+                    case PSA_ALG_SHAKE256:
+                        ret = wc_Shake256_SqueezeBlocks(&ctx->shake, output,
+                                                        (word32)n_blocks);
+                        break;
 #endif
-                default:
-                    return wolfpsa_xof_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                    default:
+                        return wolfpsa_xof_fail(operation,
+                                                PSA_ERROR_NOT_SUPPORTED);
+                }
+
+                if (ret != 0)
+                    return wolfpsa_xof_fail(operation,
+                                            wc_error_to_psa_status(ret));
+
+                produced = n_blocks * (size_t)ctx->block_size;
+                output        += produced;
+                output_length -= produced;
             }
-
-            if (ret != 0)
-                return wolfpsa_xof_fail(operation,
-                                        wc_error_to_psa_status(ret));
-
-            produced = n_blocks * ctx->block_size;
-            output        += produced;
-            output_length -= produced;
-            continue;
+            if (output_length == 0)
+                break;
         }
 
         /* 3. Tail: squeeze one block into the staging buffer. */
