@@ -1357,12 +1357,17 @@ psa_status_t psa_cipher_finish(psa_cipher_operation_t *operation,
         }
         if (ctx->direction == AES_ENCRYPTION) {
             uint8_t block[AES_BLOCK_SIZE];
-            size_t pad_len = block_size - ctx->partial_len;
+            size_t pad_len;
             psa_status_t status = PSA_SUCCESS;
 
-            if (pad_len == 0) {
-                pad_len = block_size;
+            /* psa_cipher_update keeps the encrypt-path residue strictly
+             * below one full block, so pad_len always lands in
+             * [1, block_size]. Fail loudly if that invariant ever breaks
+             * instead of guessing a padding length. */
+            if (ctx->partial_len >= block_size) {
+                return wolfpsa_cipher_fail(operation, PSA_ERROR_BAD_STATE);
             }
+            pad_len = block_size - ctx->partial_len;
             if (output_size < block_size) {
                 return wolfpsa_cipher_fail(operation, PSA_ERROR_BUFFER_TOO_SMALL);
             }
