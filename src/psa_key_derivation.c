@@ -735,7 +735,26 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     }
     else if (step == PSA_KEY_DERIVATION_INPUT_SECRET ||
              step == PSA_KEY_DERIVATION_INPUT_OTHER_SECRET) {
-        if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_DERIVE) {
+        psa_key_type_t key_type = psa_get_key_type(&attributes);
+        int compatible = 0;
+
+        /* A generic DERIVE key is valid for any KDF. The SP800-108
+         * backends also take a key of the underlying MAC type, whose
+         * material is the raw MAC key: HMAC keys for the HMAC variant
+         * and AES keys for the CMAC variant. */
+        if (key_type == PSA_KEY_TYPE_DERIVE) {
+            compatible = 1;
+        }
+        else if (key_type == PSA_KEY_TYPE_HMAC &&
+                 PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg)) {
+            compatible = 1;
+        }
+        else if (key_type == PSA_KEY_TYPE_AES &&
+                 ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+            compatible = 1;
+        }
+
+        if (!compatible) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
