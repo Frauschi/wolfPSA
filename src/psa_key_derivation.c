@@ -1114,25 +1114,33 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             return PSA_ERROR_INVALID_ARGUMENT;
         }
 
-        XMEMSET(zero_key, 0, sizeof(zero_key));
-        ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
-                          WC_CMAC_AES, NULL);
-        if (ret != 0) {
-            status = wc_error_to_psa_status(ret);
-            goto cleanup;
+        /* RFC 4615 step 1: a key that is exactly 128 bits is used
+         * directly as the AES-CMAC key; any other length is
+         * normalized with CMAC(0^128, key). */
+        if (ctx->password_length == WC_AES_BLOCK_SIZE) {
+            XMEMCPY(prf_key, password, WC_AES_BLOCK_SIZE);
         }
-        ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
-        if (ret != 0) {
+        else {
+            XMEMSET(zero_key, 0, sizeof(zero_key));
+            ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
+                              WC_CMAC_AES, NULL);
+            if (ret != 0) {
+                status = wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
+            ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
+            if (ret != 0) {
+                wc_CmacFree(&cmac);
+                status = wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
+            ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
             wc_CmacFree(&cmac);
-            status = wc_error_to_psa_status(ret);
-            goto cleanup;
-        }
-        ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
-        wc_CmacFree(&cmac);
-        if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
-            status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
-                                wc_error_to_psa_status(ret);
-            goto cleanup;
+            if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
+                status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                    wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
         }
 
         block_input_len = ctx->salt_length + 4;
