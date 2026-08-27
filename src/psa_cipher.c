@@ -747,8 +747,14 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
      * all of the input has been read (the partial-block assembly reads
      * only the first bytes of the input, then the full-block pass reads
      * the rest), so overlapping input and output ranges would corrupt
-     * unread input. Overlap is not supported; reject it. */
-    if (input != NULL && output != NULL && input_length > 0 &&
+     * unread input. The stream modes buffer nothing in the operation and
+     * read each input byte before writing the output byte, so in-place
+     * updates are safe there. Overlap is not supported in the block
+     * modes; reject it only for those. */
+    if ((ctx->alg == PSA_ALG_CBC_NO_PADDING ||
+         ctx->alg == PSA_ALG_CBC_PKCS7 ||
+         ctx->alg == PSA_ALG_ECB_NO_PADDING) &&
+        input != NULL && output != NULL && input_length > 0 &&
         output_size > 0 &&
         input < output + output_size && output < input + input_length) {
         return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);

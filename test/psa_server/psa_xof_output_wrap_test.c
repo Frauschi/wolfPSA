@@ -32,6 +32,39 @@ static void expect(psa_status_t got, psa_status_t want, const char *what)
     }
 }
 
+/* This test commits two R_LEN buffers. Under Linux overcommit,
+ * malloc() succeeds even when the machine cannot back the pages,
+ * so the NULL-skip path never fires and the kernel OOM killer takes
+ * the process out instead. When MemAvailable can be read, require
+ * the peak plus a 1 GiB headroom; otherwise fall back to the
+ * malloc-failure skip. */
+static int mem_budget_ok(size_t peak)
+{
+#ifdef __linux__
+    long long need = (long long)peak + (1LL << 30);
+    FILE *f = fopen("/proc/meminfo", "r");
+    long long avail_kb = -1;
+    char line[128];
+
+    if (f != NULL) {
+        while (fgets(line, sizeof(line), f) != NULL) {
+            long long kb;
+
+            if (sscanf(line, "MemAvailable: %lld", &kb) == 1) {
+                avail_kb = kb;
+                break;
+            }
+        }
+        fclose(f);
+    }
+    if (avail_kb >= 0) {
+        return avail_kb * 1024LL >= need;
+    }
+#endif
+    (void)peak;
+    return 1;
+}
+
 int main(void)
 {
     psa_status_t status;
@@ -49,6 +82,11 @@ int main(void)
     status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
         printf("SKIP: psa_crypto_init failed: 0x%08x\n", (unsigned)status);
+        return 0;
+    }
+
+    if (!mem_budget_ok(2 * R_LEN)) {
+        printf("output-wrap tests: skipped (insufficient memory)\n");
         return 0;
     }
 

@@ -32,6 +32,39 @@ static int expect_status(const char *label, psa_status_t status,
     return 0;
 }
 
+/* This test commits peak bytes of resident memory. Under Linux
+ * overcommit, malloc() succeeds even when the machine cannot back
+ * the pages, so the NULL-skip path never fires and the kernel OOM
+ * killer takes the process out instead. When MemAvailable can be
+ * read, require the peak plus a 1 GiB headroom; otherwise fall back
+ * to the malloc-failure skip. */
+static int mem_budget_ok(size_t peak)
+{
+#ifdef __linux__
+    long long need = (long long)peak + (1LL << 30);
+    FILE *f = fopen("/proc/meminfo", "r");
+    long long avail_kb = -1;
+    char line[128];
+
+    if (f != NULL) {
+        while (fgets(line, sizeof(line), f) != NULL) {
+            long long kb;
+
+            if (sscanf(line, "MemAvailable: %lld", &kb) == 1) {
+                avail_kb = kb;
+                break;
+            }
+        }
+        fclose(f);
+    }
+    if (avail_kb >= 0) {
+        return avail_kb * 1024LL >= need;
+    }
+#endif
+    (void)peak;
+    return 1;
+}
+
 /* Classify an oversized-input derivation. The oversized label or
  * context is copied into the operation inside the library before the
  * length check runs, so a machine that cannot hold the two 4 GiB test
@@ -145,6 +178,13 @@ int main(void)
     uint8_t *big_label;
     uint8_t *big_context;
     int skipped = 0;
+
+    /* Two own 4 GiB buffers plus the library's copy of the oversized
+     * label or context. */
+    if (!mem_budget_ok(3 * BIG_LEN)) {
+        printf("length-check tests: skipped (insufficient memory)\n");
+        return 0;
+    }
 
     if (psa_crypto_init() != PSA_SUCCESS) {
         printf("SKIP: psa_crypto_init failed\n");
