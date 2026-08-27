@@ -479,6 +479,12 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         attr->type == PSA_KEY_TYPE_PASSWORD ||
         attr->type == PSA_KEY_TYPE_PASSWORD_HASH ||
         attr->type == PSA_KEY_TYPE_PEPPER) {
+        /* psa_key_bits_t is 16-bit: reject data lengths whose bit count
+         * would wrap on the narrowing cast below (e.g. 8192 bytes is
+         * 65536 bits, which truncates to 0). */
+        if (data_length * 8U > PSA_MAX_KEY_BITS) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         attr->bits = (psa_key_bits_t)(data_length * 8U);
         return PSA_SUCCESS;
     }
