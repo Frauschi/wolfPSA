@@ -3,7 +3,9 @@
  * Regression test: psa_cipher_encrypt() and
  * psa_cipher_decrypt() never validated output_length and wrote through
  * it after completing the cryptographic operation, so a call with
- * output_length == NULL crashed on the final write.
+ * output_length == NULL crashed on the final write. psa_cipher_encrypt()
+ * also never validated output itself: with a generated-IV algorithm
+ * and output == NULL it reached the IV copy and crashed.
  *
  * Copyright (C) 2026 wolfSSL Inc.
  *
@@ -76,6 +78,24 @@ int main(void)
                             pt, sizeof(pt), NULL);
     if (st != PSA_ERROR_INVALID_ARGUMENT) {
         printf("FAIL decrypt NULL outlen: status=%d\n", (int)st);
+        rc = 1;
+    }
+
+    /* NULL output with a non-zero output_size must be rejected before
+     * the IV is written to it. Pre-fix the encrypt path reached the IV
+     * copy and crashed. The decrypt path is covered by the same check
+     * in psa_cipher_update(). */
+    st = psa_cipher_encrypt(key_id, PSA_ALG_CBC_NO_PADDING, plain, 16,
+                            NULL, sizeof(ct), &ct_len);
+    if (st != PSA_ERROR_INVALID_ARGUMENT) {
+        printf("FAIL encrypt NULL output: status=%d\n", (int)st);
+        rc = 1;
+    }
+
+    st = psa_cipher_decrypt(key_id, PSA_ALG_CBC_NO_PADDING, plain, 16,
+                            NULL, sizeof(pt), &pt_len);
+    if (st != PSA_ERROR_INVALID_ARGUMENT) {
+        printf("FAIL decrypt NULL output: status=%d\n", (int)st);
         rc = 1;
     }
 

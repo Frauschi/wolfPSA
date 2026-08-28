@@ -6,10 +6,16 @@
  * clobbered unread plaintext and the operation silently encrypted the
  * wrong data.
  *
- * The chosen contract: overlapping input and output buffers are rejected
- * with PSA_ERROR_NOT_SUPPORTED (the in-tree PSA header makes no
- * overlap guarantee for the one-shot cipher API, and the block-cipher
- * paths read input while writing output).
+ * The chosen contract for the one-shot entry points: any overlap
+ * between the declared input and output ranges is rejected with
+ * PSA_ERROR_NOT_SUPPORTED, in every mode. The in-tree PSA header makes
+ * no overlap guarantee for the one-shot cipher API; the generated IV
+ * is written to the output before the input is consumed, and the
+ * block-cipher paths read input while writing output. A byte-wise safe
+ * in-place stream call (for example CTR with the IV region disjoint
+ * from the update region) is rejected as well; the multipart API is
+ * the in-place path, and this file pins that one-shot overlap is
+ * rejected there too.
  *
  * The multipart update() applies the same contract only to the block
  * modes (their partial-block buffering makes overlap unsafe); the
@@ -41,13 +47,14 @@
 
 #include <psa/crypto.h>
 
-static int make_aes_key(psa_key_id_t* key_id, psa_algorithm_t alg)
+static int make_key(psa_key_id_t *key_id, psa_key_type_t key_type,
+                    size_t key_bits, psa_algorithm_t alg, const char *name)
 {
     psa_key_attributes_t attrs = psa_key_attributes_init();
     psa_status_t st;
 
-    psa_set_key_type(&attrs, PSA_KEY_TYPE_AES);
-    psa_set_key_bits(&attrs, 128);
+    psa_set_key_type(&attrs, key_type);
+    psa_set_key_bits(&attrs, key_bits);
     psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT |
                             PSA_KEY_USAGE_DECRYPT);
     psa_set_key_algorithm(&attrs, alg);
@@ -55,9 +62,35 @@ static int make_aes_key(psa_key_id_t* key_id, psa_algorithm_t alg)
 
     st = psa_generate_key(&attrs, key_id);
     if (st != PSA_SUCCESS) {
-        printf("FAIL generate_key(%s) status=%d\n",
-               (alg == PSA_ALG_CBC_NO_PADDING) ? "nopad" : "pkcs7",
-               (int)st);
+        printf("FAIL generate_key(%s) status=%d\n", name, (int)st);
+        return 1;
+    }
+    return 0;
+}
+
+/* Three-key DES is imported as PSA_KEY_TYPE_DES with 192 bits.
+ * (psa_generate_key does not cover it.) */
+static int make_des3_key(psa_key_id_t *key_id, psa_algorithm_t alg)
+{
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    uint8_t key[24];
+    psa_status_t st;
+    int i;
+
+    for (i = 0; i < (int)sizeof(key); i++) {
+        key[i] = (uint8_t)(i * 5 + 3);
+    }
+
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_DES);
+    psa_set_key_bits(&attrs, 192);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_ENCRYPT |
+                            PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_algorithm(&attrs, alg);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_VOLATILE);
+
+    st = psa_import_key(&attrs, key, sizeof(key), key_id);
+    if (st != PSA_SUCCESS) {
+        printf("FAIL import_key(des3-pkcs7) status=%d\n", (int)st);
         return 1;
     }
     return 0;
@@ -225,7 +258,11 @@ int main(void)
 {
     psa_key_id_t nopad_id = PSA_KEY_ID_NULL;
     psa_key_id_t pkcs7_id = PSA_KEY_ID_NULL;
+    psa_key_id_t ctr_id = PSA_KEY_ID_NULL;
+    psa_key_id_t des3_id = PSA_KEY_ID_NULL;
     uint8_t buf[64];
+    uint8_t fbuf[96];
+    uint8_t sbuf[48];
     uint8_t plain[16];
     uint8_t ct[64];
     size_t ct_len = 0;
@@ -237,10 +274,18 @@ int main(void)
         return 1;
     }
 
-    if (make_aes_key(&nopad_id, PSA_ALG_CBC_NO_PADDING) != 0) {
+    if (make_key(&nopad_id, PSA_KEY_TYPE_AES, 128, PSA_ALG_CBC_NO_PADDING,
+                 "nopad") != 0) {
         return 1;
     }
-    if (make_aes_key(&pkcs7_id, PSA_ALG_CBC_PKCS7) != 0) {
+    if (make_key(&pkcs7_id, PSA_KEY_TYPE_AES, 128, PSA_ALG_CBC_PKCS7,
+                 "pkcs7") != 0) {
+        return 1;
+    }
+    if (make_key(&ctr_id, PSA_KEY_TYPE_AES, 128, PSA_ALG_CTR, "ctr") != 0) {
+        return 1;
+    }
+    if (make_des3_key(&des3_id, PSA_ALG_CBC_PKCS7) != 0) {
         return 1;
     }
 
@@ -295,6 +340,62 @@ int main(void)
         rc = 1;
     }
 
+    /* The one-shot contract is all-modes: even a byte-wise safe
+     * in-place stream call is rejected when the declared ranges
+     * overlap. The IV region sbuf[0..15] is disjoint from the input
+     * sbuf[16..47], and a CTR update there would be safe, but the
+     * declared output range sbuf[0..47] overlaps the input range, so
+     * the one-shot entry point refuses it. */
+    for (i = 0; i < (int)sizeof(sbuf); i++) {
+        sbuf[i] = (uint8_t)(i + 1);
+    }
+    ct_len = 0;
+    if (psa_cipher_encrypt(ctr_id, PSA_ALG_CTR, sbuf + 16, 32, sbuf,
+                           sizeof(sbuf), &ct_len) != PSA_ERROR_NOT_SUPPORTED) {
+        printf("FAIL oneshot stream overlap: expected NOT_SUPPORTED\n");
+        rc = 1;
+    }
+
+    /* Decrypt path: the mirror of the encrypt contract. In-place
+     * block-mode decrypt must be rejected. */
+    ct_len = 0;
+    if (psa_cipher_decrypt(nopad_id, PSA_ALG_CBC_NO_PADDING, buf, 48,
+                           buf, sizeof(buf), &ct_len) !=
+        PSA_ERROR_NOT_SUPPORTED) {
+        printf("FAIL in-place decrypt nopad: expected NOT_SUPPORTED\n");
+        rc = 1;
+    }
+
+    ct_len = 0;
+    if (psa_cipher_decrypt(pkcs7_id, PSA_ALG_CBC_PKCS7, buf, 48, buf,
+                           sizeof(buf), &ct_len) != PSA_ERROR_NOT_SUPPORTED) {
+        printf("FAIL in-place decrypt pkcs7: expected NOT_SUPPORTED\n");
+        rc = 1;
+    }
+
+    /* DES3 + PKCS7 decrypt overlap was uncovered too. */
+    ct_len = 0;
+    if (psa_cipher_decrypt(des3_id, PSA_ALG_CBC_PKCS7, buf, 48, buf,
+                           sizeof(buf), &ct_len) != PSA_ERROR_NOT_SUPPORTED) {
+        printf("FAIL in-place decrypt des3-pkcs7: expected NOT_SUPPORTED\n");
+        rc = 1;
+    }
+
+    /* Forward overlap on the stream decrypt path: the IV sits at
+     * fbuf[0..15], the CTR ciphertext at fbuf[16..79], and the output
+     * starts inside the ciphertext range. Pre-fix this returned
+     * SUCCESS after writing plaintext block 0 over the unread
+     * ciphertext block 1. */
+    for (i = 0; i < (int)sizeof(fbuf); i++) {
+        fbuf[i] = (uint8_t)(i + 7);
+    }
+    ct_len = 0;
+    if (psa_cipher_decrypt(ctr_id, PSA_ALG_CTR, fbuf, 80, fbuf + 32, 64,
+                           &ct_len) != PSA_ERROR_NOT_SUPPORTED) {
+        printf("FAIL forward-overlap decrypt ctr: expected NOT_SUPPORTED\n");
+        rc = 1;
+    }
+
     /* Multipart contract: block modes reject in-place updates, the
      * stream modes accept them and must match a disjoint run. */
     if (block_update_rejects_overlap(PSA_ALG_CBC_NO_PADDING, "cbcnopad") != 0) {
@@ -331,6 +432,8 @@ int main(void)
 
     (void)psa_destroy_key(nopad_id);
     (void)psa_destroy_key(pkcs7_id);
+    (void)psa_destroy_key(ctr_id);
+    (void)psa_destroy_key(des3_id);
 
     if (rc != 0) {
         printf("PSA cipher overlap test: FAIL\n");

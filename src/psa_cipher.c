@@ -751,12 +751,17 @@ psa_status_t psa_cipher_update(psa_cipher_operation_t *operation,
      * read each input byte before writing the output byte, so in-place
      * updates are safe there. Overlap is not supported in the block
      * modes; reject it only for those. */
+    /* The range test runs on uintptr_t: comparing pointers into two
+     * different objects with < is undefined (C99 6.5.8p5), and forming
+     * output + output_size one past the end is undefined (6.5.6p8).
+     * The flat address comparison is what every target does anyway. */
     if ((ctx->alg == PSA_ALG_CBC_NO_PADDING ||
          ctx->alg == PSA_ALG_CBC_PKCS7 ||
          ctx->alg == PSA_ALG_ECB_NO_PADDING) &&
         input != NULL && output != NULL && input_length > 0 &&
         output_size > 0 &&
-        input < output + output_size && output < input + input_length) {
+        (uintptr_t)input < (uintptr_t)output + output_size &&
+        (uintptr_t)output < (uintptr_t)input + input_length) {
         return wolfpsa_cipher_fail(operation, PSA_ERROR_NOT_SUPPORTED);
     }
 
@@ -1528,13 +1533,23 @@ psa_status_t psa_cipher_encrypt(psa_key_id_t key,
     if (output_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if (output == NULL && output_size > 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
-    /* The generated IV is written to the output before the input is
-     * consumed, so overlapping input and output buffers would clobber
-     * unread plaintext. Overlap is not supported; reject it. */
+    /* The one-shot API rejects any overlap between the declared input
+     * and output ranges. The generated IV is written to the output
+     * before the input is consumed, and the block modes read input
+     * while writing output. The stream modes are in-place safe in the
+     * multipart API, but the one-shot entry points do not make that
+     * distinction; psa_cipher_overlap_test.c pins both contracts.
+     * The range test runs on uintptr_t: comparing pointers into two
+     * different objects with < is undefined (C99 6.5.8p5), and forming
+     * output + output_size one past the end is undefined (6.5.6p8). */
     if (input != NULL && output != NULL && input_length > 0 &&
         output_size > 0 &&
-        input < output + output_size && output < input + input_length) {
+        (uintptr_t)input < (uintptr_t)output + output_size &&
+        (uintptr_t)output < (uintptr_t)input + input_length) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
 
@@ -1602,6 +1617,22 @@ psa_status_t psa_cipher_decrypt(psa_key_id_t key,
 
     if (output_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Mirror the one-shot encrypt contract: any overlap between the
+     * declared input and output ranges is rejected. In the block modes
+     * the partial-block assembly reads only the first bytes of the
+     * input before the rest is consumed; in the stream modes an output
+     * that starts inside the ciphertext range writes over unread
+     * ciphertext. The IV prefix is consumed into a local buffer before
+     * any output is written, so it does not widen the hazard; the
+     * declared-range test stays conservative. The test runs on
+     * uintptr_t for the same reasons as in psa_cipher_encrypt(). */
+    if (input != NULL && output != NULL && input_length > 0 &&
+        output_size > 0 &&
+        (uintptr_t)input < (uintptr_t)output + output_size &&
+        (uintptr_t)output < (uintptr_t)input + input_length) {
+        return PSA_ERROR_NOT_SUPPORTED;
     }
 
     status = psa_cipher_decrypt_setup(&operation, key, alg);
