@@ -31,6 +31,8 @@
 #include <string.h>
 
 #include <wolfpsa/psa/crypto.h>
+#include <wolfpsa/psa_engine.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
 
 static int expect_status(const char *label, psa_status_t status,
                          psa_status_t expected)
@@ -989,6 +991,66 @@ static int test_volatile_attributes_reuse(void)
     return ret;
 }
 
+/* Case 17: the default devId setter agrees with how the library was built.
+ * INVALID_DEVID and WOLFPSA_DEVID_DEFAULT ask for no offload and must always
+ * be accepted; a real devId is only meaningful when the dispatch was compiled
+ * in. Which of those two the library does is not decided here: this TU is
+ * compiled without user_settings.h, so its own WOLF_CRYPTO_CB is unrelated
+ * to the flags libwolfpsa was built with, and test/Makefile already builds a
+ * sibling archive with the callbacks on. So accept either answer and assert
+ * the invariant that holds in both: the setter's verdict and the getter's
+ * report agree. */
+static int test_default_devid_setter(void)
+{
+    int ret = 0;
+    int st;
+
+    st = wolfPSA_SetDefaultDevID(INVALID_DEVID);
+    if (st != 0) {
+        printf("FAIL devid setter rejected INVALID_DEVID ret=%d\n", st);
+        ret = 1;
+    }
+
+    if (ret == 0 && wolfPSA_GetDefaultDevID() != INVALID_DEVID) {
+        printf("FAIL devid getter did not report the forced local devId\n");
+        ret = 1;
+    }
+
+    if (ret == 0) {
+        st = wolfPSA_SetDefaultDevID(7);
+        if (st == 0) {
+            /* Accepted: the library dispatches, so it has to use the value. */
+            if (wolfPSA_GetDefaultDevID() != 7) {
+                printf("FAIL accepted devId was not reported back\n");
+                ret = 1;
+            }
+        }
+        else if (st == WC_NO_ERR_TRACE(NOT_COMPILED_IN)) {
+            /* Refused: no dispatch was compiled in, so nothing may change. */
+            if (wolfPSA_GetDefaultDevID() != INVALID_DEVID) {
+                printf("FAIL rejected devId still changed the default\n");
+                ret = 1;
+            }
+        }
+        else {
+            printf("FAIL devid setter returned neither success nor"
+                   " NOT_COMPILED_IN ret=%d\n", st);
+            ret = 1;
+        }
+    }
+
+    /* Hand the choice back to wolfCrypt, so this case leaves the process in
+     * the state it found it in. */
+    st = wolfPSA_SetDefaultDevID(WOLFPSA_DEVID_DEFAULT);
+    if (st != 0) {
+        printf("FAIL devid setter rejected WOLFPSA_DEVID_DEFAULT ret=%d\n",
+               st);
+        ret = 1;
+    }
+
+    return ret;
+}
+
 int main(void)
 {
     psa_status_t st;
@@ -1061,6 +1123,10 @@ int main(void)
 
     /* Case 16: those attributes still work as a key-creation template */
     if (test_volatile_attributes_reuse() != 0)
+        return 1;
+
+    /* Case 17: the default devId setter agrees with the build */
+    if (test_default_devid_setter() != 0)
         return 1;
 
     printf("PSA 1.4 misc test: OK\n");

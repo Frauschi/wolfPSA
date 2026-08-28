@@ -30,7 +30,12 @@ extern "C" {
 #define NO_OLD_TLS
 #define NO_FILESYSTEM
 
-#define HAVE_GETRANDOM
+/* Valued 1 to match the autotools config.h of the sibling wolfSSL, which
+ * defines it the same way on Linux. A test that includes a wolfpsa header
+ * pulls that config.h in as well (the headers include it under
+ * HAVE_CONFIG_H), and a bare #define here would collide with it under
+ * -Werror. Identical redefinitions are permitted; differing ones are not. */
+#define HAVE_GETRANDOM 1
 #define HAVE_HASHDRBG
 
 #define HAVE_ECC

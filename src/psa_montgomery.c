@@ -295,7 +295,8 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
     priv_len = (word32)private_key_size;
     pub_len = (word32)public_key_size;
 
-    ret = wc_curve448_init(&key);
+    ret = wc_curve448_init_ex(&key, NULL,
+                              wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
@@ -306,6 +307,12 @@ psa_status_t psa_asymmetric_generate_key_x448(psa_key_type_t key_type,
     }
 
     ret = wc_curve448_make_key(&rng, CURVE448_KEY_SIZE, &key);
+    /* Same offload caveat as the X25519 path above. */
+    if ((ret == 0) && (!key.privSet)) {
+        wc_FreeRng(&rng);
+        wc_curve448_free(&key);
+        return PSA_ERROR_HARDWARE_FAILURE;
+    }
     if (ret == 0) {
         ret = wc_curve448_export_private_raw_ex(&key, private_key, &priv_len,
                                                 EC448_LITTLE_ENDIAN);
@@ -335,7 +342,7 @@ psa_status_t psa_asymmetric_export_public_key_x448(psa_key_type_t key_type,
                                                    size_t *output_length)
 {
     int ret;
-    uint8_t priv[CURVE448_KEY_SIZE];
+    word32 pub_len;
 
     if ((key_type != PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY) &&
          key_type != PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_MONTGOMERY)) ||
@@ -353,12 +360,24 @@ psa_status_t psa_asymmetric_export_public_key_x448(psa_key_type_t key_type,
         if (key_buffer_size != CURVE448_KEY_SIZE) {
             return PSA_ERROR_INVALID_ARGUMENT;
         }
-        XMEMCPY(priv, key_buffer, CURVE448_KEY_SIZE);
-        priv[0] &= 252;
-        priv[55] |= 128;
-        ret = wc_curve448_make_pub(CURVE448_KEY_SIZE, output,
-                                   CURVE448_KEY_SIZE, priv);
-        wc_ForceZero(priv, sizeof(priv));
+        curve448_key key;
+
+        /* Derive through a key object rather than wc_curve448_make_pub():
+         * the keyless form is documented as routable to whichever device
+         * happens to be registered, which would ignore the configured devId
+         * and defeat forcing local execution. */
+        ret = wc_curve448_init_ex(&key, NULL, wolfPSA_GetDefaultDevID());
+        if (ret == 0) {
+            /* import_private_ex applies the curve448 clamp itself */
+            ret = wc_curve448_import_private_ex(key_buffer, CURVE448_KEY_SIZE,
+                                                &key, EC448_LITTLE_ENDIAN);
+            if (ret == 0) {
+                pub_len = CURVE448_KEY_SIZE;
+                ret = wc_curve448_export_public_ex(&key, output, &pub_len,
+                                                   EC448_LITTLE_ENDIAN);
+            }
+            wc_curve448_free(&key);
+        }
     }
     else {
         if (key_buffer_size != CURVE448_KEY_SIZE) {
@@ -409,11 +428,13 @@ psa_status_t psa_asymmetric_key_agreement_x448(
     }
     out_len = (word32)output_size;
 
-    ret = wc_curve448_init(&priv);
+    ret = wc_curve448_init_ex(&priv, NULL,
+                              wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         return wc_error_to_psa_status(ret);
     }
-    ret = wc_curve448_init(&pub);
+    ret = wc_curve448_init_ex(&pub, NULL,
+                              wolfPSA_GetDefaultDevID());
     if (ret != 0) {
         wc_curve448_free(&priv);
         return wc_error_to_psa_status(ret);
