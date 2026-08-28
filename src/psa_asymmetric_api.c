@@ -1355,6 +1355,13 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     }
 
 #ifdef HAVE_ECC
+#if defined(ECC_TIMING_RESISTANT) && defined(WC_NO_RNG)
+    /* Blinding is compiled in but no RNG exists: wolfCrypt would fail
+     * late in wc_ecc_shared_secret() with MISSING_RNG_E, so report the
+     * combination as unsupported up front. */
+    wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+    return PSA_ERROR_NOT_SUPPORTED;
+#endif
     curve_id = wc_psa_get_ecc_curve_id(attributes.type, attributes.bits);
     if (curve_id == ECC_CURVE_INVALID) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
