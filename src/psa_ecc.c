@@ -438,7 +438,11 @@ psa_status_t psa_asymmetric_export_public_key_ecc(psa_key_type_t key_type,
         }
     }
     else {
-        ret = wc_ecc_import_x963(key_buffer, (word32)key_buffer_size, &ecc);
+        /* Pin the point to the curve from the key attributes: a point
+         * that is not on this curve must fail, not be reinterpreted on
+         * the default curve for the coordinate size. */
+        ret = wc_ecc_import_x963_ex(key_buffer, (word32)key_buffer_size,
+                                    &ecc, curve_id);
     }
     
     if (ret != 0) {
