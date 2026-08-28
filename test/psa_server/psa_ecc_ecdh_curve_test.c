@@ -6,10 +6,12 @@
  * Brainpool-P256) peer key was imported on the wrong curve, so key
  * agreement failed or used the wrong domain parameters.
  *
- * Requires a build with HAVE_ECC_KOBLITZ; without it this test is a
- * no-op. test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the
- * same USER_SETTINGS_PATH as the library build, so the gate below
- * tracks the libwolfpsa configuration.
+ * The SECP_R1 round trip runs in every build (it also covers the
+ * blinding RNG plumbing under ECC_TIMING_RESISTANT); the secp256k1 and
+ * Brainpool-P256 cases run when the matching curve family is enabled.
+ * test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the same
+ * USER_SETTINGS_PATH as the library build, so the gates below track
+ * the libwolfpsa configuration.
  */
 
 #include <psa/crypto.h>
@@ -18,8 +20,6 @@
 #endif
 #include <stdio.h>
 #include <string.h>
-
-#ifdef HAVE_ECC_KOBLITZ
 
 #define PUB_LEN   65
 #define SECRET_LEN 32
@@ -110,7 +110,15 @@ int main(void)
         return 1;
     }
 
+    /* Unconditional: covers the RNG plumbing in the default build. */
+    test_ecdh_family(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1), 256);
+#ifdef HAVE_ECC_KOBLITZ
     test_ecdh_family(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_K1), 256);
+#endif
+#ifdef HAVE_ECC_BRAINPOOL
+    test_ecdh_family(
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_BRAINPOOL_P_R1), 256);
+#endif
     if (failures == 0) {
         printf("ecdh-curve tests: all passed\n");
         return 0;
@@ -118,13 +126,3 @@ int main(void)
     printf("ecdh-curve tests: %d failure(s)\n", failures);
     return 1;
 }
-
-#else /* !HAVE_ECC_KOBLITZ */
-
-int main(void)
-{
-    printf("ecdh-curve tests: skipped (no HAVE_ECC_KOBLITZ)\n");
-    return 0;
-}
-
-#endif /* HAVE_ECC_KOBLITZ */

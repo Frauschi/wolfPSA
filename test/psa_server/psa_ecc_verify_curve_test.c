@@ -6,10 +6,11 @@
  * Brainpool-P256) public key was imported on the default curve, so
  * verification of a valid signature failed.
  *
- * Requires a build with HAVE_ECC_KOBLITZ; without it this test is a
- * no-op. test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the
- * same USER_SETTINGS_PATH as the library build, so the gate below
- * tracks the libwolfpsa configuration.
+ * The SECP_R1 round trip runs in every build; the secp256k1 and
+ * Brainpool-P256 cases run when the matching curve family is enabled.
+ * test/Makefile compiles with -DWOLFSSL_USER_SETTINGS and the same
+ * USER_SETTINGS_PATH as the library build, so the gates below track
+ * the libwolfpsa configuration.
  */
 
 #include <psa/crypto.h>
@@ -18,8 +19,6 @@
 #endif
 #include <stdio.h>
 #include <string.h>
-
-#ifdef HAVE_ECC_KOBLITZ
 
 #define HASH_LEN  32
 #define PUB_LEN   65
@@ -113,9 +112,20 @@ int main(void)
         return 1;
     }
 
+    /* Unconditional in any ECC build. */
+    test_curve_family(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1),
+                      PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1),
+                      256);
+#ifdef HAVE_ECC_KOBLITZ
     test_curve_family(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_K1),
                       PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_K1),
                       256);
+#endif
+#ifdef HAVE_ECC_BRAINPOOL
+    test_curve_family(
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_BRAINPOOL_P_R1),
+        PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_BRAINPOOL_P_R1), 256);
+#endif
     if (failures == 0) {
         printf("verify-curve tests: all passed\n");
         return 0;
@@ -123,13 +133,3 @@ int main(void)
     printf("verify-curve tests: %d failure(s)\n", failures);
     return 1;
 }
-
-#else /* !HAVE_ECC_KOBLITZ */
-
-int main(void)
-{
-    printf("verify-curve tests: skipped (no HAVE_ECC_KOBLITZ)\n");
-    return 0;
-}
-
-#endif /* HAVE_ECC_KOBLITZ */
