@@ -127,7 +127,7 @@ static void psa_xof_free_ctx(psa_xof_operation_ctx_t *ctx)
 
     /* free input accumulation buffer */
     if (ctx->ibuf != NULL) {
-        wc_ForceZero(ctx->ibuf, (word32)ctx->ibuf_cap);
+        wc_ForceZero(ctx->ibuf, ctx->ibuf_cap);
         XFREE(ctx->ibuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         ctx->ibuf = NULL;
     }
@@ -164,7 +164,7 @@ static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, size_t need_cap)
         XMEMCPY(newbuf, ctx->ibuf, ctx->ibuf_len);
 
     if (ctx->ibuf != NULL) {
-        wc_ForceZero(ctx->ibuf, (word32)ctx->ibuf_cap);
+        wc_ForceZero(ctx->ibuf, ctx->ibuf_cap);
         XFREE(ctx->ibuf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
 
@@ -310,12 +310,14 @@ psa_status_t psa_xof_update(psa_xof_operation_t *operation,
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 
-    /* accumulate input for the deferred single Absorb() call; do the
-     * sizing in size_t (the word32 sum wraps past 2^32) and keep the
-     * total within the word32 range the backend Absorb() takes */
-    need = ctx->ibuf_len + input_length;
-    if (need > (size_t)UINT32_MAX)
+    /* accumulate input for the deferred single Absorb() call; keep the
+     * total within the word32 range the backend Absorb() takes. The
+     * subtraction form is what holds where size_t is 32 bits, where
+     * need > UINT32_MAX can never be true after the sum wraps
+     * (ibuf_len stays <= UINT32_MAX, so the RHS cannot underflow). */
+    if (input_length > (size_t)UINT32_MAX - ctx->ibuf_len)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
+    need = ctx->ibuf_len + input_length;
 
     if (psa_xof_ibuf_grow(ctx, need) != 0)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INSUFFICIENT_MEMORY);
