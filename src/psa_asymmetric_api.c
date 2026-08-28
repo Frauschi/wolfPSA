@@ -208,7 +208,10 @@ static int wolfpsa_key_agreement_alg_permitted(psa_algorithm_t key_alg,
  *    any concrete hash variant of the same family.
  *  - For VERIFY usages, PSA_ALG_ECDSA(h) in the policy permits
  *    PSA_ALG_DETERMINISTIC_ECDSA(h) requests and vice versa (same hash), per
- *    PSA 1.4 verify-equivalence. */
+ *    PSA 1.4 verify-equivalence. The two HashML-DSA families are
+ *    interchangeable for VERIFY usages the same way: FIPS 204
+ *    verification is family-independent, so the dispatch (and this
+ *    function) accepts either family when the hash matches. */
 static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
                                       psa_algorithm_t alg,
                                       psa_key_usage_t requested_usage)
@@ -240,13 +243,27 @@ static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
                ((key_alg & ~0x000000ffU) == (alg & ~0x000000ffU));
     }
     /* PSA 1.4 ECDSA verify-equivalence: for verify usages, ECDSA and
-     * DETERMINISTIC_ECDSA with the same hash are interchangeable. */
+     * DETERMINISTIC_ECDSA with the same hash are interchangeable.
+     * PSA_ALG_IS_HASH_ML_DSA is true for both the hedged and the
+     * deterministic family (its mask ~0x1ff covers the family
+     * selector bit), so the test below is the cross-family
+     * verify-equivalence: a wildcard policy of either family, or a
+     * concrete policy with a matching hash, admits the other family.
+     * This applies to verify usages only; signing stays strict, since
+     * hedged and deterministic signing are different operations. */
     if ((requested_usage & (PSA_KEY_USAGE_VERIFY_HASH |
                             PSA_KEY_USAGE_VERIFY_MESSAGE)) != 0) {
         if (PSA_ALG_IS_ECDSA(alg) && PSA_ALG_IS_ECDSA(key_alg)) {
             /* Same hash, different determinism bit */
             if ((PSA_ALG_GET_HASH(alg) == PSA_ALG_GET_HASH(key_alg)) &&
                 (PSA_ALG_GET_HASH(alg) != PSA_ALG_NONE)) {
+                return 1;
+            }
+        }
+        if (PSA_ALG_IS_HASH_ML_DSA(alg) &&
+            PSA_ALG_IS_HASH_ML_DSA(key_alg)) {
+            if (PSA_ALG_GET_HASH(key_alg) == PSA_ALG_ANY_HASH ||
+                PSA_ALG_GET_HASH(key_alg) == PSA_ALG_GET_HASH(alg)) {
                 return 1;
             }
         }

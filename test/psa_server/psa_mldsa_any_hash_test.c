@@ -52,13 +52,28 @@ static void sign_case(psa_key_id_t key, psa_algorithm_t request_alg,
            want, what);
 }
 
+static void verify_case(psa_key_id_t key, psa_algorithm_t request_alg,
+                        const uint8_t *digest, const uint8_t *sig,
+                        size_t sig_len, psa_status_t want, const char *what)
+{
+    expect(psa_verify_hash(key, request_alg, digest, HASH_LEN, sig,
+                           sig_len),
+           want, what);
+}
+
 int main(void)
 {
     psa_status_t status;
     psa_key_id_t hedged_key = PSA_KEY_ID_NULL;
     psa_key_id_t det_key = PSA_KEY_ID_NULL;
+    psa_key_id_t concrete_key = PSA_KEY_ID_NULL;
     psa_algorithm_t hedged;
     psa_algorithm_t det;
+    uint8_t digest[HASH_LEN];
+    uint8_t hedged_sig[SIG_MAX];
+    size_t hedged_sig_len = 0;
+    uint8_t det_sig[SIG_MAX];
+    size_t det_sig_len = 0;
 
     status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
@@ -79,6 +94,10 @@ int main(void)
     if (status != PSA_SUCCESS) {
         return 1;
     }
+    status = make_key(&concrete_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256));
+    if (status != PSA_SUCCESS) {
+        return 1;
+    }
 
     /* Hedged wildcard policy: accepts hedged, rejects deterministic. */
     sign_case(hedged_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
@@ -95,6 +114,37 @@ int main(void)
     sign_case(det_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
               PSA_ERROR_NOT_PERMITTED,
               "deterministic policy + hedged request");
+
+    /* Verification is family-independent (FIPS 204: both families
+     * dispatch to the same VerifyCtxHash), so a key with a wildcard
+     * policy of one family admits a verify request from the other
+     * family. Pre-fix the policy check returned NOT_PERMITTED for the
+     * wildcard policy that the pre-PR mask used to admit. */
+    memset(digest, 0x7e, sizeof(digest));
+    expect(psa_sign_hash(hedged_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
+                         digest, HASH_LEN, hedged_sig, SIG_MAX,
+                         &hedged_sig_len),
+           PSA_SUCCESS, "sign digest with hedged key");
+    expect(psa_sign_hash(det_key,
+                         PSA_ALG_DETERMINISTIC_HASH_ML_DSA(PSA_ALG_SHA_256),
+                         digest, HASH_LEN, det_sig, SIG_MAX, &det_sig_len),
+           PSA_SUCCESS, "sign digest with deterministic key");
+
+    verify_case(hedged_key,
+                PSA_ALG_DETERMINISTIC_HASH_ML_DSA(PSA_ALG_SHA_256), digest,
+                hedged_sig, hedged_sig_len, PSA_SUCCESS,
+                "hedged wildcard policy + deterministic verify request");
+    verify_case(det_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256), digest,
+                det_sig, det_sig_len, PSA_SUCCESS,
+                "deterministic wildcard policy + hedged verify request");
+
+    /* The verify equivalence must not loosen the hash match: a
+     * concrete policy still rejects a different hash, even across
+     * families. */
+    verify_case(concrete_key,
+                PSA_ALG_DETERMINISTIC_HASH_ML_DSA(PSA_ALG_SHA_384), digest,
+                det_sig, det_sig_len, PSA_ERROR_NOT_PERMITTED,
+                "concrete policy + cross-family different-hash request");
 
     if (failures == 0) {
         printf("any-hash tests: all passed\n");
