@@ -346,7 +346,7 @@ psa_status_t psa_asymmetric_check_key_type_supported(psa_key_type_t type)
             #endif
             
             case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
-            #if defined(HAVE_ECC) && defined(HAVE_BRAINPOOL)
+            #if defined(HAVE_ECC) && defined(HAVE_ECC_BRAINPOOL)
                 return PSA_SUCCESS;
             #else
                 return PSA_ERROR_NOT_SUPPORTED;
@@ -505,7 +505,7 @@ psa_status_t psa_asymmetric_check_key_size_valid(psa_key_type_t type, size_t bit
             #endif
             
             case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
-            #if defined(HAVE_ECC) && defined(HAVE_BRAINPOOL)
+            #if defined(HAVE_ECC) && defined(HAVE_ECC_BRAINPOOL)
                 /* Check key size */
                 switch (bits) {
                     case 256:
