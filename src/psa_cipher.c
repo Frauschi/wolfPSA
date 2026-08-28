@@ -1028,6 +1028,7 @@ pkcs7_enc_partial_done:
                 if (ctx->partial_len > 0) {
                     size_t needed = block_size - ctx->partial_len;
                     uint8_t block[AES_BLOCK_SIZE];
+                    psa_status_t status = PSA_SUCCESS;
 
                     XMEMCPY(block, ctx->partial, ctx->partial_len);
                     XMEMCPY(block + ctx->partial_len, input, needed);
@@ -1037,8 +1038,8 @@ pkcs7_enc_partial_done:
                         ret = wc_Des3_CbcDecrypt(&ctx->des3, output, block,
                                                 (word32)block_size);
 #else
-                        return wolfpsa_cipher_fail(operation,
-                                                   PSA_ERROR_NOT_SUPPORTED);
+                        status = PSA_ERROR_NOT_SUPPORTED;
+                        goto pkcs7_dec_partial_done;
 #endif
                     }
                     else {
@@ -1046,12 +1047,18 @@ pkcs7_enc_partial_done:
                                                (word32)block_size);
                     }
                     if (ret != 0) {
-                        return wolfpsa_cipher_fail(operation,
-                                                   wc_error_to_psa_status(ret));
+                        status = wc_error_to_psa_status(ret);
+                        goto pkcs7_dec_partial_done;
                     }
                     output_offset += block_size;
                     input_offset += needed;
                     ctx->partial_len = 0;
+
+pkcs7_dec_partial_done:
+                    wc_ForceZero(block, sizeof(block));
+                    if (status != PSA_SUCCESS) {
+                        return wolfpsa_cipher_fail(operation, status);
+                    }
                 }
 
                 full_blocks_len = process_len - output_offset;
