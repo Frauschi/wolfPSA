@@ -80,8 +80,15 @@ static const char *algo_name(int algo_type)
     }
 }
 
+/* Sink for the borrowed HMAC key, so the read below is not optimised away. */
+static volatile byte key_sink;
+
 /* Records the dispatch and declines it, so wolfCrypt falls back to software
- * and the PSA results stay correct. */
+ * and the PSA results stay correct.
+ *
+ * The HMAC arm reads the key the way a real backend would. wc_HmacSetKey()
+ * stores the caller's buffer in Hmac.keyRaw rather than copying it, so this
+ * is what catches the operation outliving the key material. */
 static int count_cb(int devId, wc_CryptoInfo *info, void *ctx)
 {
     (void)ctx;
@@ -94,6 +101,14 @@ static int count_cb(int devId, wc_CryptoInfo *info, void *ctx)
         seen[info->algo_type]++;
     }
     seen_total++;
+
+    if (info != NULL && info->algo_type == WC_ALGO_TYPE_HMAC &&
+        info->hmac.hmac != NULL && info->hmac.hmac->keyRaw != NULL) {
+        word16 i;
+        for (i = 0; i < info->hmac.hmac->keyLen; i++) {
+            key_sink = info->hmac.hmac->keyRaw[i];
+        }
+    }
 
     if (mute_keygen_pk_type != WC_PK_TYPE_NONE && info != NULL &&
         info->algo_type == WC_ALGO_TYPE_PK &&
@@ -230,6 +245,77 @@ static int exercise_ecdsa(void)
     return 0;
 }
 
+#ifdef WOLFSSL_ECDSA_DETERMINISTIC_K
+/* PSA_ALG_DETERMINISTIC_ECDSA promises RFC 6979, and the crypto callback
+ * contract carries no deterministic flag, so wolfPSA pins that algorithm to
+ * local execution. Two things have to hold: the signature is reproducible,
+ * and the sign never reaches the device even though one is selected. The
+ * second is the real guard, because the declining callback in this test
+ * leaves the software path reproducible either way.
+ *
+ * Called with a device selected and the counters freshly reset. */
+static int check_deterministic_ecdsa_stays_local(void)
+{
+    uint8_t digest[32];
+    uint8_t sig_a[PSA_SIGNATURE_MAX_SIZE];
+    uint8_t sig_b[PSA_SIGNATURE_MAX_SIZE];
+    size_t len_a = 0;
+    size_t len_b = 0;
+    psa_algorithm_t alg = PSA_ALG_DETERMINISTIC_ECDSA(PSA_ALG_SHA_256);
+    psa_key_attributes_t attr = psa_key_attributes_init();
+    psa_key_id_t key = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int ret = 0;
+
+    XMEMSET(digest, 0x33, sizeof(digest));
+
+    psa_set_key_type(&attr,
+                     PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attr, 256);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_HASH);
+    psa_set_key_algorithm(&attr, alg);
+
+    st = psa_generate_key(&attr, &key);
+    if (st != PSA_SUCCESS)
+        return fail("deterministic ecdsa generate", st);
+
+    /* Key generation is allowed to offload; only the signing is measured. */
+    reset_counts(expect_devid);
+
+    st = psa_sign_hash(key, alg, digest, sizeof(digest),
+                       sig_a, sizeof(sig_a), &len_a);
+    if (st != PSA_SUCCESS) {
+        ret = fail("deterministic ecdsa sign 1", st);
+    }
+
+    if (ret == 0) {
+        st = psa_sign_hash(key, alg, digest, sizeof(digest),
+                           sig_b, sizeof(sig_b), &len_b);
+        if (st != PSA_SUCCESS)
+            ret = fail("deterministic ecdsa sign 2", st);
+    }
+
+    if (ret == 0 && (len_a != len_b ||
+                     XMEMCMP(sig_a, sig_b, len_a) != 0)) {
+        printf("FAIL deterministic ECDSA produced two different"
+               " signatures\n");
+        ret = 1;
+    }
+
+    if (ret == 0 && seen[WC_ALGO_TYPE_PK] != 0) {
+        printf("FAIL deterministic ECDSA dispatched %d pk operation(s) to a"
+               " device\n", seen[WC_ALGO_TYPE_PK]);
+        ret = 1;
+    }
+    else if (ret == 0) {
+        printf("deterministic ECDSA: stayed local\n");
+    }
+
+    psa_destroy_key(key);
+    return ret;
+}
+#endif /* WOLFSSL_ECDSA_DETERMINISTIC_K */
+
 #ifdef HAVE_ED25519
 static int exercise_eddsa(void)
 {
@@ -323,6 +409,48 @@ static int exercise_keywrap(void)
     return ret;
 }
 #endif /* !NO_AES && HAVE_AES_KEYWRAP */
+
+#ifdef HAVE_CURVE448
+/* X448 keygen plus agreement, so the curve448 crypto callbacks wolfCrypt
+ * gained are actually exercised rather than assumed. */
+static int exercise_x448(void)
+{
+    uint8_t peer[56];
+    uint8_t secret[56];
+    size_t peer_len = 0;
+    size_t secret_len = 0;
+    psa_key_attributes_t attr = psa_key_attributes_init();
+    psa_key_id_t key = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int ret = 0;
+
+    psa_set_key_type(&attr,
+                     PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY));
+    psa_set_key_bits(&attr, 448);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_DERIVE |
+                                   PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attr, PSA_ALG_ECDH);
+
+    st = psa_generate_key(&attr, &key);
+    if (st != PSA_SUCCESS)
+        return fail("x448 generate", st);
+
+    st = psa_export_public_key(key, peer, sizeof(peer), &peer_len);
+    if (st != PSA_SUCCESS) {
+        ret = fail("x448 export public", st);
+    }
+
+    if (ret == 0) {
+        st = psa_raw_key_agreement(PSA_ALG_ECDH, key, peer, peer_len,
+                                   secret, sizeof(secret), &secret_len);
+        if (st != PSA_SUCCESS)
+            ret = fail("psa_raw_key_agreement x448", st);
+    }
+
+    psa_destroy_key(key);
+    return ret;
+}
+#endif /* HAVE_CURVE448 */
 
 #ifndef NO_RSA
 static int exercise_rsa(void)
@@ -528,6 +656,9 @@ static int exercise_all(void)
 #ifdef HAVE_ED25519
     ret |= exercise_eddsa();
 #endif
+#ifdef HAVE_CURVE448
+    ret |= exercise_x448();
+#endif
 #ifndef NO_RSA
     ret |= exercise_rsa();
 #endif
@@ -550,7 +681,7 @@ static int require_seen(int algo_type)
 /* A device that generates the key but keeps the scalar leaves the private
  * key at zero. Exporting that would hand the caller an all-zero private key,
  * so psa_generate_key() must fail instead. Exercises the guards in
- * psa_asymmetric_generate_key_ecc(), _ed25519() and _x25519().
+ * psa_asymmetric_generate_key_ecc(), _ed25519(), _x25519() and _x448().
  *
  * Ed448 has no case here on purpose: wc_ed448_make_key() carries no
  * wc_CryptoCb_* dispatch at all, only sign and verify, so no device can hold
@@ -626,6 +757,14 @@ static int check_keygen_silent_device_all(void)
     }
     reset_counts(TEST_DEVID);
 #endif
+#ifdef HAVE_CURVE448
+    if (ret == 0) {
+        ret = check_keygen_silent_device("x448", WC_PK_TYPE_CURVE448_KEYGEN,
+                  PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY), 448,
+                  PSA_KEY_USAGE_DERIVE, PSA_ALG_ECDH);
+    }
+    reset_counts(TEST_DEVID);
+#endif
 
     return ret;
 }
@@ -680,8 +819,11 @@ int main(void)
      * own selection picks the only registered device, so every family must
      * reach it. An algorithm that never ran its wc_*Init() carries devId 0
      * instead and goes missing here. */
-    if (wc_CryptoCb_RegisterDevice(PROBE_DEVID, count_cb, NULL) != 0) {
-        printf("FAIL wc_CryptoCb_RegisterDevice(probe)\n");
+    /* Through wolfPSA's own wrappers, which is what a shared-library user
+     * has to use: a bare wc_CryptoCb_RegisterDevice() binds by link order
+     * and can land in libwolfssl's device table instead of this one. */
+    if (wolfPSA_RegisterCryptoCb(PROBE_DEVID, count_cb, NULL) != 0) {
+        printf("FAIL wolfPSA_RegisterCryptoCb(probe)\n");
         return 1;
     }
 
@@ -705,9 +847,9 @@ int main(void)
     /* Phase 3: an explicit devId must win over that selection. The probe
      * device stays registered, so a stale read shows up as a dispatch on
      * PROBE_DEVID rather than TEST_DEVID. */
-    if (ret == 0 && wc_CryptoCb_RegisterDevice(TEST_DEVID, count_cb,
-                                               NULL) != 0) {
-        printf("FAIL wc_CryptoCb_RegisterDevice(test)\n");
+    if (ret == 0 && wolfPSA_RegisterCryptoCb(TEST_DEVID, count_cb,
+                                             NULL) != 0) {
+        printf("FAIL wolfPSA_RegisterCryptoCb(test)\n");
         ret = 1;
     }
 
@@ -730,6 +872,13 @@ int main(void)
     if (ret == 0) {
         ret = check_families();
     }
+
+#ifdef WOLFSSL_ECDSA_DETERMINISTIC_K
+    if (ret == 0) {
+        ret = check_deterministic_ecdsa_stays_local();
+    }
+    reset_counts(TEST_DEVID);
+#endif
 
     if (ret == 0) {
         ret = check_kdf_dispatch();
@@ -766,8 +915,33 @@ int main(void)
         printf("opt-out: no dispatches\n");
     }
 
-    wc_CryptoCb_UnRegisterDevice(TEST_DEVID);
-    wc_CryptoCb_UnRegisterDevice(PROBE_DEVID);
+    /* Phase 5: WOLFPSA_DEVID_DEFAULT hands the choice back to wolfCrypt, so
+     * the opt-out and any explicit devId are both reversible. TEST_DEVID is
+     * unregistered first, leaving the probe as wolfCrypt's own selection. */
+    wolfPSA_UnRegisterCryptoCb(TEST_DEVID);
+
+    if (ret == 0 && wolfPSA_SetDefaultDevID(WOLFPSA_DEVID_DEFAULT) != 0) {
+        printf("FAIL wolfPSA_SetDefaultDevID(WOLFPSA_DEVID_DEFAULT)\n");
+        ret = 1;
+    }
+
+    if (ret == 0 && wolfPSA_GetDefaultDevID() != PROBE_DEVID) {
+        printf("FAIL default was not handed back to wolfCrypt (got %d,"
+               " want %d)\n", wolfPSA_GetDefaultDevID(), PROBE_DEVID);
+        ret = 1;
+    }
+
+    if (ret == 0) {
+        printf("handed back to wolfCrypt (devId %d):\n", PROBE_DEVID);
+        reset_counts(PROBE_DEVID);
+        ret = exercise_all();
+    }
+
+    if (ret == 0) {
+        ret = check_families();
+    }
+
+    wolfPSA_UnRegisterCryptoCb(PROBE_DEVID);
 
     if (ret != 0)
         return 1;

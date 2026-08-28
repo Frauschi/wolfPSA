@@ -134,6 +134,14 @@ WOLFPSA_1.0 {
         wolfpsa_test_set_next_key_id;
         wolfPSA_SetDefaultDevID;
         wolfPSA_GetDefaultDevID;
+        /* The wolfCrypt objects a devId selects live inside this library,
+         * so a shared-library user has to register the device against this
+         * copy of the callback table rather than their own wolfSSL. The raw
+         * wc_CryptoCb_* names are deliberately not exported: an application
+         * that also links libwolfssl would bind them by link order, and
+         * silently register into the wrong table. */
+        wolfPSA_RegisterCryptoCb;
+        wolfPSA_UnRegisterCryptoCb;
     local:
         *;
 };
