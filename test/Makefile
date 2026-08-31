@@ -28,17 +28,23 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
-# Mirror the library build so the test translation units see the same
-# user_settings.h (and therefore the same wolfCrypt feature macros) as
-# libwolfpsa. USER_SETTINGS_PATH takes the same value as the library
-# build; by default it resolves to the repository root, which ships the
-# baseline user_settings.h.
+# The ECC curve regression tests read the library's feature macros
+# (they include <user_settings.h> and branch on HAVE_ECC_KOBLITZ /
+# HAVE_ECC_BRAINPOOL), so only they mirror the library build:
+# -DWOLFSSL_USER_SETTINGS plus USER_SETTINGS_PATH, which takes the same
+# value as the library build and by default resolves to the repository
+# root, which ships the baseline user_settings.h. The flag and the
+# include path stay out of the shared CPPFLAGS on purpose: every other
+# test TU links the autotools-built libwolfssl and must see that
+# library's own configuration (config.h, via HAVE_CONFIG_H) - layering
+# wolfPSA's user_settings.h on top would let a test declare wolfCrypt
+# structs (Hmac, wc_Sha256) with a layout the linked library does not
+# use.
 USER_SETTINGS_PATH ?= $(WOLFPSA_PATH)
 WOLFSSL_CPPFLAGS ?= -DWOLFSSL_USER_SETTINGS
 
 CPPFLAGS += -DHAVE_CONFIG_H -DWOLFSSL_HAVE_PSA -DHAVE_PK_CALLBACKS
-CPPFLAGS += $(WOLFSSL_CPPFLAGS)
-CPPFLAGS += -I$(WOLFSSL_PATH) -I$(USER_SETTINGS_PATH) -I$(WOLFSSL_PATH)/wolfssl
+CPPFLAGS += -I$(WOLFSSL_PATH) -I$(WOLFSSL_PATH)/wolfssl
 ifneq ($(WOLFSSL_BUILD_DIR),)
 CPPFLAGS += -I$(WOLFSSL_BUILD_DIR)
 endif
@@ -148,6 +154,13 @@ psa_rsa_pss_interop_test: require-wolfssl-lib $(PSA_RSA_PSS_TEST_OBJS)
 
 $(PSA_14_TESTS): %: require-wolfssl-lib psa_server/%.o
 	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+# Target-specific: only the curve tests compile with the library's
+# user_settings.h (see the comment at USER_SETTINGS_PATH above). The
+# value reaches the psa_server/%.o prerequisite's recipe, which is what
+# needs the flag and the include path.
+psa_ecc_verify_curve_test psa_ecc_ecdh_curve_test psa_ecc_curve_caps_test: \
+	CPPFLAGS += $(WOLFSSL_CPPFLAGS) -I$(USER_SETTINGS_PATH)
 
 $(PSA_REGRESSION_TESTS): %: require-wolfssl-lib psa_server/%.o
 	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
