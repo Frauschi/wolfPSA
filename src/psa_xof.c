@@ -87,10 +87,12 @@ typedef struct psa_xof_operation_ctx {
     word32          buf_off; /* next unread byte in buf */
     word32          buf_len; /* valid bytes in buf (== block_size once filled) */
 
-    /* accumulated input buffer (absorb-once strategy) */
+    /* accumulated input buffer (absorb-once strategy); the backend
+     * Absorb() takes word32 lengths, so ibuf_len stays <= UINT32_MAX
+     * and size_t keeps the grow arithmetic overflow-free */
     uint8_t        *ibuf;
-    word32          ibuf_len;  /* bytes written */
-    word32          ibuf_cap;  /* bytes allocated */
+    size_t          ibuf_len;  /* bytes written */
+    size_t          ibuf_cap;  /* bytes allocated */
 } psa_xof_operation_ctx_t;
 
 /* ------------------------------------------------------------------ helpers */
@@ -135,18 +137,24 @@ static void psa_xof_free_ctx(psa_xof_operation_ctx_t *ctx)
  * Grow the input accumulation buffer to hold at least need_cap bytes total.
  * Returns 0 on success, -1 on allocation failure.
  */
-static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, word32 need_cap)
+static int psa_xof_ibuf_grow(psa_xof_operation_ctx_t *ctx, size_t need_cap)
 {
     uint8_t *newbuf;
-    word32   new_cap;
+    size_t   new_cap;
 
     if (need_cap <= ctx->ibuf_cap)
         return 0;
 
-    /* double-or-fit growth */
+    /* double-or-fit growth; stop doubling once past half of UINT32_MAX
+     * so the multiply cannot wrap (need_cap is <= UINT32_MAX) */
     new_cap = ctx->ibuf_cap ? ctx->ibuf_cap : 256u;
-    while (new_cap < need_cap)
+    while (new_cap < need_cap) {
+        if (new_cap > ((size_t)UINT32_MAX) / 2u) {
+            new_cap = (size_t)UINT32_MAX;
+            break;
+        }
         new_cap *= 2u;
+    }
 
     newbuf = (uint8_t *)XMALLOC(new_cap, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (newbuf == NULL)
@@ -256,23 +264,24 @@ psa_status_t psa_xof_set_context(psa_xof_operation_t *operation,
     wolfpsa_trace("psa_xof_set_context(context_length=%zu)", context_length);
 
     if (ctx == NULL)
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_BAD_STATE);
 
     /*
      * PSA 1.4: set_context is only valid for algorithms where
      * PSA_ALG_XOF_HAS_CONTEXT is true.  Neither SHAKE128 nor SHAKE256
      * has a context field, so always return INVALID_ARGUMENT here.
+     * A rejected context aborts the operation like any other error.
      */
     if (!PSA_ALG_XOF_HAS_CONTEXT(ctx->alg))
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 
     /* Unreachable for SHAKE (kept for future context-supporting algs) */
     if (ctx->squeezing || ctx->ibuf_len > 0)
-        return PSA_ERROR_BAD_STATE;
+        return wolfpsa_xof_fail(operation, PSA_ERROR_BAD_STATE);
 
     (void)context;
     (void)context_length;
-    return PSA_ERROR_INVALID_ARGUMENT;
+    return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 }
 
 /* ========================================================= psa_xof_update */
@@ -282,6 +291,7 @@ psa_status_t psa_xof_update(psa_xof_operation_t *operation,
                              size_t               input_length)
 {
     psa_xof_operation_ctx_t *ctx = psa_xof_get_ctx(operation);
+    size_t need;
 
     if (operation == NULL || (input == NULL && input_length > 0))
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
@@ -300,12 +310,20 @@ psa_status_t psa_xof_update(psa_xof_operation_t *operation,
     if (wolfpsa_check_word32_length(input_length) != PSA_SUCCESS)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
 
-    /* accumulate input for the deferred single Absorb() call */
-    if (psa_xof_ibuf_grow(ctx, ctx->ibuf_len + (word32)input_length) != 0)
+    /* accumulate input for the deferred single Absorb() call; keep the
+     * total within the word32 range the backend Absorb() takes. The
+     * subtraction form is what holds where size_t is 32 bits, where
+     * need > UINT32_MAX can never be true after the sum wraps
+     * (ibuf_len stays <= UINT32_MAX, so the RHS cannot underflow). */
+    if (input_length > (size_t)UINT32_MAX - ctx->ibuf_len)
+        return wolfpsa_xof_fail(operation, PSA_ERROR_INVALID_ARGUMENT);
+    need = ctx->ibuf_len + input_length;
+
+    if (psa_xof_ibuf_grow(ctx, need) != 0)
         return wolfpsa_xof_fail(operation, PSA_ERROR_INSUFFICIENT_MEMORY);
 
     XMEMCPY(ctx->ibuf + ctx->ibuf_len, input, input_length);
-    ctx->ibuf_len += (word32)input_length;
+    ctx->ibuf_len += input_length;
 
     return PSA_SUCCESS;
 }
@@ -340,7 +358,8 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
     if (!ctx->squeezing) {
         const uint8_t *absorb_data = (ctx->ibuf != NULL) ? ctx->ibuf
                                                           : (const uint8_t *)"";
-        word32 absorb_len = ctx->ibuf_len;
+        /* ibuf_len is kept <= UINT32_MAX by psa_xof_update */
+        word32 absorb_len = (word32)ctx->ibuf_len;
 
         switch (ctx->alg) {
 #ifdef WOLFSSL_SHAKE128
@@ -393,36 +412,48 @@ psa_status_t psa_xof_output(psa_xof_operation_t *operation,
         ctx->buf_off = 0;
         ctx->buf_len = 0;
 
-        /* 2. If caller wants >= one full block, squeeze directly. */
+        /* 2. If caller wants >= one full block, squeeze directly.
+         * The backend takes a word32 block count and the byte product
+         * must not wrap either, so squeeze in chunks for requests
+         * whose block count exceeds that range. */
         if (output_length >= (size_t)ctx->block_size) {
-            word32 n_blocks = (word32)(output_length / ctx->block_size);
-            word32 produced;
+            size_t max_blocks = ((size_t)UINT32_MAX) / ctx->block_size;
 
-            switch (ctx->alg) {
+            while (output_length >= (size_t)ctx->block_size) {
+                size_t n_blocks = output_length / ctx->block_size;
+                size_t produced;
+
+                if (n_blocks > max_blocks)
+                    n_blocks = max_blocks;
+
+                switch (ctx->alg) {
 #ifdef WOLFSSL_SHAKE128
-                case PSA_ALG_SHAKE128:
-                    ret = wc_Shake128_SqueezeBlocks(&ctx->shake, output,
-                                                    n_blocks);
-                    break;
+                    case PSA_ALG_SHAKE128:
+                        ret = wc_Shake128_SqueezeBlocks(&ctx->shake, output,
+                                                        (word32)n_blocks);
+                        break;
 #endif
 #ifdef WOLFSSL_SHAKE256
-                case PSA_ALG_SHAKE256:
-                    ret = wc_Shake256_SqueezeBlocks(&ctx->shake, output,
-                                                    n_blocks);
-                    break;
+                    case PSA_ALG_SHAKE256:
+                        ret = wc_Shake256_SqueezeBlocks(&ctx->shake, output,
+                                                        (word32)n_blocks);
+                        break;
 #endif
-                default:
-                    return wolfpsa_xof_fail(operation, PSA_ERROR_NOT_SUPPORTED);
+                    default:
+                        return wolfpsa_xof_fail(operation,
+                                                PSA_ERROR_NOT_SUPPORTED);
+                }
+
+                if (ret != 0)
+                    return wolfpsa_xof_fail(operation,
+                                            wc_error_to_psa_status(ret));
+
+                produced = n_blocks * (size_t)ctx->block_size;
+                output        += produced;
+                output_length -= produced;
             }
-
-            if (ret != 0)
-                return wolfpsa_xof_fail(operation,
-                                        wc_error_to_psa_status(ret));
-
-            produced = n_blocks * ctx->block_size;
-            output        += produced;
-            output_length -= produced;
-            continue;
+            if (output_length == 0)
+                break;
         }
 
         /* 3. Tail: squeeze one block into the staging buffer. */
@@ -470,6 +501,66 @@ psa_status_t psa_xof_abort(psa_xof_operation_t *operation)
     XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     operation->opaque = (uintptr_t)NULL;
 
+    return PSA_SUCCESS;
+}
+
+#else /* !WOLFSSL_SHAKE128 && !WOLFSSL_SHAKE256 */
+
+/*
+ * No SHAKE backend in this build.  The XOF API is declared in
+ * crypto.h and exported in wolfpsa.map, so the symbols must exist in
+ * every configuration: report PSA_ERROR_NOT_SUPPORTED at run time
+ * instead of failing at link time.
+ */
+
+psa_status_t psa_xof_setup(psa_xof_operation_t *operation,
+                           psa_algorithm_t alg)
+{
+    (void)alg;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_xof_set_context(psa_xof_operation_t *operation,
+                                 const uint8_t *context,
+                                 size_t context_length)
+{
+    (void)context;
+    (void)context_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    /* No backend: no operation can ever be active. */
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_update(psa_xof_operation_t *operation,
+                            const uint8_t *input,
+                            size_t input_length)
+{
+    (void)input;
+    (void)input_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_output(psa_xof_operation_t *operation,
+                            uint8_t *output,
+                            size_t output_length)
+{
+    (void)output;
+    (void)output_length;
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_xof_abort(psa_xof_operation_t *operation)
+{
+    if (operation == NULL)
+        return PSA_ERROR_INVALID_ARGUMENT;
+    /* No backend: no active operation can exist, nothing to release. */
     return PSA_SUCCESS;
 }
 

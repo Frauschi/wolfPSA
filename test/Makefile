@@ -28,6 +28,21 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
+# The ECC curve regression tests read the library's feature macros
+# (they include <user_settings.h> and branch on HAVE_ECC_KOBLITZ /
+# HAVE_ECC_BRAINPOOL), so only they mirror the library build:
+# -DWOLFSSL_USER_SETTINGS plus USER_SETTINGS_PATH, which takes the same
+# value as the library build and by default resolves to the repository
+# root, which ships the baseline user_settings.h. The flag and the
+# include path stay out of the shared CPPFLAGS on purpose: every other
+# test TU links the autotools-built libwolfssl and must see that
+# library's own configuration (config.h, via HAVE_CONFIG_H) - layering
+# wolfPSA's user_settings.h on top would let a test declare wolfCrypt
+# structs (Hmac, wc_Sha256) with a layout the linked library does not
+# use.
+USER_SETTINGS_PATH ?= $(WOLFPSA_PATH)
+WOLFSSL_CPPFLAGS ?= -DWOLFSSL_USER_SETTINGS
+
 CPPFLAGS += -DHAVE_CONFIG_H -DWOLFSSL_HAVE_PSA -DHAVE_PK_CALLBACKS
 CPPFLAGS += -I$(WOLFSSL_PATH) -I$(WOLFSSL_PATH)/wolfssl
 ifneq ($(WOLFSSL_BUILD_DIR),)
@@ -64,6 +79,32 @@ BINARIES = psa_api_test psa_crypto_init_test psa_des3_stack_scrub_test psa_ecc_b
 PSA_14_TESTS = psa_mldsa_test psa_mlkem_test psa_xof_test psa_key_wrap_test \
 	psa_sign_context_test psa_lms_xmss_verify_test psa_ascon_xchacha_test \
 	psa_sp800_108_test psa_14_misc_test
+
+# Regression tests: one self-contained binary per finding, all
+# built from psa_server/<name>.c with the default link recipe.
+PSA_REGRESSION_TESTS = psa_xof_input_wrap_test \
+	psa_pbkdf2_cmac_test \
+	psa_kdf_input_key_test \
+	psa_ecc_verify_curve_test \
+	psa_ecc_ecdh_curve_test \
+	psa_xof_output_wrap_test \
+	psa_kdf_length_check_test \
+	psa_mldsa_det_sign_test \
+	psa_mldsa_any_hash_test \
+	psa_ecc_curve_caps_test \
+	psa_xof_no_backend_test \
+	psa_ecc_sig_len_test \
+	psa_xof_set_context_test \
+	psa_cipher_inplace_test \
+	psa_cipher_overlap_test \
+	psa_des3_pkcs7_test \
+	psa_eddsa_mont_export_test \
+	psa_eddsa_mont_gen_test \
+	psa_key_infer_bits_test \
+	psa_cipher_oneshot_len_test \
+	psa_pqc_export_seed_test \
+	psa_key_declared_bits_test
+BINARIES += $(PSA_REGRESSION_TESTS)
 
 ifdef WOLFSSL_HAS_PSA_TLS
 BINARIES += psa_tls_server
@@ -112,6 +153,16 @@ psa_rsa_pss_interop_test: require-wolfssl-lib $(PSA_RSA_PSS_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_RSA_PSS_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 $(PSA_14_TESTS): %: require-wolfssl-lib psa_server/%.o
+	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+# Target-specific: only the curve tests compile with the library's
+# user_settings.h (see the comment at USER_SETTINGS_PATH above). The
+# value reaches the psa_server/%.o prerequisite's recipe, which is what
+# needs the flag and the include path.
+psa_ecc_verify_curve_test psa_ecc_ecdh_curve_test psa_ecc_curve_caps_test: \
+	CPPFLAGS += $(WOLFSSL_CPPFLAGS) -I$(USER_SETTINGS_PATH)
+
+$(PSA_REGRESSION_TESTS): %: require-wolfssl-lib psa_server/%.o
 	$(CC) $(CFLAGS) -o $@ psa_server/$@.o $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
 
 ifdef WOLFSSL_HAS_PSA_TLS

@@ -112,9 +112,14 @@ for tok in ${flags}; do
     cppflags="${cppflags} -D${tok}"
 done
 
+# BUILD_TARGET lets a lane compile only part of the library (e.g.
+# psa-objects for a configuration the bundled wolfCrypt sources do not
+# support).
+target="${BUILD_TARGET:-libwolfpsa.a}"
+
 make -C "${repo_root}" clean BUILD_DIR="${repo_root}/build-test/out/${variant_name}" >/dev/null
 make -C "${repo_root}" \
     BUILD_DIR="${repo_root}/build-test/out/${variant_name}" \
     USER_SETTINGS_PATH="${repo_root}/build-test" \
     WOLFSSL_CPPFLAGS="${cppflags}" \
-    libwolfpsa.a
+    "${target}"

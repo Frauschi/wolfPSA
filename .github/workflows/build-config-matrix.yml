@@ -81,6 +81,12 @@ jobs:
             modifiers: "-WOLFSSL_SP_384 -HAVE_ECC384"
           - name: rsa-1024
             modifiers: "-WOLFSSL_SP_1024 -RSA_MIN_SIZE +RSA_MIN_SIZE=2048"
+          # wolfPSA's own sources only: the bundled wolfCrypt sources do not
+          # build under WC_NO_RNG (asn.c trips -Wnonnull), which is a wolfSSL
+          # issue outside this lane's scope.
+          - name: no-rng
+            modifiers: "+WC_NO_RNG +WC_BLINDING_NO_RNG_ACKNOWLEDGE_WEAKNESS"
+            target: psa-objects
 
     steps:
       - name: Check out wolfPSA
@@ -95,4 +101,6 @@ jobs:
         run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
 
       - name: Build ${{ matrix.name }}
+        env:
+          BUILD_TARGET: ${{ matrix.target || 'libwolfpsa.a' }}
         run: ./build-test/build-variant.sh "${{ matrix.name }}" ${{ matrix.modifiers }}

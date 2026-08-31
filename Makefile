@@ -100,9 +100,15 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
-.PHONY: all clean
+.PHONY: all clean psa-objects
 
 all: $(LIBNAME) $(SHLIBNAME)
+
+# Compile only wolfPSA's own sources, skipping the wolfCrypt sources pulled
+# in from WOLFSSL_PATH. Used by build-config-matrix lanes that exercise a
+# configuration where wolfPSA's own exclusions are the point and the
+# bundled wolfCrypt sources are out of scope.
+psa-objects: $(OBJ)
 
 $(LIBNAME): $(OBJ) $(WOLFCRYPT_OBJ)
 	$(AR) rcs $@ $^

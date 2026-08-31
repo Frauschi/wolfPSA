@@ -5,6 +5,60 @@ on:
   pull_request:
 
 jobs:
+  # The baseline user_settings.h enables neither HAVE_ECC_KOBLITZ nor
+  # HAVE_ECC_BRAINPOOL, so the ECC curve-pinning regression tests would
+  # run without those families. This lane rebuilds the library and the
+  # two curve tests with both curve families enabled, so the secp256k1
+  # and Brainpool-P256 paths get real coverage. libwolfpsa.so exports
+  # only the psa_* API and keeps its wolfCrypt objects local, so the
+  # curve operations run on the variant wolfCrypt compiled into the
+  # library itself; the sibling wolfSSL only provides the link.
+  test-ecc-curve-families:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out wolfPSA
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool libtool-bin pkg-config
+
+      - name: Clone sibling wolfSSL
+        run: git clone --depth 1 https://github.com/wolfSSL/wolfssl ../wolfssl
+
+      - name: Build variant user_settings (Koblitz + Brainpool)
+        run: |
+          mkdir -p build-ecc-var
+          cp user_settings.h build-ecc-var/baseline_user_settings.h
+          cat > build-ecc-var/user_settings.h <<'EOF'
+          /* wolfCrypt dependency: HAVE_ECC_BRAINPOOL requires
+           * WOLFSSL_CUSTOM_CURVES. */
+          #define WOLFSSL_CUSTOM_CURVES
+          #define HAVE_ECC_KOBLITZ
+          #define HAVE_ECC_BRAINPOOL
+          #include "baseline_user_settings.h"
+          EOF
+
+      - name: Build wolfPSA with the variant
+        # Absolute path: make -C test runs with CWD=test/, where a
+        # relative USER_SETTINGS_PATH would silently resolve to the
+        # repo-root baseline user_settings.h.
+        run: make USER_SETTINGS_PATH="${GITHUB_WORKSPACE}/build-ecc-var"
+
+      - name: Build sibling wolfSSL for wolfPSA tests
+        run: make -C test rebuild-wolfssl-psa
+
+      - name: Build and run the ECC curve tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
+        run: |
+          make -C test USER_SETTINGS_PATH="${GITHUB_WORKSPACE}/build-ecc-var" \
+            psa_ecc_verify_curve_test psa_ecc_ecdh_curve_test
+          ./test/psa_ecc_verify_curve_test
+          ./test/psa_ecc_ecdh_curve_test
+
   test-psa-api:
     runs-on: ubuntu-latest
 
@@ -44,6 +98,28 @@ jobs:
           psa_ascon_xchacha_test
           psa_sp800_108_test
           psa_14_misc_test
+          psa_xof_input_wrap_test
+          psa_pbkdf2_cmac_test
+          psa_kdf_input_key_test
+          psa_ecc_verify_curve_test
+          psa_ecc_ecdh_curve_test
+          psa_xof_output_wrap_test
+          psa_kdf_length_check_test
+          psa_mldsa_det_sign_test
+          psa_mldsa_any_hash_test
+          psa_ecc_curve_caps_test
+          psa_xof_no_backend_test
+          psa_ecc_sig_len_test
+          psa_xof_set_context_test
+          psa_cipher_inplace_test
+          psa_cipher_overlap_test
+          psa_des3_pkcs7_test
+          psa_eddsa_mont_export_test
+          psa_eddsa_mont_gen_test
+          psa_key_infer_bits_test
+          psa_cipher_oneshot_len_test
+          psa_pqc_export_seed_test
+          psa_key_declared_bits_test
 
       - name: Run PSA API tests
         env:
@@ -63,7 +139,29 @@ jobs:
                    psa_lms_xmss_verify_test \
                    psa_ascon_xchacha_test \
                    psa_sp800_108_test \
-                   psa_14_misc_test; do
+                   psa_14_misc_test \
+                   psa_xof_input_wrap_test \
+                   psa_pbkdf2_cmac_test \
+                   psa_kdf_input_key_test \
+                   psa_ecc_verify_curve_test \
+                   psa_ecc_ecdh_curve_test \
+                   psa_xof_output_wrap_test \
+                   psa_kdf_length_check_test \
+                   psa_mldsa_det_sign_test \
+                   psa_mldsa_any_hash_test \
+                   psa_ecc_curve_caps_test \
+                   psa_xof_no_backend_test \
+                   psa_ecc_sig_len_test \
+                   psa_xof_set_context_test \
+                   psa_cipher_inplace_test \
+                   psa_cipher_overlap_test \
+                   psa_des3_pkcs7_test \
+                   psa_eddsa_mont_export_test \
+                   psa_eddsa_mont_gen_test \
+                   psa_key_infer_bits_test \
+                   psa_cipher_oneshot_len_test \
+                   psa_pqc_export_seed_test \
+                   psa_key_declared_bits_test; do
             echo "=== $t ==="
             rm -rf test/.store
             ./test/$t

@@ -243,9 +243,12 @@ psa_status_t psa_asymmetric_verify_ecc(psa_key_type_t key_type,
         return wc_error_to_psa_status(ret);
     }
     
-    /* Import key */
+    /* Import key, pinning the curve from the key attributes so a
+     * same-size non-default family is not reinterpreted on the default
+     * curve. */
     if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(key_type)) {
-        ret = wc_ecc_import_x963(key_buffer, (word32)key_buffer_size, &ecc);
+        ret = wc_ecc_import_x963_ex(key_buffer, (word32)key_buffer_size,
+                                    &ecc, curve_id);
     }
     else {
         ret = wc_ecc_import_private_key_ex(key_buffer, (word32)key_buffer_size,
@@ -261,9 +264,11 @@ psa_status_t psa_asymmetric_verify_ecc(psa_key_type_t key_type,
 
     key_bytes = PSA_BITS_TO_BYTES(key_bits);
     raw_sig_len = key_bytes * 2u;
+    /* A wrong-length raw signature is malformed peer signature data,
+     * not an API argument error. */
     if (signature_length != raw_sig_len) {
         wc_ecc_free(&ecc);
-        return PSA_ERROR_INVALID_ARGUMENT;
+        return PSA_ERROR_INVALID_SIGNATURE;
     }
 
     der_len = wc_ecc_sig_size(&ecc);
@@ -433,7 +438,11 @@ psa_status_t psa_asymmetric_export_public_key_ecc(psa_key_type_t key_type,
         }
     }
     else {
-        ret = wc_ecc_import_x963(key_buffer, (word32)key_buffer_size, &ecc);
+        /* Pin the point to the curve from the key attributes: a point
+         * that is not on this curve must fail, not be reinterpreted on
+         * the default curve for the coordinate size. */
+        ret = wc_ecc_import_x963_ex(key_buffer, (word32)key_buffer_size,
+                                    &ecc, curve_id);
     }
     
     if (ret != 0) {

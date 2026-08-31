@@ -479,6 +479,14 @@ static psa_status_t wolfpsa_infer_key_bits(psa_key_attributes_t* attr,
         attr->type == PSA_KEY_TYPE_PASSWORD ||
         attr->type == PSA_KEY_TYPE_PASSWORD_HASH ||
         attr->type == PSA_KEY_TYPE_PEPPER) {
+        /* Byte-string keys have no size of their own: the size is the
+         * data length in bits. A zero-length import therefore has no
+         * valid size, and the bit count must fit the 16-bit
+         * psa_key_bits_t (e.g. 8192 bytes is 65536 bits, which would
+         * truncate to 0). */
+        if (data_length == 0 || data_length * 8U > PSA_MAX_KEY_BITS) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
         attr->bits = (psa_key_bits_t)(data_length * 8U);
         return PSA_SUCCESS;
     }
@@ -1113,6 +1121,22 @@ psa_status_t psa_import_key(
             return PSA_ERROR_INVALID_ARGUMENT;
         }
     }
+    else if (attr.type == PSA_KEY_TYPE_HMAC ||
+             attr.type == PSA_KEY_TYPE_RAW_DATA ||
+             attr.type == PSA_KEY_TYPE_DERIVE ||
+             attr.type == PSA_KEY_TYPE_PASSWORD ||
+             attr.type == PSA_KEY_TYPE_PASSWORD_HASH ||
+             attr.type == PSA_KEY_TYPE_PEPPER) {
+        /* Raw byte-string keys: the size is the data length in bits, so
+         * the declared size must equal it, and it must fit the 16-bit
+         * size type. */
+        if (data_length * 8U > PSA_MAX_KEY_BITS ||
+            attr.bits != (psa_key_bits_t)(data_length * 8U)) {
+            wolfpsa_debug_import_reason("unstructured bits/length mismatch",
+                                        &attr, data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
     else if (PSA_KEY_TYPE_IS_ML_DSA(attr.type)) {
         if (attr.type == PSA_KEY_TYPE_ML_DSA_KEY_PAIR) {
             if (attr.bits != 128 && attr.bits != 192 && attr.bits != 256) {
@@ -1439,7 +1463,12 @@ psa_status_t psa_generate_key(
     }
 
     if (PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
-#ifdef HAVE_ECC
+#if defined(HAVE_ECC) || defined(HAVE_ED25519) || defined(HAVE_ED448) || \
+    defined(HAVE_CURVE25519) || defined(HAVE_CURVE448)
+        /* Standalone EdDSA and Montgomery backends compile without generic
+         * Weierstrass ECC, so only the default (Weierstrass) dispatch below
+         * is gated on HAVE_ECC; each EdDSA/Montgomery arm is gated on its
+         * own backend macros. */
         psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(key_type);
         size_t priv_buf_size = PSA_KEY_EXPORT_ECC_KEY_PAIR_MAX_SIZE(key_bits);
         size_t pub_buf_size = PSA_KEY_EXPORT_ECC_PUBLIC_KEY_MAX_SIZE(key_bits);
@@ -1539,11 +1568,15 @@ psa_status_t psa_generate_key(
             }
         }
         else {
+#ifdef HAVE_ECC
             status = psa_asymmetric_generate_key_ecc(key_type, key_bits,
                                                      key_data, priv_buf_size,
                                                      &priv_len,
                                                      pub_buf, pub_buf_size,
                                                      &pub_len);
+#else
+            status = PSA_ERROR_NOT_SUPPORTED;
+#endif
         }
         XFREE(pub_buf, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if (status != PSA_SUCCESS) {
@@ -1944,7 +1977,10 @@ psa_status_t psa_export_public_key(
     #endif
     }
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
-    #if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && defined(HAVE_ECC_KEY_IMPORT)
+        /* Standalone EdDSA and Montgomery exporters compile without generic
+         * Weierstrass ECC, so only the default (Weierstrass) key-pair arm
+         * below is gated on HAVE_ECC + the ECC key import/export macros; the
+         * stored-public-key copy needs no backend at all. */
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attributes.type)) {
             if (data_size < key_data_length) {
                 status = PSA_ERROR_BUFFER_TOO_SMALL;
@@ -2004,14 +2040,16 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
+#if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_EXPORT) && \
+    defined(HAVE_ECC_KEY_IMPORT)
                 status = psa_asymmetric_export_public_key_ecc(
                     attributes.type, attributes.bits, key_data,
                     key_data_length, data, data_size, data_length);
+#else
+                status = PSA_ERROR_NOT_SUPPORTED;
+#endif
             }
         }
-    #else
-        status = PSA_ERROR_NOT_SUPPORTED;
-    #endif
     }
     else {
         /* PQC key types — reached when neither RSA nor ECC matched the type
@@ -2030,10 +2068,18 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
-                /* Key pair: stored as 32-byte seed — derive public key. */
-                status = wolfpsa_mldsa_export_public((size_t)attributes.bits,
-                                                     key_data, data, data_size,
-                                                     data_length);
+                /* Key pair: stored as 32-byte seed — derive public key.
+                 * The expansion helper reads exactly
+                 * WOLFPSA_MLDSA_SEED_SIZE bytes, so a corrupted record
+                 * with a shorter seed would read out of bounds. */
+                if (key_data_length != WOLFPSA_MLDSA_SEED_SIZE) {
+                    status = PSA_ERROR_DATA_INVALID;
+                }
+                else {
+                    status = wolfpsa_mldsa_export_public(
+                        (size_t)attributes.bits, key_data, data, data_size,
+                        data_length);
+                }
             }
         }
         else
@@ -2052,10 +2098,18 @@ psa_status_t psa_export_public_key(
                 }
             }
             else {
-                /* Key pair: stored as 64-byte seed — derive public key. */
-                status = wolfpsa_mlkem_export_public((size_t)attributes.bits,
-                                                     key_data, data, data_size,
-                                                     data_length);
+                /* Key pair: stored as 64-byte seed — derive public key.
+                 * The expansion helper reads exactly
+                 * WOLFPSA_MLKEM_SEED_SIZE bytes, so a corrupted record
+                 * with a shorter seed would read out of bounds. */
+                if (key_data_length != WOLFPSA_MLKEM_SEED_SIZE) {
+                    status = PSA_ERROR_DATA_INVALID;
+                }
+                else {
+                    status = wolfpsa_mlkem_export_public(
+                        (size_t)attributes.bits, key_data, data, data_size,
+                        data_length);
+                }
             }
         }
         else

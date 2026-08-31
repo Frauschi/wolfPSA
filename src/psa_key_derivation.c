@@ -735,7 +735,26 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     }
     else if (step == PSA_KEY_DERIVATION_INPUT_SECRET ||
              step == PSA_KEY_DERIVATION_INPUT_OTHER_SECRET) {
-        if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_DERIVE) {
+        psa_key_type_t key_type = psa_get_key_type(&attributes);
+        int compatible = 0;
+
+        /* A generic DERIVE key is valid for any KDF. The SP800-108
+         * backends also take a key of the underlying MAC type, whose
+         * material is the raw MAC key: HMAC keys for the HMAC variant
+         * and AES keys for the CMAC variant. */
+        if (key_type == PSA_KEY_TYPE_DERIVE) {
+            compatible = 1;
+        }
+        else if (key_type == PSA_KEY_TYPE_HMAC &&
+                 PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg)) {
+            compatible = 1;
+        }
+        else if (key_type == PSA_KEY_TYPE_AES &&
+                 ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
+            compatible = 1;
+        }
+
+        if (!compatible) {
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
@@ -1114,25 +1133,33 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             return PSA_ERROR_INVALID_ARGUMENT;
         }
 
-        XMEMSET(zero_key, 0, sizeof(zero_key));
-        ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
-                          WC_CMAC_AES, NULL);
-        if (ret != 0) {
-            status = wc_error_to_psa_status(ret);
-            goto cleanup;
+        /* RFC 4615 step 1: a key that is exactly 128 bits is used
+         * directly as the AES-CMAC key; any other length is
+         * normalized with CMAC(0^128, key). */
+        if (ctx->password_length == WC_AES_BLOCK_SIZE) {
+            XMEMCPY(prf_key, password, WC_AES_BLOCK_SIZE);
         }
-        ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
-        if (ret != 0) {
+        else {
+            XMEMSET(zero_key, 0, sizeof(zero_key));
+            ret = wc_InitCmac(&cmac, zero_key, (word32)sizeof(zero_key),
+                              WC_CMAC_AES, NULL);
+            if (ret != 0) {
+                status = wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
+            ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
+            if (ret != 0) {
+                wc_CmacFree(&cmac);
+                status = wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
+            ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
             wc_CmacFree(&cmac);
-            status = wc_error_to_psa_status(ret);
-            goto cleanup;
-        }
-        ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
-        wc_CmacFree(&cmac);
-        if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
-            status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
-                                wc_error_to_psa_status(ret);
-            goto cleanup;
+            if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
+                status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
+                                    wc_error_to_psa_status(ret);
+                goto cleanup;
+            }
         }
 
         block_input_len = ctx->salt_length + 4;
@@ -1313,6 +1340,13 @@ static psa_status_t wolfpsa_kdf_sp800_108_hmac(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    /* The label and context are passed to wc_HmacUpdate, which takes
+     * word32 lengths; reject lengths that would truncate. */
+    if ((wolfpsa_check_word32_length(ctx->label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->context_length) != PSA_SUCCESS)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     for (counter = 1u; offset < output_length; counter++) {
         size_t copy_len;
 
@@ -1428,6 +1462,13 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
     if (wolfpsa_check_word32_length(ctx->secret_length) != PSA_SUCCESS) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* The label and context are passed to wc_CmacUpdate, which takes
+     * word32 lengths; reject lengths that would truncate. */
+    if ((wolfpsa_check_word32_length(ctx->label_length) != PSA_SUCCESS) ||
+        (wolfpsa_check_word32_length(ctx->context_length) != PSA_SUCCESS)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
