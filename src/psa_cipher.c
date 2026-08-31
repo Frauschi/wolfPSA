@@ -1625,6 +1625,9 @@ psa_status_t psa_cipher_decrypt(psa_key_id_t key,
     if (output_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    if (output == NULL && output_size > 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Mirror the one-shot encrypt contract: any overlap between the
      * declared input and output ranges is rejected. In the block modes

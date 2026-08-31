@@ -38,6 +38,7 @@ int main(void)
     uint8_t plain[16];
     uint8_t ct[64];
     uint8_t pt[64];
+    uint8_t ct_in[32];
     size_t ct_len = 0;
     size_t pt_len = 0;
     psa_status_t st;
@@ -63,6 +64,9 @@ int main(void)
     for (i = 0; i < (int)sizeof(plain); i++) {
         plain[i] = (uint8_t)(i + 10);
     }
+    for (i = 0; i < (int)sizeof(ct_in); i++) {
+        ct_in[i] = (uint8_t)(i + 1);
+    }
 
     /* NULL output_length must be rejected before any processing.
      * Pre-fix the call completed the encryption and crashed on the
@@ -83,8 +87,9 @@ int main(void)
 
     /* NULL output with a non-zero output_size must be rejected before
      * the IV is written to it. Pre-fix the encrypt path reached the IV
-     * copy and crashed. The decrypt path is covered by the same check
-     * in psa_cipher_update(). */
+     * copy and crashed. Decrypt carries the same explicit guard; the
+     * input is a full IV plus block (longer than the IV) so the call
+     * exercises the real update path, not the zero-byte edge. */
     st = psa_cipher_encrypt(key_id, PSA_ALG_CBC_NO_PADDING, plain, 16,
                             NULL, sizeof(ct), &ct_len);
     if (st != PSA_ERROR_INVALID_ARGUMENT) {
@@ -92,8 +97,8 @@ int main(void)
         rc = 1;
     }
 
-    st = psa_cipher_decrypt(key_id, PSA_ALG_CBC_NO_PADDING, plain, 16,
-                            NULL, sizeof(pt), &pt_len);
+    st = psa_cipher_decrypt(key_id, PSA_ALG_CBC_NO_PADDING, ct_in,
+                            sizeof(ct_in), NULL, sizeof(pt), &pt_len);
     if (st != PSA_ERROR_INVALID_ARGUMENT) {
         printf("FAIL decrypt NULL output: status=%d\n", (int)st);
         rc = 1;
