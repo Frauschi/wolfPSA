@@ -29,6 +29,10 @@
 
 #include <psa/crypto.h>
 #include <wolfpsa/psa_engine.h>
+#ifdef WOLFSSL_ELS_PKC
+    #include <wolfssl/wolfcrypt/wc_keystore.h>
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+#endif
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
@@ -1670,6 +1674,32 @@ psa_status_t psa_destroy_key(psa_key_id_t key_id)
         return status;
     }
 
+#ifdef WOLFSSL_ELS_PKC
+    /* Destroy means destroy. For a key store key the record here is only a
+     * reference, so removing it alone would leave the key itself in the
+     * hardware - psa_destroy_key promises the material is erased, not that a
+     * handle is dropped.
+     *
+     * Note this makes importing a reference an act of adoption: the slot
+     * becomes this key's, and destroying the key destroys it. That is what PSA
+     * means by destroy, but it is worth knowing before importing a reference
+     * to a slot something else owns. */
+    {
+        psa_key_attributes_t els_attr = PSA_KEY_ATTRIBUTES_INIT;
+        uint8_t* els_data = NULL;
+        size_t els_len = 0;
+
+        if (wolfpsa_volatile_get(key_id, &els_attr, &els_data, &els_len)
+                == PSA_SUCCESS) {
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(els_attr.lifetime)) {
+                (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, els_data,
+                                         (word32)els_len, NULL);
+            }
+            wolfpsa_forcezero_free_key_data(els_data, els_len);
+        }
+    }
+#endif
+
     status = wolfpsa_volatile_remove(key_id);
     if (status == PSA_SUCCESS) {
         return PSA_SUCCESS;
@@ -2286,6 +2316,15 @@ psa_status_t psa_copy_key(
         if (status == PSA_SUCCESS) {
             dst_attr = *attributes;
 
+#ifdef WOLFSSL_ELS_PKC
+            /* A key store key cannot be copied: duplicating a reference would
+             * leave two PSA keys sharing one slot, so destroying either would
+             * destroy the other's key. */
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime)) {
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+#endif
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_COPY) == 0) {
                 wolfpsa_forcezero_free_key_data(key_data, key_data_length);
