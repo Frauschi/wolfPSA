@@ -1294,7 +1294,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
     psa_status_t status;
-#ifdef HAVE_ECC
+#if defined(HAVE_ECC) && defined(HAVE_ECC_DHE)
     int ret;
     ecc_key priv;
     ecc_key pub;
@@ -1359,13 +1359,16 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     }
 
 #ifdef HAVE_ECC
-#if defined(ECC_TIMING_RESISTANT) && defined(WC_NO_RNG)
-    /* Blinding is compiled in but no RNG exists: wolfCrypt would fail
-     * late in wc_ecc_shared_secret() with MISSING_RNG_E, so report the
-     * combination as unsupported up front. */
+#if !defined(HAVE_ECC_DHE)
+    /* Generic (Weierstrass) ECDH needs wc_ecc_shared_secret(), which
+     * settings.h only declares when HAVE_ECC_DHE is set. That macro is
+     * off in WC_NO_RNG builds (blinding needs an RNG), so exclude the
+     * body at compile time and report the combination as unsupported
+     * up front instead of failing to compile or dying late with
+     * MISSING_RNG_E. Montgomery X25519/X448 is handled above. */
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return PSA_ERROR_NOT_SUPPORTED;
-#endif
+#else
     curve_id = wc_psa_get_ecc_curve_id(attributes.type, attributes.bits);
     if (curve_id == ECC_CURVE_INVALID) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -1468,6 +1471,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
 
     *output_length = (size_t)out_len;
     return PSA_SUCCESS;
+#endif /* HAVE_ECC_DHE */
 #else
     /* Generic (Weierstrass) ECDH needs wolfCrypt ECC (HAVE_ECC), which this
      * build does not enable. Montgomery X25519/X448 is handled above. */
