@@ -146,6 +146,18 @@ int main(void)
                 det_sig, det_sig_len, PSA_ERROR_NOT_PERMITTED,
                 "concrete policy + cross-family different-hash request");
 
+    /* A wildcard is a policy placeholder, not an executable algorithm:
+     * a verify request whose own hash is ANY_HASH is rejected by the
+     * policy check instead of being admitted by the cross-family
+     * verify-equivalence. */
+    verify_case(det_key, PSA_ALG_HASH_ML_DSA(PSA_ALG_ANY_HASH), digest,
+                det_sig, det_sig_len, PSA_ERROR_NOT_PERMITTED,
+                "deterministic wildcard policy + wildcard verify request");
+    verify_case(hedged_key,
+                PSA_ALG_DETERMINISTIC_HASH_ML_DSA(PSA_ALG_ANY_HASH), digest,
+                hedged_sig, hedged_sig_len, PSA_ERROR_NOT_PERMITTED,
+                "hedged wildcard policy + wildcard verify request");
+
     if (failures == 0) {
         printf("any-hash tests: all passed\n");
         return 0;

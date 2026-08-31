@@ -261,7 +261,11 @@ static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
             }
         }
         if (PSA_ALG_IS_HASH_ML_DSA(alg) &&
-            PSA_ALG_IS_HASH_ML_DSA(key_alg)) {
+            PSA_ALG_IS_HASH_ML_DSA(key_alg) &&
+            PSA_ALG_GET_HASH(alg) != PSA_ALG_ANY_HASH) {
+            /* A wildcard is a policy placeholder, not an executable
+             * algorithm: the request must name a concrete hash, the
+             * same invariant the wildcard blocks above enforce. */
             if (PSA_ALG_GET_HASH(key_alg) == PSA_ALG_ANY_HASH ||
                 PSA_ALG_GET_HASH(key_alg) == PSA_ALG_GET_HASH(alg)) {
                 return 1;
