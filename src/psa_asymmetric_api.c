@@ -109,7 +109,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
                                     size_t key_bits,
                                     const uint8_t *key_buffer,
                                     size_t key_buffer_size,
-                                     psa_key_lifetime_t lifetime,
+                                    psa_key_lifetime_t lifetime,
                                     psa_algorithm_t alg,
                                     const uint8_t *hash,
                                     size_t hash_length,
@@ -1325,6 +1325,16 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+#ifdef WOLFSSL_ELS_PKC
+    /* Here rather than at the entry points: raw agreement, multi-part and the
+     * derivation variant all come through here. The hardware deposits the
+     * result in a slot that cannot be read out, so there is no secret to hand
+     * back - say so rather than fail later as a malformed scalar. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes.lifetime)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
     if ((wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(peer_key_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {
@@ -1500,22 +1510,6 @@ psa_status_t psa_raw_key_agreement(psa_algorithm_t alg,
     if (!PSA_ALG_IS_RAW_KEY_AGREEMENT(alg)) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-#ifdef WOLFSSL_ELS_PKC
-    /* A raw agreement hands the shared secret back to the caller, and the
-     * hardware will not do that: EdgeLock deposits an agreement result into
-     * another key slot, and a slot key cannot be read out. This is the key
-     * store working as intended rather than a gap - an in-slot agreement is
-     * reachable through the key store derive path, where the secret stays
-     * where it was put. */
-    {
-        psa_key_attributes_t agr_attr = PSA_KEY_ATTRIBUTES_INIT;
-
-        if (psa_get_key_attributes(private_key, &agr_attr) == PSA_SUCCESS &&
-            WOLFPSA_LIFETIME_IS_ELS_PKC(agr_attr.lifetime)) {
-            return PSA_ERROR_NOT_SUPPORTED;
-        }
-    }
-#endif
 
     return wolfpsa_key_agreement_secret(alg, private_key, peer_key,
                                         peer_key_length, output, output_size,
