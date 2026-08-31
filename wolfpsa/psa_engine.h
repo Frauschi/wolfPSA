@@ -36,6 +36,23 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
+#ifdef WOLFSSL_ELS_PKC
+/* Outside the WOLFSSL_PSA_ENGINE guard below: a key location is
+ * application-facing API and has to be visible to anything including this. */
+#include <psa/crypto.h>
+
+/* A key that lives in the NXP EdgeLock key store rather than in this library.
+ * The material stored for it is exactly the id blob the crypto callback port
+ * defines, so TLS and PSA share one encoding. Such a key has no private
+ * material here: exporting the private key is refused. */
+#define PSA_KEY_LOCATION_ELS_PKC \
+    ((psa_key_location_t)(PSA_KEY_LOCATION_VENDOR_FLAG | 0x000045))
+
+/* True when a lifetime names a key held in the EdgeLock key store. */
+#define WOLFPSA_LIFETIME_IS_ELS_PKC(lifetime) \
+    (PSA_KEY_LIFETIME_GET_LOCATION(lifetime) == PSA_KEY_LOCATION_ELS_PKC)
+#endif /* WOLFSSL_ELS_PKC */
+
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>
