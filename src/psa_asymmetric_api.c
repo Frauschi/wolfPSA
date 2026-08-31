@@ -109,6 +109,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
                                     size_t key_bits,
                                     const uint8_t *key_buffer,
                                     size_t key_buffer_size,
+                                     psa_key_lifetime_t lifetime,
                                     psa_algorithm_t alg,
                                     const uint8_t *hash,
                                     size_t hash_length,
@@ -579,6 +580,7 @@ static psa_status_t wolfpsa_sign_hash_worker(psa_key_id_t key,
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
         status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
                                          key_data, key_data_length,
+                                         attributes.lifetime,
                                          alg, hash, hash_length,
                                          signature, signature_size,
                                          signature_length);
@@ -969,6 +971,7 @@ static psa_status_t wolfpsa_sign_message_worker(psa_key_id_t key,
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
         status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
                                          key_data, key_data_length,
+                                         attributes.lifetime,
                                          alg, hash, hash_length,
                                          signature, signature_size,
                                          signature_length);

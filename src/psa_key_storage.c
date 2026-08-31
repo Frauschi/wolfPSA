@@ -1053,7 +1053,21 @@ psa_status_t psa_import_key(
      * psa_copy_key and psa_key_derivation_output_key, which all store through
      * psa_import_key. */
     if (PSA_KEY_LIFETIME_GET_LOCATION(attr.lifetime) !=
-        PSA_KEY_LOCATION_LOCAL_STORAGE) {
+        PSA_KEY_LOCATION_LOCAL_STORAGE
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+        /* Admitting the location has to be guarded by the same condition that
+         * validates and erases it, not by WOLFSSL_ELS_PKC alone. An ELS build
+         * without the key store extension would otherwise accept any blob here
+         * unchecked, refuse to export it, and drop the record on destroy while
+         * reporting success, leaving the key resident. */
+        /* The EdgeLock location is the exception the comment above allows for.
+         * What gets stored is not key material but a reference to a slot that
+         * already holds it, so writing it to local storage discloses nothing -
+         * the point of the check is that key material must not end up there,
+         * and there is none. */
+        && !WOLFPSA_LIFETIME_IS_ELS_PKC(attr.lifetime)
+#endif
+        ) {
         wolfpsa_debug_import_reason("unsupported key lifetime location", &attr,
                                     data_length);
         return PSA_ERROR_NOT_SUPPORTED;
@@ -1707,6 +1721,16 @@ psa_status_t psa_export_key(
 
         status = wolfpsa_volatile_get(key_id, &vol_attr, &vol_data, &vol_len);
         if (status == PSA_SUCCESS) {
+#ifdef WOLFSSL_ELS_PKC
+            /* What is stored is a reference to a slot, not the key, so a
+             * caller would read sixteen bytes of reference as a scalar. The
+             * obstacle is absent material, not permission, so refuse
+             * regardless of the usage policy. */
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime)) {
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+#endif
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_EXPORT) == 0) {
                 wolfpsa_forcezero_free_key_data(vol_data, vol_len);
