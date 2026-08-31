@@ -109,13 +109,16 @@ static int test_multipart_roundtrip(psa_key_id_t key_id)
     uint8_t pt[64];
     size_t iv_len = 0;
     size_t ct_len = 0;
+    size_t part_len = 0;
     size_t fin_len = 0;
     size_t pt_len = 0;
     size_t dfin_len = 0;
     psa_status_t st;
     int ok = 0;
 
-    /* 3 + 8 bytes through the update partial/full-block paths. */
+    /* 8 + 3 bytes through the update full/partial-block paths; the
+     * first update must emit the first block so the output offset
+     * actually accumulates across updates. */
     st = psa_cipher_encrypt_setup(&op, key_id, PSA_ALG_CBC_PKCS7);
     if (st != PSA_SUCCESS) {
         printf("FAIL mp setup status=%d\n", (int)st);
@@ -126,17 +129,19 @@ static int test_multipart_roundtrip(psa_key_id_t key_id)
         printf("FAIL mp generate_iv status=%d\n", (int)st);
         return 1;
     }
-    st = psa_cipher_update(&op, msg, 3, ct, sizeof(ct), &ct_len);
+    st = psa_cipher_update(&op, msg, 8, ct, sizeof(ct), &part_len);
     if (st != PSA_SUCCESS) {
         printf("FAIL mp update1 status=%d\n", (int)st);
         return 1;
     }
-    st = psa_cipher_update(&op, msg + 3, 8, ct + ct_len,
-                           sizeof(ct) - ct_len, &ct_len);
+    ct_len += part_len;
+    st = psa_cipher_update(&op, msg + 8, 3, ct + ct_len,
+                           sizeof(ct) - ct_len, &part_len);
     if (st != PSA_SUCCESS) {
         printf("FAIL mp update2 status=%d\n", (int)st);
         return 1;
     }
+    ct_len += part_len;
     st = psa_cipher_finish(&op, ct + ct_len, sizeof(ct) - ct_len, &fin_len);
     if (st != PSA_SUCCESS) {
         printf("FAIL mp finish status=%d\n", (int)st);

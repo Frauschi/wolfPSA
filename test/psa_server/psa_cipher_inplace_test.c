@@ -50,6 +50,7 @@ int main(void)
     size_t iv_len = 0;
     size_t out_len = 0;
     size_t out_len2 = 0;
+    size_t part_len = 0;
     size_t fin_len = 0;
     psa_status_t st;
     int i;
@@ -178,18 +179,20 @@ int main(void)
         printf("FAIL set_iv4 status=%d\n", (int)st);
         return 1;
     }
-    st = psa_cipher_update(&op2, plain, 5, ct2, sizeof(ct2), &out_len2);
+    st = psa_cipher_update(&op2, plain, 5, ct2, sizeof(ct2), &part_len);
     if (st != PSA_SUCCESS) {
         printf("FAIL multipart update1 status=%d\n", (int)st);
         rc = 1;
     }
+    out_len2 = part_len;
     if (st == PSA_SUCCESS) {
         st = psa_cipher_update(&op2, plain + 5, 11, ct2 + out_len2,
-                               sizeof(ct2) - out_len2, &out_len2);
+                               sizeof(ct2) - out_len2, &part_len);
         if (st != PSA_SUCCESS) {
             printf("FAIL multipart update2 status=%d\n", (int)st);
             rc = 1;
         }
+        out_len2 += part_len;
         if (st == PSA_SUCCESS) {
             st = psa_cipher_finish(&op2, ct2 + out_len2,
                                    sizeof(ct2) - out_len2, &fin_len);
