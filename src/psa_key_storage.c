@@ -32,6 +32,8 @@
 #ifdef WOLFSSL_ELS_PKC
     #include <wolfssl/wolfcrypt/wc_keystore.h>
     #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+    #include <wolfssl/wolfcrypt/ecc.h>
+    #include <wolfssl/wolfcrypt/random.h>
 #endif
 #include <psa_key_storage.h>
 #include <psa_store.h>
@@ -1423,6 +1425,68 @@ psa_status_t psa_generate_key(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+#ifdef WOLFSSL_ELS_PKC
+    /* Generating into the key store. The caller cannot say which slot - PSA's
+     * generate takes no input - so one is chosen here, the same conclusion
+     * NXP's own PSA driver reaches by asking an integrator Oracle to reserve
+     * one.
+     *
+     * What is stored is the reference followed by the public point. The point
+     * has to be kept at this moment or not at all: the hardware will not give
+     * a slot key's public part back afterwards, so an export later would have
+     * nothing to answer with. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes->lifetime)) {
+        wc_ElsPkc_KeyRef ref;
+        ecc_key ecc;
+        WC_RNG rng;
+        uint8_t blob[WC_ELSPKC_KEYREF_SZ + 1 + (2 * 66)];
+        word32 refSz = WC_ELSPKC_KEYREF_SZ;
+        word32 pubSz = (word32)(sizeof(blob) - WC_ELSPKC_KEYREF_SZ);
+        int ret;
+
+        if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type) || key_bits != 256) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+
+        ret = wc_ElsPkc_ReserveSlot(WC_ELSPKC_KEY_ECC_SIGN, &ref);
+        if (ret != 0) {
+            return (ret == MEMORY_E) ? PSA_ERROR_INSUFFICIENT_STORAGE
+                                     : PSA_ERROR_HARDWARE_FAILURE;
+        }
+        ret = wc_ElsPkc_MakeKeyRef(&ref, blob, &refSz);
+        /* Everything below places the public point at a fixed offset, so a
+         * shorter reference would be read back as a longer one. */
+        if (ret == 0 && refSz != WC_ELSPKC_KEYREF_SZ) {
+            ret = BUFFER_E;
+        }
+        if (ret == 0) {
+            ret = wc_InitRng(&rng);
+        }
+        if (ret != 0) {
+            return PSA_ERROR_HARDWARE_FAILURE;
+        }
+        ret = wc_ElsPkc_EccUseSlot(&ecc, &ref, NULL, WOLFSSL_ELS_PKC_DEVID);
+        if (ret == 0) {
+            ret = wc_ecc_make_key_ex(&rng, 32, &ecc, ECC_SECP256R1);
+        }
+        if (ret == 0) {
+            ret = wc_ecc_export_x963_ex(&ecc, blob + WC_ELSPKC_KEYREF_SZ,
+                                        &pubSz, 0);
+        }
+        wc_FreeRng(&rng);
+        if (ret == 0) {
+            status = psa_import_key(attributes, blob,
+                                    WC_ELSPKC_KEYREF_SZ + pubSz, key_id);
+        }
+        else {
+            status = PSA_ERROR_HARDWARE_FAILURE;
+        }
+        wc_ecc_free(&ecc);
+
+        return status;
+    }
+#endif /* WOLFSSL_ELS_PKC */
+
     if (PSA_KEY_TYPE_IS_UNSTRUCTURED(key_type) ||
         key_type == PSA_KEY_TYPE_HMAC ||
         key_type == PSA_KEY_TYPE_AES ||
@@ -1789,7 +1853,8 @@ psa_status_t psa_export_key(
          PSA_KEY_USAGE_EXPORT) == 0) {
         return PSA_ERROR_NOT_PERMITTED;
     }
-    
+
+
     /* Calculate attribute length */
     attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                  sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
@@ -1899,6 +1964,31 @@ psa_status_t psa_export_public_key(
         }
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+#ifdef WOLFSSL_ELS_PKC
+    /* No private part here to derive from, so the point is whatever was
+     * recorded at generation - the hardware will not hand it back. A key
+     * imported as a bare reference never carried one. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes.lifetime)) {
+        size_t point_len;
+
+        if (!use_volatile || key_data_length <= WC_ELSPKC_KEYREF_SZ) {
+            if (use_volatile) {
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            }
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        point_len = key_data_length - WC_ELSPKC_KEYREF_SZ;
+        if (data_size < point_len) {
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+        XMEMCPY(data, key_data + WC_ELSPKC_KEYREF_SZ, point_len);
+        *data_length = point_len;
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_SUCCESS;
+    }
+#endif /* WOLFSSL_ELS_PKC */
 
     if (!use_volatile) {
         attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
