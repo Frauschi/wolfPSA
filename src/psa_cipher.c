@@ -1628,6 +1628,13 @@ psa_status_t psa_cipher_decrypt(psa_key_id_t key,
     if (output == NULL && output_size > 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+    /* Unlike psa_cipher_encrypt(), the decrypt path consumes the IV
+     * prefix with XMEMCPY() before it hands the remainder to
+     * psa_cipher_update(), so it cannot rely on that function's own
+     * NULL-input guard and has to reject a NULL input here. */
+    if (input == NULL && input_length > 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Mirror the one-shot encrypt contract: any overlap between the
      * declared input and output ranges is rejected. In the block modes
