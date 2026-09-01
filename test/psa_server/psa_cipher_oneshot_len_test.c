@@ -104,6 +104,25 @@ int main(void)
         rc = 1;
     }
 
+    /* NULL input with a non-zero input_length must be rejected too.
+     * psa_cipher_encrypt() only ever touches the input through
+     * psa_cipher_update(), which guards it; psa_cipher_decrypt()
+     * copies the IV prefix out of the input first, so without its own
+     * guard this call dereferenced NULL. */
+    st = psa_cipher_encrypt(key_id, PSA_ALG_CBC_NO_PADDING, NULL,
+                            sizeof(ct_in), ct, sizeof(ct), &ct_len);
+    if (st != PSA_ERROR_INVALID_ARGUMENT) {
+        printf("FAIL encrypt NULL input: status=%d\n", (int)st);
+        rc = 1;
+    }
+
+    st = psa_cipher_decrypt(key_id, PSA_ALG_CBC_NO_PADDING, NULL,
+                            sizeof(ct_in), pt, sizeof(pt), &pt_len);
+    if (st != PSA_ERROR_INVALID_ARGUMENT) {
+        printf("FAIL decrypt NULL input: status=%d\n", (int)st);
+        rc = 1;
+    }
+
     /* Controls: a normal one-shot roundtrip still works. */
     st = psa_cipher_encrypt(key_id, PSA_ALG_CBC_NO_PADDING, plain, 16,
                             ct, sizeof(ct), &ct_len);
