@@ -38,3 +38,6 @@ zephyr/**/boards/nucleo_*.overlay
 /test/psa_devid_cryptocb_test
 /test/build-cryptocb
 /test/build-cryptocb-asan
+
+# Local review notes (skoll known-issues list); not a project artifact
+.skoll-known.md
