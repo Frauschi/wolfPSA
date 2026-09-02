@@ -164,6 +164,39 @@ extern "C" {
 #define WOLFSSL_XMSS_VERIFY_ONLY
 
 /* ------------------------------------------------------------------------- */
+/* Hardware offload through a wolfCrypt crypto callback                      */
+/* ------------------------------------------------------------------------- */
+/* A settings file is authoritative: when one is supplied the wolfSSL module's
+ * own user_settings.h is not consulted and its Kconfig feature options are not
+ * selectable, so turning the port on is this file's job.
+ *
+ * All three conditions, matching the module's own Kconfig dependency.
+ * MCUX_ELS_PKC alone is not enough: els_pkc sets it for a TF-M build while
+ * only creating its McuxElsPkc target when TF-M is off, and exports the
+ * platform directory holding mcux_els.h only on RW6XX. */
+#if defined(CONFIG_MCUX_ELS_PKC) && !defined(CONFIG_BUILD_WITH_TFM) && \
+    defined(CONFIG_SOC_SERIES_RW6XX)
+    #define WOLFSSL_ELS_PKC
+    #ifndef WOLF_CRYPTO_CB
+        #define WOLF_CRYPTO_CB
+    #endif
+    #ifndef WOLF_CRYPTO_CB_KEYSTORE
+        #define WOLF_CRYPTO_CB_KEYSTORE
+    #endif
+    /* The port keeps per-hash state in a fixed pool and reclaims the entry
+     * from the free hook. Without it, psa_hash_abort() on an unfinished hash
+     * leaks its entry permanently. */
+    #ifndef WOLF_CRYPTO_CB_FREE
+        #define WOLF_CRYPTO_CB_FREE
+    #endif
+    /* Without this wc_Sha256Copy() struct-copies devCtx and two hashes share
+     * one hardware context - which is exactly what psa_hash_clone() does. */
+    #ifndef WOLF_CRYPTO_CB_COPY
+        #define WOLF_CRYPTO_CB_COPY
+    #endif
+#endif /* CONFIG_MCUX_ELS_PKC && !TFM && RW6XX */
+
+/* ------------------------------------------------------------------------- */
 /* Experimental (Ascon requires the opt-in)                                  */
 /* ------------------------------------------------------------------------- */
 #define WOLFSSL_EXPERIMENTAL_SETTINGS

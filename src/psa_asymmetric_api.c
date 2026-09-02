@@ -109,6 +109,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
                                     size_t key_bits,
                                     const uint8_t *key_buffer,
                                     size_t key_buffer_size,
+                                    psa_key_lifetime_t lifetime,
                                     psa_algorithm_t alg,
                                     const uint8_t *hash,
                                     size_t hash_length,
@@ -579,6 +580,7 @@ static psa_status_t wolfpsa_sign_hash_worker(psa_key_id_t key,
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
         status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
                                          key_data, key_data_length,
+                                         attributes.lifetime,
                                          alg, hash, hash_length,
                                          signature, signature_size,
                                          signature_length);
@@ -969,6 +971,7 @@ static psa_status_t wolfpsa_sign_message_worker(psa_key_id_t key,
     else if (PSA_KEY_TYPE_IS_ECC(attributes.type)) {
         status = psa_asymmetric_sign_ecc(attributes.type, attributes.bits,
                                          key_data, key_data_length,
+                                         attributes.lifetime,
                                          alg, hash, hash_length,
                                          signature, signature_size,
                                          signature_length);
@@ -1322,6 +1325,16 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+#ifdef WOLFSSL_ELS_PKC
+    /* Here rather than at the entry points: raw agreement, multi-part and the
+     * derivation variant all come through here. The hardware deposits the
+     * result in a slot that cannot be read out, so there is no secret to hand
+     * back - say so rather than fail later as a malformed scalar. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes.lifetime)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+#endif
     if ((wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(peer_key_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {

@@ -37,6 +37,10 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 #include <wolfssl/wolfcrypt/ecc.h>
+#include <wolfpsa/psa_engine.h>
+#ifdef WOLFSSL_ELS_PKC
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+#endif
 
 extern int wc_psa_get_ecc_curve_id(psa_key_type_t type, size_t bits);
 int wc_psa_get_hash_type(psa_algorithm_t alg);
@@ -46,6 +50,7 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
                                     size_t key_bits,
                                     const uint8_t *key_buffer,
                                     size_t key_buffer_size,
+                                    psa_key_lifetime_t lifetime,
                                     psa_algorithm_t alg,
                                     const uint8_t *hash,
                                     size_t hash_length,
@@ -66,7 +71,13 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
     byte* der_sig = NULL;
     byte* rs = NULL;
     int devId;
-    
+
+#ifndef WOLFSSL_ELS_PKC
+    /* Only the key store path reads this; without it the signer cannot tell a
+     * reference from a scalar and does not need to. */
+    (void)lifetime;
+#endif
+
     /* Check if key type is ECC key pair */
     if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -105,29 +116,62 @@ psa_status_t psa_asymmetric_sign_ecc(psa_key_type_t key_type,
 #endif
     }
 
-    /* Initialize ECC key */
-    ret = wc_ecc_init_ex(&ecc, NULL, devId);
-    if (ret != 0) {
-        return wc_error_to_psa_status(ret);
+#ifdef WOLFSSL_ELS_PKC
+    /* A key in the EdgeLock store has no private material here: key_buffer
+     * holds a slot reference, so binding it at init is the whole of importing
+     * it. A deterministic signature is impossible for such a key - RFC 6979
+     * derives its nonce from the scalar the vault exists to keep inside. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(lifetime)) {
+        wc_ElsPkc_KeyRef ref;
+
+        if (PSA_ALG_IS_DETERMINISTIC_ECDSA(alg)) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        /* The key store holds P-256 and nothing else; another curve would
+         * otherwise get a P-256 signature laid out for the width it asked. */
+        if (curve_id != ECC_SECP256R1 || key_bits != 256) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (wc_ElsPkc_ParseKeyRef(key_buffer, (word32)key_buffer_size,
+                                  &ref) != 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        ret = wc_ElsPkc_EccUseSlot(&ecc, &ref, NULL, WOLFSSL_ELS_PKC_DEVID);
+        if (ret != 0) {
+            return wc_error_to_psa_status(ret);
+        }
+        ret = wc_InitRng_ex(&rng, NULL, wolfPSA_GetDefaultDevID());
+        if (ret != 0) {
+            wc_ecc_free(&ecc);
+            return wc_error_to_psa_status(ret);
+        }
     }
-    
-    /* Initialize RNG. The same devId as the signer: k is already derived by
-     * the time any signer runs, so this RNG only blinds, but a deterministic
-     * sign should not depend on a device RNG the pin above just opted out
-     * of. */
-    ret = wc_InitRng_ex(&rng, NULL, devId);
-    if (ret != 0) {
-        wc_ecc_free(&ecc);
-        return wc_error_to_psa_status(ret);
-    }
-    
-    /* Import private key */
-    ret = wc_ecc_import_private_key_ex(key_buffer, (word32)key_buffer_size,
-                                     NULL, 0, &ecc, curve_id);
-    if (ret != 0) {
-        wc_FreeRng(&rng);
-        wc_ecc_free(&ecc);
-        return wc_error_to_psa_status(ret);
+    else
+#endif /* WOLFSSL_ELS_PKC */
+    {
+        /* Initialize ECC key */
+        ret = wc_ecc_init_ex(&ecc, NULL, devId);
+        if (ret != 0) {
+            return wc_error_to_psa_status(ret);
+        }
+
+        /* Same devId as the signer: this RNG only blinds, but a deterministic
+         * sign should not depend on a device RNG the pin above opted out of. */
+        ret = wc_InitRng_ex(&rng, NULL, devId);
+        if (ret != 0) {
+            wc_ecc_free(&ecc);
+            return wc_error_to_psa_status(ret);
+        }
+
+        /* Import private key */
+        ret = wc_ecc_import_private_key_ex(key_buffer,
+                                           (word32)key_buffer_size,
+                                           NULL, 0, &ecc, curve_id);
+        if (ret != 0) {
+            wc_FreeRng(&rng);
+            wc_ecc_free(&ecc);
+            return wc_error_to_psa_status(ret);
+        }
     }
     
     key_bytes = PSA_BITS_TO_BYTES(key_bits);

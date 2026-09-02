@@ -29,6 +29,19 @@
 
 #include <psa/crypto.h>
 #include <wolfpsa/psa_engine.h>
+/* More than WOLFSSL_ELS_PKC promises: reserve and delete live behind
+ * WOLF_CRYPTO_CB_KEYSTORE, and binding a slot to an ecc_key behind HAVE_ECC.
+ * Track all three so an ELS build without the extension still compiles. */
+#if defined(WOLFSSL_ELS_PKC) && defined(WOLF_CRYPTO_CB_KEYSTORE) && \
+    defined(HAVE_ECC)
+    #define WOLFPSA_HAVE_ELS_KEYSTORE
+    #include <wolfssl/wolfcrypt/wc_keystore.h>
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+    #include <wolfssl/wolfcrypt/ecc.h>
+    #include <wolfssl/wolfcrypt/random.h>
+#elif defined(WOLFSSL_ELS_PKC)
+    #include <wolfssl/wolfcrypt/port/nxp/els_pkc_port.h>
+#endif
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
@@ -354,11 +367,25 @@ static psa_status_t wolfpsa_volatile_store(psa_key_id_t key_id,
     return st;
 }
 
-static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
+/* Unlink a volatile key and hand its record to the caller in one hold of the
+ * lock, so destroying a key that lives in hardware cannot be split into a
+ * look-up and a later act on it. The caller owns *key_data and frees it with
+ * wolfpsa_forcezero_free_key_data(). */
+static psa_status_t wolfpsa_volatile_take(psa_key_id_t key_id,
+                                          psa_key_attributes_t* attributes,
+                                          uint8_t** key_data,
+                                          size_t* key_data_length)
 {
     wolfpsa_volatile_key_node* cur;
     wolfpsa_volatile_key_node* prev = NULL;
     psa_status_t st = PSA_ERROR_INVALID_HANDLE;
+
+    if (key_data == NULL || key_data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    *key_data = NULL;
+    *key_data_length = 0;
 
     WOLFPSA_LOCK();
 
@@ -371,10 +398,13 @@ static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
             else {
                 g_volatile_keys = cur->next;
             }
-            if (cur->data != NULL) {
-                wc_ForceZero(cur->data, cur->data_length);
-                XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            if (attributes != NULL) {
+                *attributes = cur->attributes;
             }
+            /* The node's buffer is handed over rather than copied, so there is
+             * no allocation here that could fail after the unlink. */
+            *key_data = cur->data;
+            *key_data_length = cur->data_length;
             XMEMSET(cur, 0, sizeof(*cur));
             XFREE(cur, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             st = PSA_SUCCESS;
@@ -1053,11 +1083,36 @@ psa_status_t psa_import_key(
      * psa_copy_key and psa_key_derivation_output_key, which all store through
      * psa_import_key. */
     if (PSA_KEY_LIFETIME_GET_LOCATION(attr.lifetime) !=
-        PSA_KEY_LOCATION_LOCAL_STORAGE) {
+        PSA_KEY_LOCATION_LOCAL_STORAGE
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+        /* Volatile only, and guarded by the same condition that validates and
+         * erases the location rather than by WOLFSSL_ELS_PKC alone. Every
+         * other guard for this location sits in the volatile path, and a
+         * reserved slot is not retained across a reset anyway. */
+        && !(WOLFPSA_LIFETIME_IS_ELS_PKC(attr.lifetime) &&
+             PSA_KEY_LIFETIME_IS_VOLATILE(attr.lifetime))
+#endif
+        ) {
         wolfpsa_debug_import_reason("unsupported key lifetime location", &attr,
                                     data_length);
         return PSA_ERROR_NOT_SUPPORTED;
     }
+
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+    /* Check the reference here rather than let a malformed one travel as far
+     * as the public-key export, which would do arithmetic on a short blob. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attr.lifetime)) {
+        wc_ElsPkc_KeyRef chk;
+
+        if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attr.type) || attr.bits != 256) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (data == NULL || data_length < WC_ELSPKC_KEYREF_SZ ||
+            wc_ElsPkc_ParseKeyRef(data, (word32)data_length, &chk) != 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+    }
+#endif
 
     if (attr.policy.alg2 != PSA_ALG_NONE) {
         wolfpsa_debug_import_reason("unsupported secondary algorithm", &attr,
@@ -1405,6 +1460,78 @@ psa_status_t psa_generate_key(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+    /* Generating into the key store. PSA's generate takes no input, so the
+     * slot is chosen here. What is stored is the reference followed by the
+     * public point, which has to be kept now or not at all: the hardware will
+     * not give a slot key's public part back afterwards. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes->lifetime)) {
+        wc_ElsPkc_KeyRef ref;
+        ecc_key ecc;
+        WC_RNG rng;
+        /* the reference, then the X9.62 point: 0x04 and two P-521-sized
+         * coordinates is the largest any selectable curve produces */
+        uint8_t blob[WC_ELSPKC_KEYREF_SZ + 1 + (2 * 66)];
+        word32 refSz = WC_ELSPKC_KEYREF_SZ;
+        word32 pubSz = (word32)(sizeof(blob) - WC_ELSPKC_KEYREF_SZ);
+        int ret;
+
+        if (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type) || key_bits != 256) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+
+        ret = wc_ElsPkc_ReserveSlot(WC_ELSPKC_KEY_ECC_SIGN, &ref);
+        if (ret != 0) {
+            return (ret == MEMORY_E) ? PSA_ERROR_INSUFFICIENT_STORAGE
+                                     : PSA_ERROR_HARDWARE_FAILURE;
+        }
+        ret = wc_ElsPkc_MakeKeyRef(&ref, blob, &refSz);
+        /* Everything below places the public point at a fixed offset, so a
+         * shorter reference would be read back as a longer one. */
+        if (ret == 0 && refSz != WC_ELSPKC_KEYREF_SZ) {
+            ret = BUFFER_E;
+        }
+        if (ret == 0) {
+            ret = wc_InitRng_ex(&rng, NULL, WOLFSSL_ELS_PKC_DEVID);
+        }
+        if (ret != 0) {
+            return PSA_ERROR_HARDWARE_FAILURE;
+        }
+        /* On failure EccUseSlot has either not initialised the key or freed
+         * it already; only the success path owns an initialised object. */
+        ret = wc_ElsPkc_EccUseSlot(&ecc, &ref, NULL, WOLFSSL_ELS_PKC_DEVID);
+        if (ret != 0) {
+            wc_FreeRng(&rng);
+            return PSA_ERROR_HARDWARE_FAILURE;
+        }
+
+        ret = wc_ecc_make_key_ex(&rng, 32, &ecc, ECC_SECP256R1);
+        if (ret == 0) {
+            ret = wc_ecc_export_x963_ex(&ecc, blob + WC_ELSPKC_KEYREF_SZ,
+                                        &pubSz, 0);
+        }
+        wc_FreeRng(&rng);
+
+        if (ret == 0) {
+            status = psa_import_key(attributes, blob,
+                                    WC_ELSPKC_KEYREF_SZ + pubSz, key_id);
+        }
+        else {
+            status = PSA_ERROR_HARDWARE_FAILURE;
+        }
+        wc_ecc_free(&ecc);
+
+        /* A key exists in the slot now; if recording it failed, take it back
+         * out rather than leave it with nothing referring to it. */
+        if (status != PSA_SUCCESS) {
+            (void)wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, blob,
+                                     WC_ELSPKC_KEYREF_SZ, NULL);
+        }
+
+        return status;
+    }
+#endif /* WOLFSSL_ELS_PKC */
+
     if (PSA_KEY_TYPE_IS_UNSTRUCTURED(key_type) ||
         key_type == PSA_KEY_TYPE_HMAC ||
         key_type == PSA_KEY_TYPE_AES ||
@@ -1656,9 +1783,32 @@ psa_status_t psa_destroy_key(psa_key_id_t key_id)
         return status;
     }
 
-    status = wolfpsa_volatile_remove(key_id);
-    if (status == PSA_SUCCESS) {
-        return PSA_SUCCESS;
+    /* Take the record out before anything acts on it. Reading it and acting
+     * afterwards would let a second caller destroy the same key in between and
+     * a third be handed the freed slot; the unlink is what picks a single
+     * winner. Note this makes importing a reference an act of adoption. */
+    {
+        psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+        uint8_t* vol_data = NULL;
+        size_t vol_len = 0;
+
+        status = wolfpsa_volatile_take(key_id, &vol_attr, &vol_data, &vol_len);
+        if (status == PSA_SUCCESS) {
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime) &&
+                wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, vol_data,
+                                   (word32)vol_len, NULL) != 0) {
+                /* Put the record back rather than claim success: that would
+                 * leave the key resident while reporting it destroyed. */
+                (void)wolfpsa_volatile_store(key_id, &vol_attr, vol_data,
+                                             vol_len);
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+                return PSA_ERROR_HARDWARE_FAILURE;
+            }
+#endif
+            wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+            return PSA_SUCCESS;
+        }
     }
 
     /* Remove key from persistent storage */
@@ -1707,6 +1857,16 @@ psa_status_t psa_export_key(
 
         status = wolfpsa_volatile_get(key_id, &vol_attr, &vol_data, &vol_len);
         if (status == PSA_SUCCESS) {
+#ifdef WOLFSSL_ELS_PKC
+            /* What is stored is a reference to a slot, not the key, so a
+             * caller would read sixteen bytes of reference as a scalar. The
+             * obstacle is absent material, not permission, so refuse
+             * regardless of the usage policy. */
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime)) {
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+#endif
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_EXPORT) == 0) {
                 wolfpsa_forcezero_free_key_data(vol_data, vol_len);
@@ -1735,7 +1895,7 @@ psa_status_t psa_export_key(
          PSA_KEY_USAGE_EXPORT) == 0) {
         return PSA_ERROR_NOT_PERMITTED;
     }
-    
+
     /* Calculate attribute length */
     attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                  sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
@@ -1798,7 +1958,9 @@ psa_status_t psa_export_public_key(
                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
                    sizeof(psa_key_lifetime_t) + sizeof(size_t)];
     psa_key_attributes_t attributes;
-    size_t key_data_length;
+    /* Only ever read behind use_volatile, which is set in the same branch that
+     * assigns it, but the compiler cannot see that correlation and warns. */
+    size_t key_data_length = 0;
     size_t attr_length;
     uint8_t* key_data = NULL;
     int ret;
@@ -1845,6 +2007,31 @@ psa_status_t psa_export_public_key(
         }
         return PSA_ERROR_INVALID_ARGUMENT;
     }
+
+#ifdef WOLFSSL_ELS_PKC
+    /* No private part here to derive from, so the point is whatever was
+     * recorded at generation - the hardware will not hand it back. A key
+     * imported as a bare reference never carried one. */
+    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes.lifetime)) {
+        size_t point_len;
+
+        if (!use_volatile || key_data_length <= WC_ELSPKC_KEYREF_SZ) {
+            if (use_volatile) {
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            }
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        point_len = key_data_length - WC_ELSPKC_KEYREF_SZ;
+        if (data_size < point_len) {
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+        }
+        XMEMCPY(data, key_data + WC_ELSPKC_KEYREF_SZ, point_len);
+        *data_length = point_len;
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_SUCCESS;
+    }
+#endif /* WOLFSSL_ELS_PKC */
 
     if (!use_volatile) {
         attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
@@ -2262,6 +2449,15 @@ psa_status_t psa_copy_key(
         if (status == PSA_SUCCESS) {
             dst_attr = *attributes;
 
+#ifdef WOLFSSL_ELS_PKC
+            /* A key store key cannot be copied: duplicating a reference would
+             * leave two PSA keys sharing one slot, so destroying either would
+             * destroy the other's key. */
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime)) {
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+                return PSA_ERROR_NOT_PERMITTED;
+            }
+#endif
             if ((psa_get_key_usage_flags(&vol_attr) &
                  PSA_KEY_USAGE_COPY) == 0) {
                 wolfpsa_forcezero_free_key_data(key_data, key_data_length);
