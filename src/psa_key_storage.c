@@ -1958,7 +1958,9 @@ psa_status_t psa_export_public_key(
                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
                    sizeof(psa_key_lifetime_t) + sizeof(size_t)];
     psa_key_attributes_t attributes;
-    size_t key_data_length;
+    /* Only ever read behind use_volatile, which is set in the same branch that
+     * assigns it, but the compiler cannot see that correlation and warns. */
+    size_t key_data_length = 0;
     size_t attr_length;
     uint8_t* key_data = NULL;
     int ret;
