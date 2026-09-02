@@ -367,11 +367,25 @@ static psa_status_t wolfpsa_volatile_store(psa_key_id_t key_id,
     return st;
 }
 
-static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
+/* Unlink a volatile key and hand its record to the caller in one hold of the
+ * lock, so destroying a key that lives in hardware cannot be split into a
+ * look-up and a later act on it. The caller owns *key_data and frees it with
+ * wolfpsa_forcezero_free_key_data(). */
+static psa_status_t wolfpsa_volatile_take(psa_key_id_t key_id,
+                                          psa_key_attributes_t* attributes,
+                                          uint8_t** key_data,
+                                          size_t* key_data_length)
 {
     wolfpsa_volatile_key_node* cur;
     wolfpsa_volatile_key_node* prev = NULL;
     psa_status_t st = PSA_ERROR_INVALID_HANDLE;
+
+    if (key_data == NULL || key_data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    *key_data = NULL;
+    *key_data_length = 0;
 
     WOLFPSA_LOCK();
 
@@ -384,10 +398,13 @@ static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
             else {
                 g_volatile_keys = cur->next;
             }
-            if (cur->data != NULL) {
-                wc_ForceZero(cur->data, cur->data_length);
-                XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            if (attributes != NULL) {
+                *attributes = cur->attributes;
             }
+            /* The node's buffer is handed over rather than copied, so there is
+             * no allocation here that could fail after the unlink. */
+            *key_data = cur->data;
+            *key_data_length = cur->data_length;
             XMEMSET(cur, 0, sizeof(*cur));
             XFREE(cur, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             st = PSA_SUCCESS;
@@ -1766,43 +1783,32 @@ psa_status_t psa_destroy_key(psa_key_id_t key_id)
         return status;
     }
 
-#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
-    /* Destroy means destroy. For a key store key the record here is only a
-     * reference, so removing it alone would leave the key itself in the
-     * hardware - psa_destroy_key promises the material is erased, not that a
-     * handle is dropped.
-     *
-     * Note this makes importing a reference an act of adoption: the slot
-     * becomes this key's, and destroying the key destroys it. That is what PSA
-     * means by destroy, but it is worth knowing before importing a reference
-     * to a slot something else owns. */
+    /* Take the record out before anything acts on it. Reading it and acting
+     * afterwards would let a second caller destroy the same key in between and
+     * a third be handed the freed slot; the unlink is what picks a single
+     * winner. Note this makes importing a reference an act of adoption. */
     {
-        psa_key_attributes_t els_attr = PSA_KEY_ATTRIBUTES_INIT;
-        uint8_t* els_data = NULL;
-        size_t els_len = 0;
+        psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+        uint8_t* vol_data = NULL;
+        size_t vol_len = 0;
 
-        if (wolfpsa_volatile_get(key_id, &els_attr, &els_data, &els_len)
-                == PSA_SUCCESS) {
-            if (WOLFPSA_LIFETIME_IS_ELS_PKC(els_attr.lifetime)) {
-                /* Report a failure rather than erase the record and claim
-                 * success - that would leave the key resident in the slot
-                 * while telling the caller it was destroyed, which is the
-                 * opposite of what this function promises. The record is
-                 * kept too, so the two cannot disagree about what exists. */
-                if (wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, els_data,
-                                       (word32)els_len, NULL) != 0) {
-                    wolfpsa_forcezero_free_key_data(els_data, els_len);
-                    return PSA_ERROR_HARDWARE_FAILURE;
-                }
+        status = wolfpsa_volatile_take(key_id, &vol_attr, &vol_data, &vol_len);
+        if (status == PSA_SUCCESS) {
+#ifdef WOLFPSA_HAVE_ELS_KEYSTORE
+            if (WOLFPSA_LIFETIME_IS_ELS_PKC(vol_attr.lifetime) &&
+                wc_KeyStore_Delete(WOLFSSL_ELS_PKC_DEVID, vol_data,
+                                   (word32)vol_len, NULL) != 0) {
+                /* Put the record back rather than claim success: that would
+                 * leave the key resident while reporting it destroyed. */
+                (void)wolfpsa_volatile_store(key_id, &vol_attr, vol_data,
+                                             vol_len);
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+                return PSA_ERROR_HARDWARE_FAILURE;
             }
-            wolfpsa_forcezero_free_key_data(els_data, els_len);
-        }
-    }
 #endif
-
-    status = wolfpsa_volatile_remove(key_id);
-    if (status == PSA_SUCCESS) {
-        return PSA_SUCCESS;
+            wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+            return PSA_SUCCESS;
+        }
     }
 
     /* Remove key from persistent storage */
