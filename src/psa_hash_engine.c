@@ -724,8 +724,6 @@ psa_status_t psa_hash_verify(psa_hash_operation_t *operation,
 {
     psa_status_t status;
     uint8_t computed_hash[PSA_HASH_MAX_SIZE];
-    /* psa_hash_finish() writes this on every success path; zero it anyway so
-     * the comparison below fails closed if one ever stops. */
     size_t computed_hash_length = 0;
 
     if (operation == NULL || hash == NULL) {
