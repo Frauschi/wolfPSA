@@ -30,6 +30,7 @@
 #include <psa/crypto.h>
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
+#include "psa_opaque_driver.h"
 #include "psa_pqc_internal.h"
 #include "psa_trace.h"
 #include <wolfssl/wolfcrypt/types.h>
@@ -121,6 +122,13 @@ psa_status_t psa_encapsulate(psa_key_id_t key,
     /* --- Load the KEM key and check policy --- */
     status = wolfpsa_get_key_data(key, &key_attr, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    /* No encapsulation op, and a reference is not an ML-KEM key. */
+    status = wolfpsa_opaque_driver_reject(key_attr.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
@@ -232,6 +240,13 @@ psa_status_t psa_decapsulate(psa_key_id_t key,
     /* --- Load the KEM key and check policy --- */
     status = wolfpsa_get_key_data(key, &key_attr, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    /* No encapsulation op, and a reference is not an ML-KEM key. */
+    status = wolfpsa_opaque_driver_reject(key_attr.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 

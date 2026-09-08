@@ -31,6 +31,7 @@
 #include "psa_trace.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
+#include "psa_opaque_driver.h"
 #include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
 
@@ -61,6 +62,9 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
     size_t plain_max;
     size_t exported_len = 0;
     int wret;
+    const wolfpsa_opaque_driver *driver;
+    uint8_t *target_data = NULL;
+    size_t target_len = 0;
 #endif
 
     wolfpsa_trace("psa_wrap_key(wrapping_key=%u alg=0x%08x key=%u)",
@@ -114,6 +118,29 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
     /* Obtain the target key's attributes to size the export buffer */
     status = psa_get_key_attributes(key, &target_attr);
     if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(kek, kek_len);
+        return status;
+    }
+
+    /* Both keys belong to the driver, which wraps one under the other without
+     * either reaching this side. A mixed pair has no meaning: the KEK would be
+     * a reference, or the target's material is not here to wrap. */
+    driver = wolfpsa_opaque_driver_find(wrap_attr.lifetime);
+    if (driver != NULL ||
+        wolfpsa_opaque_driver_find(target_attr.lifetime) != NULL) {
+        if (driver == NULL || driver->wrap == NULL ||
+            wolfpsa_opaque_driver_find(target_attr.lifetime) != driver) {
+            wolfpsa_forcezero_free_key_data(kek, kek_len);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        status = wolfpsa_get_key_data(key, &target_attr, &target_data,
+                                      &target_len);
+        if (status == PSA_SUCCESS) {
+            status = driver->wrap(&wrap_attr, kek, kek_len, alg, &target_attr,
+                                  target_data, target_len, data, data_size,
+                                  data_length);
+            wolfpsa_forcezero_free_key_data(target_data, target_len);
+        }
         wolfpsa_forcezero_free_key_data(kek, kek_len);
         return status;
     }
@@ -194,6 +221,40 @@ psa_status_t psa_wrap_key(psa_key_id_t wrapping_key,
  * Decrypts the wrapped blob with wc_AesKeyUnWrap() and imports the recovered
  * plaintext as a new key via psa_import_key().
  */
+#ifdef HAVE_AES_KEYWRAP
+/* The driver unwraps into its own store and hands back the reference wolfPSA
+ * records; the key material never appears on this side. */
+static psa_status_t wolfpsa_driver_unwrap_key(
+    const wolfpsa_opaque_driver *driver,
+    const psa_key_attributes_t *wrap_attr, const uint8_t *kek, size_t kek_len,
+    psa_algorithm_t alg, const psa_key_attributes_t *attributes,
+    const uint8_t *data, size_t data_length, psa_key_id_t *key)
+{
+    uint8_t *blob;
+    size_t blob_len = 0;
+    psa_status_t status;
+
+    blob = (uint8_t *)XMALLOC(driver->max_key_data_size, NULL,
+                              DYNAMIC_TYPE_TMP_BUFFER);
+    if (blob == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    status = driver->unwrap(wrap_attr, kek, kek_len, alg, attributes, data,
+                            data_length, blob, driver->max_key_data_size,
+                            &blob_len);
+    if (status == PSA_SUCCESS) {
+        status = psa_import_key(attributes, blob, blob_len, key);
+        if (status != PSA_SUCCESS && driver->destroy != NULL) {
+            (void)driver->destroy(attributes, blob, blob_len);
+        }
+    }
+    wolfpsa_forcezero_free_key_data(blob, driver->max_key_data_size);
+
+    return status;
+}
+#endif /* HAVE_AES_KEYWRAP */
+
 psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
                              psa_key_id_t wrapping_key,
                              psa_algorithm_t alg,
@@ -212,6 +273,7 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
     uint8_t *plaintext = NULL;
     size_t plain_len;
     int wret;
+    const wolfpsa_opaque_driver *driver;
 #endif
 
     wolfpsa_trace("psa_unwrap_key(wrapping_key=%u alg=0x%08x data_len=%zu)",
@@ -270,6 +332,23 @@ psa_status_t psa_unwrap_key(const psa_key_attributes_t *attributes,
     if (wrap_alg == PSA_ALG_NONE || wrap_alg != alg) {
         wolfpsa_forcezero_free_key_data(kek, kek_len);
         return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    /* Symmetric with the wrap side: the driver takes the blob straight into
+     * its own store, so no plaintext key ever exists here. */
+    driver = wolfpsa_opaque_driver_find(wrap_attr.lifetime);
+    if (driver != NULL ||
+        wolfpsa_opaque_driver_find(attributes->lifetime) != NULL) {
+        if (driver == NULL || driver->unwrap == NULL ||
+            wolfpsa_opaque_driver_find(attributes->lifetime) != driver) {
+            wolfpsa_forcezero_free_key_data(kek, kek_len);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        status = wolfpsa_driver_unwrap_key(driver, &wrap_attr, kek, kek_len,
+                                           alg, attributes, data, data_length,
+                                           key);
+        wolfpsa_forcezero_free_key_data(kek, kek_len);
+        return status;
     }
 
     plain_len = data_length - 8;

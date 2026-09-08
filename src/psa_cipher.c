@@ -32,6 +32,7 @@
 #include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
+#include "psa_opaque_driver.h"
 #include <wolfssl/wolfcrypt/aes.h>
 #ifndef NO_DES3
 #include <wolfssl/wolfcrypt/des3.h>
@@ -151,6 +152,33 @@ static size_t wolfpsa_cipher_iv_length(psa_algorithm_t alg,
     }
 }
 
+/* An AES key the driver holds: binding it takes the place of the init and key
+ * schedule, and the IV is set separately because binding runs no schedule. */
+static psa_status_t wolfpsa_cipher_bind_driver_aes(
+    const wolfpsa_opaque_driver *driver, const uint8_t *key_data,
+    size_t key_data_length, psa_algorithm_t alg, const byte *iv, Aes *aes)
+{
+    psa_status_t status;
+    int ret;
+
+    if (driver->aes_bind == NULL) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    status = driver->aes_bind(key_data, key_data_length, alg, aes);
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    ret = wc_AesSetIV(aes, iv);
+    if (ret != 0) {
+        wc_AesFree(aes);
+        return wc_error_to_psa_status(ret);
+    }
+
+    return PSA_SUCCESS;
+}
+
 static psa_status_t wolfpsa_cipher_check_key(
     psa_key_id_t key,
     psa_key_usage_t usage,
@@ -234,6 +262,13 @@ static psa_status_t wolfpsa_cipher_check_key(
         *key_data = NULL;
         *key_data_length = 0;
         return PSA_ERROR_NOT_PERMITTED;
+    }
+
+    /* Past the policy checks and before any check on the material: a driver
+     * key's data is a reference, whose length says nothing about the key.
+     * Sixteen bytes of it would otherwise pass as an AES-128 key. */
+    if (wolfpsa_opaque_driver_find(attributes->lifetime) != NULL) {
+        return PSA_SUCCESS;
     }
 
 #ifdef HAVE_CHACHA
@@ -394,6 +429,20 @@ psa_status_t psa_cipher_encrypt_setup(psa_cipher_operation_t *operation,
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
     }
+    else if (wolfpsa_opaque_driver_find(attributes.lifetime) != NULL) {
+        psa_status_t bind = wolfpsa_cipher_bind_driver_aes(
+            wolfpsa_opaque_driver_find(attributes.lifetime), key_data,
+            key_data_length, alg, ctx->iv, &ctx->aes);
+
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        if (bind != PSA_SUCCESS) {
+            wc_ForceZero(ctx, sizeof(*ctx));
+            XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return bind;
+        }
+        operation->opaque = (uintptr_t)ctx;
+        return PSA_SUCCESS;
+    }
     else {
         ret = wc_AesInit(&ctx->aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret != 0) {
@@ -536,6 +585,20 @@ psa_status_t psa_cipher_decrypt_setup(psa_cipher_operation_t *operation,
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return PSA_ERROR_NOT_SUPPORTED;
 #endif
+    }
+    else if (wolfpsa_opaque_driver_find(attributes.lifetime) != NULL) {
+        psa_status_t bind = wolfpsa_cipher_bind_driver_aes(
+            wolfpsa_opaque_driver_find(attributes.lifetime), key_data,
+            key_data_length, alg, ctx->iv, &ctx->aes);
+
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        if (bind != PSA_SUCCESS) {
+            wc_ForceZero(ctx, sizeof(*ctx));
+            XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return bind;
+        }
+        operation->opaque = (uintptr_t)ctx;
+        return PSA_SUCCESS;
     }
     else {
         ret = wc_AesInit(&ctx->aes, NULL, wolfPSA_GetDefaultDevID());
