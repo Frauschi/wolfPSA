@@ -31,6 +31,7 @@
 #include "psa_size.h"
 #include "psa_trace.h"
 #include "psa_pqc_internal.h"
+#include "psa_opaque_driver.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
 #include <wolfssl/wolfcrypt/mem_track.h>
@@ -276,12 +277,55 @@ static int wolfpsa_sign_alg_permitted(psa_algorithm_t key_alg,
     return 0;
 }
 
+/* A driver key pair verifies against the public key the driver kept for it:
+ * swap the reference for that key and let the ordinary public-key path run.
+ * Nothing to do for a key wolfPSA holds itself. */
+static psa_status_t wolfpsa_asymmetric_driver_public(
+    psa_key_attributes_t *attributes, uint8_t **key_data,
+    size_t *key_data_length)
+{
+    const wolfpsa_opaque_driver* driver;
+    uint8_t* pub;
+    size_t pub_len = 0;
+    psa_status_t status;
+
+    driver = wolfpsa_opaque_driver_find(attributes->lifetime);
+    if (driver == NULL) {
+        return PSA_SUCCESS;
+    }
+    if (driver->export_public == NULL ||
+        !PSA_KEY_TYPE_IS_KEY_PAIR(attributes->type)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    pub = (uint8_t*)XMALLOC(PSA_EXPORT_PUBLIC_KEY_MAX_SIZE, NULL,
+                            DYNAMIC_TYPE_TMP_BUFFER);
+    if (pub == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    status = driver->export_public(attributes, *key_data, *key_data_length,
+                                   pub, PSA_EXPORT_PUBLIC_KEY_MAX_SIZE,
+                                   &pub_len);
+    if (status != PSA_SUCCESS) {
+        XFREE(pub, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return status;
+    }
+
+    wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+    *key_data = pub;
+    *key_data_length = pub_len;
+    attributes->type = PSA_KEY_TYPE_PUBLIC_KEY_OF_KEY_PAIR(attributes->type);
+    return PSA_SUCCESS;
+}
+
 static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
                                                  psa_key_usage_t usage,
                                                  psa_algorithm_t alg,
                                                  psa_key_attributes_t *attributes,
                                                  uint8_t **key_data,
-                                                 size_t *key_data_length)
+                                                 size_t *key_data_length,
+                                                 int driver_ok)
 {
     psa_status_t status;
     psa_key_usage_t key_usage;
@@ -290,6 +334,16 @@ static psa_status_t wolfpsa_asymmetric_check_key(psa_key_id_t key,
     status = wolfpsa_get_key_data(key, attributes, key_data, key_data_length);
     if (status != PSA_SUCCESS) {
         return status;
+    }
+
+    /* driver_ok says the caller knows what to do with a key reference. The
+     * rest would run their algorithm over one as if it were material. */
+    if (!driver_ok &&
+        wolfpsa_opaque_driver_reject(attributes->lifetime) != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(*key_data, *key_data_length);
+        *key_data = NULL;
+        *key_data_length = 0;
+        return PSA_ERROR_NOT_SUPPORTED;
     }
 
     key_usage = psa_get_key_usage_flags(attributes);
@@ -395,7 +449,8 @@ psa_status_t psa_asymmetric_encrypt(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_ENCRYPT, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 0);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -440,7 +495,8 @@ psa_status_t psa_asymmetric_decrypt(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_DECRYPT, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 0);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -486,9 +542,20 @@ static psa_status_t wolfpsa_sign_hash_worker(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_SIGN_HASH, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 1);
     if (status != PSA_SUCCESS) {
         return status;
+    }
+
+    /* Only the ECDSA signer works from a key reference; the branches below
+     * would sign with one as if it were a scalar. */
+    if (wolfpsa_opaque_driver_find(attributes.lifetime) != NULL &&
+        (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attributes.type) ||
+         PSA_KEY_TYPE_ECC_GET_FAMILY(attributes.type) ==
+             PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
 
     status = wolfpsa_check_context(alg, attributes.type, attributes.bits,
@@ -614,8 +681,16 @@ static psa_status_t wolfpsa_verify_hash_worker(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_VERIFY_HASH, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 1);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    status = wolfpsa_asymmetric_driver_public(&attributes, &key_data,
+                                             &key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
@@ -801,9 +876,20 @@ static psa_status_t wolfpsa_sign_message_worker(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_SIGN_MESSAGE, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 1);
     if (status != PSA_SUCCESS) {
         return status;
+    }
+
+    /* Only the ECDSA signer works from a key reference; the branches below
+     * would sign with one as if it were a scalar. */
+    if (wolfpsa_opaque_driver_find(attributes.lifetime) != NULL &&
+        (!PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attributes.type) ||
+         PSA_KEY_TYPE_ECC_GET_FAMILY(attributes.type) ==
+             PSA_ECC_FAMILY_TWISTED_EDWARDS)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return PSA_ERROR_NOT_SUPPORTED;
     }
 
     status = wolfpsa_check_context(alg, attributes.type, attributes.bits,
@@ -1009,8 +1095,16 @@ static psa_status_t wolfpsa_verify_message_worker(psa_key_id_t key,
     }
 
     status = wolfpsa_asymmetric_check_key(key, PSA_KEY_USAGE_VERIFY_MESSAGE, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 1);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    status = wolfpsa_asymmetric_driver_public(&attributes, &key_data,
+                                             &key_data_length);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
@@ -1297,6 +1391,7 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
     psa_status_t status;
+    const wolfpsa_opaque_driver* driver;
 #if defined(HAVE_ECC) && defined(HAVE_ECC_DHE)
     int ret;
     ecc_key priv;
@@ -1316,7 +1411,8 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
     }
 
     status = wolfpsa_asymmetric_check_key(private_key, PSA_KEY_USAGE_DERIVE, alg,
-                                          &attributes, &key_data, &key_data_length);
+                                          &attributes, &key_data,
+                                          &key_data_length, 1);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -1325,16 +1421,22 @@ psa_status_t wolfpsa_key_agreement_secret(psa_algorithm_t alg,
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return PSA_ERROR_INVALID_ARGUMENT;
     }
-#ifdef WOLFSSL_ELS_PKC
     /* Here rather than at the entry points: raw agreement, multi-part and the
-     * derivation variant all come through here. The hardware deposits the
-     * result in a slot that cannot be read out, so there is no secret to hand
-     * back - say so rather than fail later as a malformed scalar. */
-    if (WOLFPSA_LIFETIME_IS_ELS_PKC(attributes.lifetime)) {
+     * derivation variant all come through here. */
+    driver = wolfpsa_opaque_driver_find(attributes.lifetime);
+    if (driver != NULL) {
+        if (driver->key_agreement == NULL) {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
+        else {
+            status = driver->key_agreement(&attributes, key_data,
+                                           key_data_length, alg, peer_key,
+                                           peer_key_length, output,
+                                           output_size, output_length);
+        }
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-        return PSA_ERROR_NOT_SUPPORTED;
+        return status;
     }
-#endif
     if ((wolfpsa_check_word32_length(key_data_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(peer_key_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(output_size) != PSA_SUCCESS)) {

@@ -4,11 +4,20 @@ WOLFSSL_PATH ?= ../wolfssl
 USER_SETTINGS_PATH ?= $(CURDIR)/wolfpsa
 PSA_INCLUDE ?=
 
+# The stand-in driver changes every TU's flags, so it gets its own object tree
+# and its own library rather than silently sharing either with a build made
+# without it.
+ifeq ($(TEST_OPAQUE_DRIVER),1)
+BUILD_DIR ?= build-testdrv
+LIB_SUFFIX := -testdrv
+else
 BUILD_DIR ?= build
+LIB_SUFFIX :=
+endif
 OBJDIR := $(BUILD_DIR)/obj
 OBJDIR_PIC := $(BUILD_DIR)/obj.pic
-LIBNAME := libwolfpsa.a
-SHLIBNAME := libwolfpsa.so
+LIBNAME := libwolfpsa$(LIB_SUFFIX).a
+SHLIBNAME := libwolfpsa$(LIB_SUFFIX).so
 EXPORT_MAP := $(CURDIR)/wolfpsa.map
 
 CC ?= cc
@@ -87,6 +96,12 @@ ifneq ($(strip $(PSA_INCLUDE)),)
 CPPFLAGS += -I$(PSA_INCLUDE)
 endif
 
+# Builds in the software stand-in for a hardware key store, so wolfPSA's own
+# tests can exercise the opaque-driver paths. Never set for a shipped library.
+ifeq ($(TEST_OPAQUE_DRIVER),1)
+CPPFLAGS += -DWOLFPSA_TEST_OPAQUE_DRIVER
+endif
+
 DEPFLAGS := -MMD -MP
 CFLAGS ?= -O2
 WARNFLAGS ?= -Wall -Wextra -Werror
@@ -112,7 +127,11 @@ all: $(LIBNAME) $(SHLIBNAME)
 # bundled wolfCrypt sources are out of scope.
 psa-objects: $(OBJ)
 
+# Recreated, not updated: ar replaces members but never removes them, so a
+# stale object from a differently-configured build would survive in the
+# archive.
 $(LIBNAME): $(OBJ) $(WOLFCRYPT_OBJ)
+	rm -f $@
 	$(AR) rcs $@ $^
 	$(RANLIB) $@
 

@@ -30,6 +30,8 @@ typedef struct wolfpsa_aead_ctx {
     psa_algorithm_t alg;
     psa_key_type_t key_type;
     size_t key_bits;
+    /* Where the key lives, so a finish can tell a reference from material. */
+    psa_key_lifetime_t lifetime;
     int direction;
     uint8_t *key;
     size_t key_length;

@@ -1,8 +1,11 @@
 build
+build-testdrv
 src/.deps
 libwolfpsa.a
+libwolfpsa-testdrv.a
 test-psa-api/psa-arch-tests
 libwolfpsa.so
+libwolfpsa-testdrv.so
 *.o
 test/psa_api_test
 test/psa_ecc_bit_inference_test
@@ -12,6 +15,7 @@ test/psa_des3_stack_scrub_test
 test/psa_random_size_test
 test/psa_rsa_pss_interop_test
 test/psa_crypto_init_test
+test/psa_opaque_driver_test
 psa_server/tls_client/psa_tls_client
 psa_tls_client
 wolfcrypt-benchmark/wolfcrypt-psa-benchmark
