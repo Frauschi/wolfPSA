@@ -838,7 +838,6 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
 #if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
         size_t out_len = 0;
-        uint8_t *ciphertext = ctx->input;
         size_t ciphertext_len;
         uint8_t *tmp;
         if (ctx->input_length > SIZE_MAX - tag_length) {
@@ -850,7 +849,9 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (tmp == NULL) {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
-        XMEMCPY(tmp, ciphertext, ctx->input_length);
+        /* input, not ctx->input: an empty ciphertext leaves the latter NULL,
+         * and a NULL source is undefined even for a zero-length copy. */
+        XMEMCPY(tmp, input, ctx->input_length);
         XMEMCPY(tmp + ctx->input_length, tag, tag_length);
         ret = psa_chacha20_poly1305_decrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
