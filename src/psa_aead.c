@@ -40,7 +40,56 @@
 #include <wolfssl/wolfcrypt/ascon.h>
 #endif
 #include "psa_aead_internal.h"
+#include "psa_opaque_driver.h"
 #include "psa_size.h"
+
+#if defined(HAVE_AESGCM) || defined(HAVE_AESCCM)
+/* Init an Aes for one AEAD call and key it, from a driver's key reference when
+ * one owns the key and from plain material otherwise. On success the caller
+ * owns the object and frees it with wc_AesFree(). */
+static psa_status_t wolfpsa_aead_aes_key(Aes *aes, psa_key_lifetime_t lifetime,
+                                         psa_algorithm_t alg,
+                                         const uint8_t *key, size_t key_length)
+{
+    const wolfpsa_opaque_driver *driver = wolfpsa_opaque_driver_find(lifetime);
+    int ret;
+
+    if (driver != NULL) {
+        if (driver->aes_bind == NULL) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        return driver->aes_bind(key, key_length, alg, aes);
+    }
+
+    ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
+    if (ret != 0) {
+        return wc_error_to_psa_status(ret);
+    }
+
+#ifdef HAVE_AESGCM
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_GCM)) {
+        ret = wc_AesGcmSetKey(aes, key, (word32)key_length);
+    }
+    else
+#endif
+#ifdef HAVE_AESCCM
+    if (PSA_ALG_AEAD_EQUAL(alg, PSA_ALG_CCM)) {
+        ret = wc_AesCcmSetKey(aes, key, (word32)key_length);
+    }
+    else
+#endif
+    {
+        ret = NOT_COMPILED_IN;
+    }
+
+    if (ret != 0) {
+        wc_AesFree(aes);
+        return wc_error_to_psa_status(ret);
+    }
+
+    return PSA_SUCCESS;
+}
+#endif /* HAVE_AESGCM || HAVE_AESCCM */
 
 static wolfpsa_aead_ctx_t* wolfpsa_aead_get_ctx(psa_aead_operation_t *operation)
 {
@@ -317,6 +366,7 @@ static psa_status_t wolfpsa_aead_setup(psa_aead_operation_t *operation,
     }
     XMEMCPY(ctx->key, key_data, key_data_length);
     ctx->key_length = key_data_length;
+    ctx->lifetime = attributes.lifetime;
 
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     operation->opaque = (uintptr_t)ctx;
@@ -593,17 +643,16 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
         Aes aes;
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
-        if (ret == 0) {
-            ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+        psa_status_t bind = wolfpsa_aead_aes_key(&aes, ctx->lifetime, ctx->alg,
+                                                 ctx->key, ctx->key_length);
+        if (bind != PSA_SUCCESS) {
+            return bind;
         }
-        if (ret == 0) {
-            ret = wc_AesGcmEncrypt(&aes, ciphertext, input,
-                                   (word32)ctx->input_length,
-                                   ctx->nonce, (word32)ctx->nonce_length,
-                                   tag, (word32)ctx->tag_length,
-                                   aad, (word32)ctx->aad_length);
-        }
+        ret = wc_AesGcmEncrypt(&aes, ciphertext, input,
+                               (word32)ctx->input_length,
+                               ctx->nonce, (word32)ctx->nonce_length,
+                               tag, (word32)ctx->tag_length,
+                               aad, (word32)ctx->aad_length);
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
@@ -616,20 +665,21 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
 #ifdef HAVE_AESCCM
         Aes aes;
+        psa_status_t bind;
+
         if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
-        if (ret == 0) {
-            ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+        bind = wolfpsa_aead_aes_key(&aes, ctx->lifetime, ctx->alg, ctx->key,
+                                    ctx->key_length);
+        if (bind != PSA_SUCCESS) {
+            return bind;
         }
-        if (ret == 0) {
-            ret = wc_AesCcmEncrypt(&aes, ciphertext, input,
-                                   (word32)ctx->input_length,
-                                   ctx->nonce, (word32)ctx->nonce_length,
-                                   tag, (word32)ctx->tag_length,
-                                   aad, (word32)ctx->aad_length);
-        }
+        ret = wc_AesCcmEncrypt(&aes, ciphertext, input,
+                               (word32)ctx->input_length,
+                               ctx->nonce, (word32)ctx->nonce_length,
+                               tag, (word32)ctx->tag_length,
+                               aad, (word32)ctx->aad_length);
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
         if (ret != 0) {
@@ -730,17 +780,16 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
         Aes aes;
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
-        if (ret == 0) {
-            ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+        psa_status_t bind = wolfpsa_aead_aes_key(&aes, ctx->lifetime, ctx->alg,
+                                                 ctx->key, ctx->key_length);
+        if (bind != PSA_SUCCESS) {
+            return bind;
         }
-        if (ret == 0) {
-            ret = wc_AesGcmDecrypt(&aes, plaintext, input,
-                                   (word32)ctx->input_length,
-                                   ctx->nonce, (word32)ctx->nonce_length,
-                                   tag, (word32)tag_length,
-                                   aad, (word32)ctx->aad_length);
-        }
+        ret = wc_AesGcmDecrypt(&aes, plaintext, input,
+                               (word32)ctx->input_length,
+                               ctx->nonce, (word32)ctx->nonce_length,
+                               tag, (word32)tag_length,
+                               aad, (word32)ctx->aad_length);
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_GCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
@@ -759,17 +808,21 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (wc_AesCcmCheckTagSize((int)tag_length) != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
-        if (ret == 0) {
-            ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+        psa_status_t bind;
+
+        if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
+            return PSA_ERROR_NOT_SUPPORTED;
         }
-        if (ret == 0) {
-            ret = wc_AesCcmDecrypt(&aes, plaintext, input,
-                                   (word32)ctx->input_length,
-                                   ctx->nonce, (word32)ctx->nonce_length,
-                                   tag, (word32)tag_length,
-                                   aad, (word32)ctx->aad_length);
+        bind = wolfpsa_aead_aes_key(&aes, ctx->lifetime, ctx->alg, ctx->key,
+                                    ctx->key_length);
+        if (bind != PSA_SUCCESS) {
+            return bind;
         }
+        ret = wc_AesCcmDecrypt(&aes, plaintext, input,
+                               (word32)ctx->input_length,
+                               ctx->nonce, (word32)ctx->nonce_length,
+                               tag, (word32)tag_length,
+                               aad, (word32)ctx->aad_length);
         wc_AesFree(&aes);
         wc_ForceZero(&aes, sizeof(aes));
         if (ret == AES_CCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
@@ -785,7 +838,6 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CHACHA20_POLY1305)) {
 #if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
         size_t out_len = 0;
-        uint8_t *ciphertext = ctx->input;
         size_t ciphertext_len;
         uint8_t *tmp;
         if (ctx->input_length > SIZE_MAX - tag_length) {
@@ -797,7 +849,9 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
         if (tmp == NULL) {
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
-        XMEMCPY(tmp, ciphertext, ctx->input_length);
+        /* input, not ctx->input: an empty ciphertext leaves the latter NULL,
+         * and a NULL source is undefined even for a zero-length copy. */
+        XMEMCPY(tmp, input, ctx->input_length);
         XMEMCPY(tmp + ctx->input_length, tag, tag_length);
         ret = psa_chacha20_poly1305_decrypt(ctx->key, ctx->key_length, ctx->alg,
                                             ctx->nonce, ctx->nonce_length,
@@ -921,6 +975,14 @@ static psa_status_t wolfpsa_xchacha_oneshot_encrypt(
         return status;
     }
 
+    /* XChaCha and Ascon have no driver op, and this key type cannot be an
+     * AES slot in any case. */
+    status = wolfpsa_opaque_driver_reject(attributes.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return status;
+    }
+
     if (attributes.type != PSA_KEY_TYPE_XCHACHA20 ||
         key_data_length != CHACHA20_POLY1305_AEAD_KEYSIZE) {
         wolfpsa_forcezero_free_key_data(key_data, key_data_length);
@@ -1001,6 +1063,14 @@ static psa_status_t wolfpsa_xchacha_oneshot_decrypt(
 
     status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    /* XChaCha and Ascon have no driver op, and this key type cannot be an
+     * AES slot in any case. */
+    status = wolfpsa_opaque_driver_reject(attributes.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
@@ -1098,6 +1168,14 @@ static psa_status_t wolfpsa_ascon_oneshot_encrypt(
 
     status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    /* XChaCha and Ascon have no driver op, and this key type cannot be an
+     * AES slot in any case. */
+    status = wolfpsa_opaque_driver_reject(attributes.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 
@@ -1203,6 +1281,14 @@ static psa_status_t wolfpsa_ascon_oneshot_decrypt(
 
     status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
+        return status;
+    }
+
+    /* XChaCha and Ascon have no driver op, and this key type cannot be an
+     * AES slot in any case. */
+    status = wolfpsa_opaque_driver_reject(attributes.lifetime);
+    if (status != PSA_SUCCESS) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         return status;
     }
 

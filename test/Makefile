@@ -52,6 +52,14 @@ CPPFLAGS += -I$(WOLFPSA_PATH) -I$(WOLFPSA_PATH)/wolfpsa
 CPPFLAGS += -I$(WOLFPSA_PATH)/src
 CPPFLAGS += -I$(WOLFPSA_PATH)/test/psa_server
 
+# Matches the library the root Makefile builds under the same flag.
+ifeq ($(TEST_OPAQUE_DRIVER),1)
+CPPFLAGS += -DWOLFPSA_TEST_OPAQUE_DRIVER
+WOLFPSA_LIB := $(WOLFPSA_PATH)/libwolfpsa-testdrv.a
+else
+WOLFPSA_LIB := $(WOLFPSA_PATH)/libwolfpsa.a
+endif
+
 LDFLAGS += -L$(WOLFPSA_PATH)
 ifneq ($(WOLFSSL_BUILD_DIR),)
 LDFLAGS += -L$(WOLFSSL_BUILD_DIR)
@@ -106,6 +114,10 @@ PSA_REGRESSION_TESTS = psa_xof_input_wrap_test \
 	psa_key_declared_bits_test
 BINARIES += $(PSA_REGRESSION_TESTS)
 
+ifeq ($(TEST_OPAQUE_DRIVER),1)
+BINARIES += psa_opaque_driver_test
+endif
+
 ifdef WOLFSSL_HAS_PSA_TLS
 BINARIES += psa_tls_server
 endif
@@ -119,6 +131,7 @@ PSA_RANDOM_SIZE_TEST_OBJS = psa_server/psa_random_size_test.o
 PSA_ECC_CURVE_ID_TEST_DEPS = $(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_asymmetric.o \
 	$(WOLFPSA_PATH)/$(BUILD_DIR)/obj/psa_pq.o
 PSA_RSA_PSS_TEST_OBJS = psa_server/psa_rsa_pss_interop_test.o
+PSA_OPAQUE_DRIVER_TEST_OBJS = psa_server/psa_opaque_driver_test.o
 
 .PHONY: all clean rebuild-wolfssl-psa require-wolfssl-lib FORCE
 
@@ -133,6 +146,9 @@ endif
 
 psa_api_test: require-wolfssl-lib $(PSA_API_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_API_TEST_OBJS) $(LDFLAGS) $(LDLIBS) $(RPATH_WOLFPSA) $(RPATH_WOLFSSL)
+
+psa_opaque_driver_test: require-wolfssl-lib $(PSA_OPAQUE_DRIVER_TEST_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(PSA_OPAQUE_DRIVER_TEST_OBJS) $(WOLFPSA_LIB) $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
 
 psa_crypto_init_test: require-wolfssl-lib $(PSA_CRYPTO_INIT_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(PSA_CRYPTO_INIT_TEST_OBJS) $(WOLFPSA_PATH)/libwolfpsa.a $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL) -Wl,--wrap=wolfCrypt_Init

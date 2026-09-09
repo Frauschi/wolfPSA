@@ -32,6 +32,7 @@
 #include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
+#include "psa_opaque_driver.h"
 #include <wolfssl/wolfcrypt/hmac.h>
 #include <wolfssl/wolfcrypt/kdf.h>
 #include <wolfssl/wolfcrypt/hash.h>
@@ -82,6 +83,10 @@ typedef struct wolfpsa_kdf_ctx {
                                * first output_bytes() call for SP800-108 */
     int is_key_agreement;
     int is_raw_kdf;
+    /* Set when the secret step named a driver key: secret holds its reference
+     * rather than key material, so nothing may be derived on this side. */
+    const wolfpsa_opaque_driver *secret_driver;
+    psa_key_attributes_t secret_attr;
     int output_started;
     uint8_t *output_cache;
     size_t output_cache_length;
@@ -704,6 +709,7 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     size_t key_data_length = 0;
     psa_algorithm_t key_alg;
     psa_status_t status;
+    const wolfpsa_opaque_driver *driver;
 
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
@@ -712,6 +718,28 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *operat
     status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
     if (status != PSA_SUCCESS) {
         return status;
+    }
+
+    /* A driver key's material is not here: record it as the secret of a
+     * derivation the driver itself performs. */
+    driver = wolfpsa_opaque_driver_find(attributes.lifetime);
+    if (driver != NULL) {
+        if (step != PSA_KEY_DERIVATION_INPUT_SECRET) {
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if ((psa_get_key_usage_flags(&attributes) & PSA_KEY_USAGE_DERIVE)
+            == 0) {
+            wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+            return PSA_ERROR_NOT_PERMITTED;
+        }
+        wolfpsa_kdf_free_buf(&ctx->secret, &ctx->secret_length);
+        ctx->secret = key_data;
+        ctx->secret_length = key_data_length;
+        ctx->secret_driver = driver;
+        ctx->secret_attr = attributes;
+        ctx->steps_set |= WOLFPSA_KDF_STEP_SECRET;
+        return PSA_SUCCESS;
     }
 
     status = wolfpsa_kdf_validate_step(ctx, step, key_data_length);
@@ -1631,6 +1659,12 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
         return PSA_ERROR_BAD_STATE;
     }
 
+    /* The secret is inside the driver, so only a key it derives itself comes
+     * out of this operation, never bytes. */
+    if (ctx->secret_driver != NULL) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
     if (ctx->is_raw_kdf) {
         if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0 ||
             ctx->output_offset > ctx->secret_length ||
@@ -1771,15 +1805,48 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     return status;
 }
 
+/* The driver derives slot to slot and hands back the reference wolfPSA
+ * records. The context step carries the derivation data, which the device
+ * fixes the length of. */
+static psa_status_t wolfpsa_driver_derive_key(
+    const wolfpsa_opaque_driver *driver, wolfpsa_kdf_ctx_t *ctx,
+    const psa_key_attributes_t *attributes, psa_key_id_t *key)
+{
+    uint8_t *blob;
+    size_t blob_size = driver->max_key_data_size;
+    size_t blob_len = 0;
+    psa_status_t status;
+
+    blob = (uint8_t *)XMALLOC(blob_size, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    if (blob == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    status = driver->derive(attributes, &ctx->secret_attr, ctx->secret,
+                            ctx->secret_length, ctx->alg, ctx->context,
+                            ctx->context_length, blob, blob_size, &blob_len);
+    if (status == PSA_SUCCESS) {
+        status = psa_import_key(attributes, blob, blob_len, key);
+        if (status != PSA_SUCCESS && driver->destroy != NULL) {
+            (void)driver->destroy(attributes, blob, blob_len);
+        }
+    }
+    wolfpsa_kdf_free_buf(&blob, &blob_size);
+
+    return status;
+}
+
 psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *attributes,
                                            psa_key_derivation_operation_t *operation,
                                            psa_key_id_t *key)
 {
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    const wolfpsa_opaque_driver *driver;
     size_t key_len;
     uint8_t *buffer;
     psa_status_t status;
 
-    if (attributes == NULL || key == NULL) {
+    if (attributes == NULL || key == NULL || ctx == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1790,6 +1857,17 @@ psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *attribute
     key_len = PSA_BITS_TO_BYTES(attributes->bits);
     if (key_len == 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Before the derivation, not after: deriving into a buffer and only then
+     * finding the target cannot take it would compute the key for nothing. */
+    driver = wolfpsa_opaque_driver_find(attributes->lifetime);
+    if (driver != NULL || ctx->secret_driver != NULL) {
+        if (driver == NULL || driver != ctx->secret_driver ||
+            driver->derive == NULL) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        return wolfpsa_driver_derive_key(driver, ctx, attributes, key);
     }
 
     buffer = (uint8_t *)XMALLOC(key_len, NULL, DYNAMIC_TYPE_TMP_BUFFER);

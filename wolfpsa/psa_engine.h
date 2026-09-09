@@ -36,6 +36,10 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
+/* Outside the WOLFSSL_PSA_ENGINE guard below: a key location is
+ * application-facing API and has to be visible to anything including this. */
+#include <wolfpsa/psa_locations.h>
+
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>

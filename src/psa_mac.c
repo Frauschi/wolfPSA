@@ -31,6 +31,7 @@
 #include "psa_size.h"
 #include <wolfpsa/psa_engine.h>
 #include <wolfpsa/psa_key_storage.h>
+#include "psa_opaque_driver.h"
 #include <wolfssl/wolfcrypt/hmac.h>
 #ifdef WOLFSSL_CMAC
 #include <wolfssl/wolfcrypt/cmac.h>
@@ -267,6 +268,7 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
     wolfpsa_mac_ctx_t *ctx = NULL;
+    const wolfpsa_opaque_driver *driver;
     int ret;
 
     if (operation == NULL) {
@@ -293,6 +295,16 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     XMEMSET(ctx, 0, sizeof(*ctx));
+
+    driver = wolfpsa_opaque_driver_find(attributes.lifetime);
+    /* wc_HmacSetKey() takes raw bytes, and no op stands in for it, so an HMAC
+     * key the driver holds cannot be used here. */
+    if (driver != NULL && PSA_ALG_IS_HMAC(alg)) {
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        wc_ForceZero(ctx, sizeof(*ctx));
+        XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
 
     ctx->alg = alg;
     ctx->key_type = attributes.type;
@@ -346,9 +358,25 @@ static psa_status_t wolfpsa_mac_setup(psa_mac_operation_t *operation,
 #ifdef WOLFSSL_CMAC
     else if (PSA_ALG_IS_BLOCK_CIPHER_MAC(alg) &&
              PSA_ALG_FULL_LENGTH_MAC(alg) == PSA_ALG_CMAC) {
-        ret = wc_InitCmac_ex(&ctx->ctx.cmac, key_data,
-                             (word32)key_data_length, WC_CMAC_AES, NULL, NULL,
-                             wolfPSA_GetDefaultDevID());
+        if (driver != NULL) {
+            psa_status_t bind = (driver->cmac_bind == NULL)
+                ? PSA_ERROR_NOT_SUPPORTED
+                : driver->cmac_bind(key_data, key_data_length, alg,
+                                    &ctx->ctx.cmac);
+
+            if (bind != PSA_SUCCESS) {
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+                wc_ForceZero(ctx, sizeof(*ctx));
+                XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                return bind;
+            }
+            ret = 0;
+        }
+        else {
+            ret = wc_InitCmac_ex(&ctx->ctx.cmac, key_data,
+                                 (word32)key_data_length, WC_CMAC_AES, NULL,
+                                 NULL, wolfPSA_GetDefaultDevID());
+        }
         ctx->type = WOLFPSA_MAC_CMAC;
     }
 #endif

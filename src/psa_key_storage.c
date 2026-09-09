@@ -29,6 +29,7 @@
 
 #include <psa/crypto.h>
 #include <wolfpsa/psa_engine.h>
+#include "psa_opaque_driver.h"
 #include <psa_key_storage.h>
 #include <psa_store.h>
 #include "psa_trace.h"
@@ -354,11 +355,25 @@ static psa_status_t wolfpsa_volatile_store(psa_key_id_t key_id,
     return st;
 }
 
-static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
+/* Unlink a volatile key and hand its record to the caller in one hold of the
+ * lock, so destroying a key that lives in hardware cannot be split into a
+ * look-up and a later act on it. The caller owns *key_data and frees it with
+ * wolfpsa_forcezero_free_key_data(). */
+static psa_status_t wolfpsa_volatile_take(psa_key_id_t key_id,
+                                          psa_key_attributes_t* attributes,
+                                          uint8_t** key_data,
+                                          size_t* key_data_length)
 {
     wolfpsa_volatile_key_node* cur;
     wolfpsa_volatile_key_node* prev = NULL;
     psa_status_t st = PSA_ERROR_INVALID_HANDLE;
+
+    if (key_data == NULL || key_data_length == NULL) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    *key_data = NULL;
+    *key_data_length = 0;
 
     WOLFPSA_LOCK();
 
@@ -371,10 +386,13 @@ static psa_status_t wolfpsa_volatile_remove(psa_key_id_t key_id)
             else {
                 g_volatile_keys = cur->next;
             }
-            if (cur->data != NULL) {
-                wc_ForceZero(cur->data, cur->data_length);
-                XFREE(cur->data, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            if (attributes != NULL) {
+                *attributes = cur->attributes;
             }
+            /* The node's buffer is handed over rather than copied, so there is
+             * no allocation here that could fail after the unlink. */
+            *key_data = cur->data;
+            *key_data_length = cur->data_length;
             XMEMSET(cur, 0, sizeof(*cur));
             XFREE(cur, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             st = PSA_SUCCESS;
@@ -1026,7 +1044,8 @@ psa_status_t psa_import_key(
     int ret = 0;
     void* store = NULL;
     psa_key_attributes_t attr;
-    
+    const wolfpsa_opaque_driver* driver;
+
     /* Check parameters */
     if (attributes == NULL || data == NULL || key_id == NULL) {
         wolfpsa_debug_import_reason("invalid parameters", attributes, data_length);
@@ -1046,17 +1065,26 @@ psa_status_t psa_import_key(
 
     attr = *attributes;
 
-    /* Local storage is the only location this build implements. A key whose
-     * lifetime names any other location (for example a secure element or
-     * vendor location) must be rejected rather than silently written to
-     * plaintext local storage. This choke point also covers psa_generate_key,
-     * psa_copy_key and psa_key_derivation_output_key, which all store through
+    /* Local storage, or a location some compiled-in driver owns. Anything
+     * else must be rejected rather than silently written to plaintext local
+     * storage. This choke point also covers psa_generate_key, psa_copy_key
+     * and psa_key_derivation_output_key, which all store through
      * psa_import_key. */
-    if (PSA_KEY_LIFETIME_GET_LOCATION(attr.lifetime) !=
+    driver = wolfpsa_opaque_driver_find(attr.lifetime);
+    if (driver == NULL &&
+        PSA_KEY_LIFETIME_GET_LOCATION(attr.lifetime) !=
         PSA_KEY_LOCATION_LOCAL_STORAGE) {
         wolfpsa_debug_import_reason("unsupported key lifetime location", &attr,
                                     data_length);
         return PSA_ERROR_NOT_SUPPORTED;
+    }
+    if (driver != NULL) {
+        status = driver->validate(&attr, data, data_length);
+        if (status != PSA_SUCCESS) {
+            wolfpsa_debug_import_reason("driver rejected the key", &attr,
+                                        data_length);
+            return status;
+        }
     }
 
     if (attr.policy.alg2 != PSA_ALG_NONE) {
@@ -1385,6 +1413,7 @@ psa_status_t psa_generate_key(
     psa_key_bits_t key_bits;
     uint8_t *key_data = NULL;
     size_t key_data_length = 0;
+    const wolfpsa_opaque_driver* driver;
 
     if (attributes == NULL || key_id == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -1403,6 +1432,40 @@ psa_status_t psa_generate_key(
 
     if (!wolfpsa_usage_flags_valid(psa_get_key_usage_flags(attributes))) {
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    driver = wolfpsa_opaque_driver_find(attributes->lifetime);
+    if (driver != NULL) {
+        uint8_t* blob;
+        size_t blob_len = 0;
+
+        if (driver->generate == NULL) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        status = driver->validate(attributes, NULL, 0);
+        if (status != PSA_SUCCESS) {
+            return status;
+        }
+
+        blob = (uint8_t*)XMALLOC(driver->max_key_data_size, NULL,
+                                 DYNAMIC_TYPE_TMP_BUFFER);
+        if (blob == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+
+        status = driver->generate(attributes, blob,
+                                   driver->max_key_data_size, &blob_len);
+        if (status == PSA_SUCCESS) {
+            status = psa_import_key(attributes, blob, blob_len, key_id);
+            /* The key exists in the driver now; if recording it failed, take
+             * it back out rather than leave it with nothing referring to it. */
+            if (status != PSA_SUCCESS && driver->destroy != NULL) {
+                (void)driver->destroy(attributes, blob, blob_len);
+            }
+        }
+
+        wolfpsa_forcezero_free_key_data(blob, driver->max_key_data_size);
+        return status;
     }
 
     if (PSA_KEY_TYPE_IS_UNSTRUCTURED(key_type) ||
@@ -1645,6 +1708,10 @@ psa_status_t psa_destroy_key(psa_key_id_t key_id)
 {
     psa_status_t status;
     int ret;
+    psa_key_attributes_t vol_attr = PSA_KEY_ATTRIBUTES_INIT;
+    uint8_t* vol_data = NULL;
+    size_t vol_len = 0;
+    const wolfpsa_opaque_driver* driver;
 
     if (key_id == PSA_KEY_ID_NULL) {
         return PSA_SUCCESS;
@@ -1656,8 +1723,22 @@ psa_status_t psa_destroy_key(psa_key_id_t key_id)
         return status;
     }
 
-    status = wolfpsa_volatile_remove(key_id);
+    /* Take the record out before anything acts on it. Reading it and acting
+     * afterwards would let a second caller destroy the same key in between and
+     * a third be handed the freed slot; the unlink is what picks a single
+     * winner. Note this makes importing a reference an act of adoption. */
+    status = wolfpsa_volatile_take(key_id, &vol_attr, &vol_data, &vol_len);
     if (status == PSA_SUCCESS) {
+        driver = wolfpsa_opaque_driver_find(vol_attr.lifetime);
+        if (driver != NULL && driver->destroy != NULL &&
+            driver->destroy(&vol_attr, vol_data, vol_len) != PSA_SUCCESS) {
+            /* Put the record back rather than claim success: that would leave
+             * the key resident while reporting it destroyed. */
+            (void)wolfpsa_volatile_store(key_id, &vol_attr, vol_data, vol_len);
+            wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+            return PSA_ERROR_HARDWARE_FAILURE;
+        }
+        wolfpsa_forcezero_free_key_data(vol_data, vol_len);
         return PSA_SUCCESS;
     }
 
@@ -1688,7 +1769,8 @@ psa_status_t psa_export_key(
     size_t attr_length;
     int ret;
     void* store = NULL;
-    
+    const wolfpsa_opaque_driver* driver;
+
     /* Check parameters */
     if (data == NULL || data_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -1711,6 +1793,21 @@ psa_status_t psa_export_key(
                  PSA_KEY_USAGE_EXPORT) == 0) {
                 wolfpsa_forcezero_free_key_data(vol_data, vol_len);
                 return PSA_ERROR_NOT_PERMITTED;
+            }
+            /* What a driver stores is a reference, not the key, so copying it
+             * out would hand back the reference as a scalar. */
+            driver = wolfpsa_opaque_driver_find(vol_attr.lifetime);
+            if (driver != NULL) {
+                if (driver->export_private == NULL) {
+                    status = PSA_ERROR_NOT_SUPPORTED;
+                }
+                else {
+                    status = driver->export_private(&vol_attr, vol_data,
+                                                    vol_len, data, data_size,
+                                                    data_length);
+                }
+                wolfpsa_forcezero_free_key_data(vol_data, vol_len);
+                return status;
             }
             if (data_size < vol_len) {
                 wolfpsa_forcezero_free_key_data(vol_data, vol_len);
@@ -1735,7 +1832,7 @@ psa_status_t psa_export_key(
          PSA_KEY_USAGE_EXPORT) == 0) {
         return PSA_ERROR_NOT_PERMITTED;
     }
-    
+
     /* Calculate attribute length */
     attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                  sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
@@ -1798,12 +1895,13 @@ psa_status_t psa_export_public_key(
                    sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
                    sizeof(psa_key_lifetime_t) + sizeof(size_t)];
     psa_key_attributes_t attributes;
-    size_t key_data_length;
+    size_t key_data_length = 0;
     size_t attr_length;
     uint8_t* key_data = NULL;
     int ret;
     void* store = NULL;
     int use_volatile = 0;
+    const wolfpsa_opaque_driver* driver;
 
     if (data == NULL || data_length == NULL) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -1844,6 +1942,26 @@ psa_status_t psa_export_public_key(
             wolfpsa_forcezero_free_key_data(key_data, key_data_length);
         }
         return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* There is no private part here to derive the public one from, so only the
+     * driver can produce it - and only for a driver key wolfPSA still holds
+     * the material for. */
+    driver = wolfpsa_opaque_driver_find(attributes.lifetime);
+    if (driver != NULL) {
+        if (!use_volatile) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (driver->export_public == NULL) {
+            status = PSA_ERROR_NOT_SUPPORTED;
+        }
+        else {
+            status = driver->export_public(&attributes, key_data,
+                                            key_data_length, data, data_size,
+                                            data_length);
+        }
+        wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+        return status;
     }
 
     if (!use_volatile) {
@@ -1983,7 +2101,7 @@ psa_status_t psa_export_public_key(
         /* Standalone EdDSA and Montgomery exporters compile without generic
          * Weierstrass ECC, so only the default (Weierstrass) key-pair arm
          * below is gated on HAVE_ECC + the ECC key import/export macros; the
-         * stored-public-key copy needs no backend at all. */
+         * stored-public-key copy needs no driver at all. */
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attributes.type)) {
             if (data_size < key_data_length) {
                 status = PSA_ERROR_BUFFER_TOO_SMALL;
@@ -2224,6 +2342,52 @@ psa_status_t psa_purge_key(psa_key_id_t key)
 }
 
 /* Copy a key in the PSA key storage */
+/* A driver makes the second key itself; wolfPSA only records what it hands
+ * back. Attribute compatibility with the source is the caller's check. */
+static psa_status_t wolfpsa_driver_copy_key(const wolfpsa_opaque_driver* driver,
+                                            const psa_key_attributes_t* src,
+                                            const uint8_t* key_data,
+                                            size_t key_data_length,
+                                            const psa_key_attributes_t* target,
+                                            psa_key_id_t* target_key)
+{
+    psa_key_attributes_t attr = *target;
+    uint8_t* blob;
+    size_t blob_len = 0;
+    psa_status_t status;
+
+    if (attr.type == 0) {
+        attr.type = src->type;
+    }
+    if (attr.bits == 0) {
+        attr.bits = src->bits;
+    }
+    if (PSA_KEY_LIFETIME_GET_LOCATION(attr.lifetime) !=
+        PSA_KEY_LIFETIME_GET_LOCATION(src->lifetime)) {
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    blob = (uint8_t*)XMALLOC(driver->max_key_data_size, NULL,
+                             DYNAMIC_TYPE_TMP_BUFFER);
+    if (blob == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    status = driver->copy(src, key_data, key_data_length, &attr, blob,
+                          driver->max_key_data_size, &blob_len);
+    if (status == PSA_SUCCESS) {
+        status = psa_import_key(&attr, blob, blob_len, target_key);
+        /* The key exists in the driver now; if recording it failed, take it
+         * back out rather than leave a slot nothing names. */
+        if (status != PSA_SUCCESS && driver->destroy != NULL) {
+            (void)driver->destroy(&attr, blob, blob_len);
+        }
+    }
+    wolfpsa_forcezero_free_key_data(blob, driver->max_key_data_size);
+
+    return status;
+}
+
 psa_status_t psa_copy_key(
     psa_key_id_t source_key,
     const psa_key_attributes_t* attributes,
@@ -2240,6 +2404,7 @@ psa_status_t psa_copy_key(
     void* store = NULL;
     psa_key_attributes_t src_attr = PSA_KEY_ATTRIBUTES_INIT;
     psa_key_attributes_t dst_attr;
+    const wolfpsa_opaque_driver* driver;
     
     /* Check parameters */
     if (attributes == NULL || target_key == NULL) {
@@ -2266,6 +2431,22 @@ psa_status_t psa_copy_key(
                  PSA_KEY_USAGE_COPY) == 0) {
                 wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_NOT_PERMITTED;
+            }
+            /* Copying the reference itself would leave two PSA keys sharing
+             * one hardware key, so destroying either would destroy the
+             * other's. Only the driver can make an independent second key. */
+            driver = wolfpsa_opaque_driver_find(vol_attr.lifetime);
+            if (driver != NULL) {
+                if (driver->copy == NULL) {
+                    wolfpsa_forcezero_free_key_data(key_data,
+                                                    key_data_length);
+                    return PSA_ERROR_NOT_SUPPORTED;
+                }
+                status = wolfpsa_driver_copy_key(driver, &vol_attr, key_data,
+                                                 key_data_length, attributes,
+                                                 target_key);
+                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
+                return status;
             }
 
             if (attributes->type != 0 && attributes->type != vol_attr.type) {
