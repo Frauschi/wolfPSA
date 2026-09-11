@@ -456,8 +456,20 @@ psa_status_t psa_asymmetric_sign_ed448(psa_key_type_t key_type,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    ctx_ptr = (context_length > 0u) ? (const byte *)context : NULL;
-    ctx_len = (byte)context_length;
+    if (alg == PSA_ALG_PURE_EDDSA) {
+        /* PureEdDSA is context-free; a non-empty context is rejected
+         * (defense-in-depth: the API path enforces this in
+         * wolfpsa_check_context()). */
+        if (context_length != 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        ctx_ptr = NULL;
+        ctx_len = 0;
+    }
+    else {
+        ctx_ptr = (context_length > 0u) ? (const byte *)context : NULL;
+        ctx_len = (byte)context_length;
+    }
 
     /* Initialize ED448 key */
     ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());
@@ -550,8 +562,20 @@ psa_status_t psa_asymmetric_verify_ed448(psa_key_type_t key_type,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    ctx_ptr = (context_length > 0u) ? (const byte *)context : NULL;
-    ctx_len = (byte)context_length;
+    if (alg == PSA_ALG_PURE_EDDSA) {
+        /* PureEdDSA is context-free; a non-empty context is rejected
+         * (defense-in-depth: the API path enforces this in
+         * wolfpsa_check_context()). */
+        if (context_length != 0) {
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
+        ctx_ptr = NULL;
+        ctx_len = 0;
+    }
+    else {
+        ctx_ptr = (context_length > 0u) ? (const byte *)context : NULL;
+        ctx_len = (byte)context_length;
+    }
 
     /* Initialize ED448 key */
     ret = wc_ed448_init_ex(&ed_key, NULL, wolfPSA_GetDefaultDevID());

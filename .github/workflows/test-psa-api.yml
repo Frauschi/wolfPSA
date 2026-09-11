@@ -84,6 +84,8 @@ jobs:
         run: >
           make -C test
           psa_api_test
+          psa_aead_multipart_test
+          psa_copy_key_narrowing_test
           psa_des3_stack_scrub_test
           psa_ecc_bit_inference_test
           psa_ecc_curve_id_test
@@ -116,10 +118,13 @@ jobs:
           psa_des3_pkcs7_test
           psa_eddsa_mont_export_test
           psa_eddsa_mont_gen_test
+          psa_pure_eddsa_context_test
+          psa_sign_hash_eddsa_test
           psa_key_infer_bits_test
           psa_cipher_oneshot_len_test
           psa_pqc_export_seed_test
           psa_key_declared_bits_test
+          psa_import_key_probe_test
           psa_devid_cryptocb_test
 
       - name: Run PSA API tests
@@ -127,6 +132,8 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/../wolfssl/src/.libs
         run: |
           for t in psa_api_test \
+                   psa_aead_multipart_test \
+                   psa_copy_key_narrowing_test \
                    psa_ecc_bit_inference_test \
                    psa_des3_stack_scrub_test \
                    psa_ecc_curve_id_test \
@@ -159,10 +166,13 @@ jobs:
                    psa_des3_pkcs7_test \
                    psa_eddsa_mont_export_test \
                    psa_eddsa_mont_gen_test \
+                   psa_pure_eddsa_context_test \
+                   psa_sign_hash_eddsa_test \
                    psa_key_infer_bits_test \
                    psa_cipher_oneshot_len_test \
                    psa_pqc_export_seed_test \
                    psa_key_declared_bits_test \
+                   psa_import_key_probe_test \
                    psa_devid_cryptocb_test; do
             echo "=== $t ==="
             rm -rf test/.store

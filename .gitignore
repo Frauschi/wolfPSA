@@ -28,6 +28,34 @@ test/psa_lms_xmss_verify_test
 test/psa_ascon_xchacha_test
 test/psa_sp800_108_test
 test/psa_14_misc_test
+test/psa_aead_multipart_test
+test/psa_cipher_inplace_test
+test/psa_cipher_oneshot_len_test
+test/psa_cipher_overlap_test
+test/psa_copy_key_narrowing_test
+test/psa_des3_pkcs7_test
+test/psa_ecc_curve_caps_test
+test/psa_ecc_ecdh_curve_test
+test/psa_ecc_sig_len_test
+test/psa_ecc_verify_curve_test
+test/psa_eddsa_mont_export_test
+test/psa_eddsa_mont_gen_test
+test/psa_kdf_input_key_test
+test/psa_kdf_length_check_test
+test/psa_key_declared_bits_test
+test/psa_key_infer_bits_test
+test/psa_mldsa_any_hash_test
+test/psa_mldsa_det_sign_test
+test/psa_pbkdf2_cmac_test
+test/psa_pqc_export_seed_test
+test/psa_pure_eddsa_context_test
+test/psa_sign_hash_eddsa_test
+test/psa_xof_input_wrap_test
+test/psa_xof_no_backend_test
+test/psa_xof_output_wrap_test
+test/psa_xof_set_context_test
+test/psa_import_key_probe_test
+
 
 # Local-only editor/agent context (not part of the module)
 CLAUDE.md
@@ -35,6 +63,7 @@ CLAUDE.md
 # Real-hardware board configs are kept local, not in-tree (CI is native_sim only)
 zephyr/**/boards/nucleo_*.conf
 zephyr/**/boards/nucleo_*.overlay
-/test/psa_devid_cryptocb_test
-/test/build-cryptocb
-/test/build-cryptocb-asan
+test/psa_devid_cryptocb_test
+test/build-probe
+test/build-cryptocb
+test/build-cryptocb-asan
