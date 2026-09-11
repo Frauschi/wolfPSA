@@ -119,6 +119,13 @@ static word32 els_pkc_key_store_type(byte keyClass)
     }
 }
 
+/* The key's size in bytes, which is what decides whether it needs a slot pair.
+ * Zero when the attributes carry no size, leaving the choice to the port. */
+static word32 els_pkc_key_bytes(const psa_key_attributes_t* attributes)
+{
+    return (word32)PSA_BITS_TO_BYTES(psa_get_key_bits(attributes));
+}
+
 /* Reserve a slot for a key the caller is about to create and serialise its
  * reference. Nothing is marked taken until a key is written, so a failure
  * afterwards leaves no slot to release. */
@@ -137,7 +144,7 @@ static psa_status_t els_pkc_reserve(const psa_key_attributes_t* attributes,
         return PSA_ERROR_BUFFER_TOO_SMALL;
     }
 
-    ret = wc_ElsPkc_ReserveSlot(keyClass, ref);
+    ret = wc_ElsPkc_ReserveSlot(keyClass, els_pkc_key_bytes(attributes), ref);
     if (ret != 0) {
         return (ret == MEMORY_E) ? PSA_ERROR_INSUFFICIENT_STORAGE
                                  : PSA_ERROR_HARDWARE_FAILURE;
@@ -395,6 +402,7 @@ static psa_status_t els_pkc_derive(const psa_key_attributes_t* attributes,
     ret = wc_KeyStore_Derive(WOLFSSL_ELS_PKC_DEVID, key_data,
                              WC_ELSPKC_KEYREF_SZ,
                              els_pkc_key_store_type(ref.keyClass),
+                             els_pkc_key_bytes(attributes),
                              src_key_data, (word32)src_key_data_length,
                              0, input, (word32)input_length, 0, NULL);
     if (ret != 0) {
