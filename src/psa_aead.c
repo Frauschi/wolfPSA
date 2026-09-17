@@ -25,6 +25,15 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
+/* The AEAD/CMAC/KDF paths process secret-derived AES keys. Require a
+ * constant-time AES backend: the default software fallback uses
+ * secret-indexed T-table loads (a cache-timing channel). WC_AES_BITSLICED
+ * (user_settings.h) is the portable constant-time backend; WOLFSSL_AESNI is
+ * the hardware alternative. Fail the build if neither is selected. */
+#if !defined(WC_AES_BITSLICED) && !defined(WOLFSSL_AESNI)
+#error "wolfPSA needs consttime AES backend (WC_AES_BITSLICED or WOLFSSL_AESNI)"
+#endif
+
 #if defined(WOLFSSL_PSA_ENGINE)
 
 #include <psa/crypto.h>

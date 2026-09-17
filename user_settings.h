@@ -50,6 +50,11 @@
 #define TFM_TIMING_RESISTANT
 #define ECC_TIMING_RESISTANT
 #define WC_RSA_BLINDING
+/* Constant-time AES for the AEAD/CMAC/KDF paths. The default software
+ * fallback uses secret-indexed T-table loads (a cache-timing channel); the
+ * bitsliced implementation is constant-time by construction and portable to
+ * targets without a hardware AES. Requires HAVE_AES_ECB (defined below). */
+#define WC_AES_BITSLICED
 #define WOLFSSL_HAVE_PRF
 #define HAVE_HKDF
 #define HAVE_PBKDF2
