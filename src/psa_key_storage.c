@@ -1299,8 +1299,24 @@ psa_status_t psa_import_key(
                  * no prefix. */
                 coord_len = data_length;
             } else {
-                /* Uncompressed point: 0x04 + 2 * coord_len. */
-                coord_len = (data_length >= 2) ? (data_length - 1) / 2 : 0;
+                /* Uncompressed point: 0x04 || X || Y, where X and Y are each
+                 * coordinate_size bytes (SEC 1 2.3.3). data_length must be
+                 * exactly 1 + 2 * coordinate_size (odd, >= 3) and the prefix
+                 * must be 0x04; flooring the length or skipping the prefix
+                 * check would store malformed public keys. */
+                if (data_length < 3 || (data_length % 2) == 0) {
+                    wolfpsa_debug_import_reason(
+                        "ECC public key length not 1 + 2*coord",
+                        &attr, data_length);
+                    return PSA_ERROR_INVALID_ARGUMENT;
+                }
+                if (data[0] != 0x04) {
+                    wolfpsa_debug_import_reason(
+                        "ECC public key missing 0x04 prefix",
+                        &attr, data_length);
+                    return PSA_ERROR_INVALID_ARGUMENT;
+                }
+                coord_len = (data_length - 1) / 2;
             }
         } else {
             /* Key pair: the private key is coord_len bytes. */

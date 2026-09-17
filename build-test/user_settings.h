@@ -36,5 +36,9 @@
  * the portable consttime core; psa_aead.c fails the build if neither it nor
  * WOLFSSL_AESNI is selected. */
 #define WC_AES_BITSLICED
+/* psa_sign_hash()/psa_verify_hash() must accept an all-zero digest (PSA
+ * treats the hash as opaque bytes); wolfCrypt rejects it by default, so opt
+ * out. psa_ecc.c #errors when HAVE_ECC is on and this is undefined. */
+#define WC_ALLOW_ECC_ZERO_HASH
 
 #endif /* WOLFSSL_USER_SETTINGS_H */
