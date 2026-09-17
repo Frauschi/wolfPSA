@@ -74,3 +74,4 @@ test/psa_kdf_expand_context_test
 test/psa_kdf_repeat_step_test
 test/psa_kdf_psk_to_ms_size_test
 test/psa_kdf_zeroize_output_test
+test/psa_import_zero_length_test

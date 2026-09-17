@@ -1055,6 +1055,15 @@ psa_status_t psa_import_key(
     /* Always treat key_id as output-only. */
     *key_id = PSA_KEY_ID_NULL;
 
+    /* A zero-length blob is not a valid key of any type. Reject it up front:
+     * the bits-inference path only rejects it when bits are not supplied, and
+     * RSA/ECC/DH have no per-type length check, so a zero-length import with a
+     * supplied bit count would otherwise be serialized and stored. */
+    if (data_length == 0) {
+        wolfpsa_debug_import_reason("empty key data", attributes, data_length);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
     /* Reject lengths that do not fit the int-based storage API or that would
      * overflow the serialized buffer_size computation below. */
     if (data_length > (size_t)INT_MAX) {
