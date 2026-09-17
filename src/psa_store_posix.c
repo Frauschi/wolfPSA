@@ -122,6 +122,12 @@ static int wolfPSA_StoreValidateDir(const char* dirPath)
         return WOLFPSA_STORE_IO_ERROR;
     }
 #endif
+    /* The directory must be private: a directory we do not own, or that is
+     * writable by group or other, lets a local peer rename records out from
+     * under the store (key replacement), so fail closed. */
+    if (st.st_uid != geteuid() || (st.st_mode & 0022) != 0) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
     return 0;
 #endif
 }
