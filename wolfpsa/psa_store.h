@@ -83,8 +83,11 @@ int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2);
  * Closes access to location being read or written.
  *
  * @param [in]  store  Context for operation.
+ * @return  0 on success.
+ * @return  Other value to indicate failure (e.g. a failed commit of a
+ *          pending write).
  */
-void wolfPSA_Store_Close(void* store);
+int wolfPSA_Store_Close(void* store);
 
 /*
  * Reads a specific number of bytes into buffer.

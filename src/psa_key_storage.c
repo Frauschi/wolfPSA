@@ -1377,10 +1377,15 @@ psa_status_t psa_import_key(
         ret = wolfPSA_Store_OpenSz(WOLFPSA_STORE_KEY, (unsigned long)*key_id, 0,
                                   0, (int)data_length, &store);
         if (ret == 0) {
+            int closeRet;
+
             ret = wolfPSA_Store_Write(store, buffer,
                                       (int)(attr_length + sizeof(size_t) + data_length));
-            wolfPSA_Store_Close(store);
+            closeRet = wolfPSA_Store_Close(store);
             store = NULL;
+            if (ret == 0) {
+                ret = closeRet;
+            }
         }
 
         WOLFPSA_UNLOCK();

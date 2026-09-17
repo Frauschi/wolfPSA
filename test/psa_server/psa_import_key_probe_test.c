@@ -105,9 +105,11 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
     return len;
 }
 
-void wolfPSA_Store_Close(void* store)
+int wolfPSA_Store_Close(void* store)
 {
     (void)store;
+
+    return WOLFPSA_STORE_OK;
 }
 
 int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2)

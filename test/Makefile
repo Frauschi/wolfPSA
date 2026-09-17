@@ -237,6 +237,14 @@ psa_import_key_probe_test: require-wolfssl-lib psa_server/psa_import_key_probe_t
 	$(CC) $(CFLAGS) -o $@ psa_server/psa_import_key_probe_test.o $(PROBE_LIB) \
 		$(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
 
+# Links the static library: it calls the internal wolfPSA_Store_* backend
+# API, which the shared library does not export.
+BINARIES += psa_store_commit_test
+
+psa_store_commit_test: require-wolfssl-lib psa_server/psa_store_commit_test.o
+	$(CC) $(CFLAGS) -o $@ psa_server/psa_store_commit_test.o \
+		$(WOLFPSA_PATH)/libwolfpsa.a $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
+
 wolfcrypt-psa-benchmark:
 	make -C wolfcrypt-benchmark
 	cp wolfcrypt-benchmark/wolfcrypt-psa-benchmark ./wolfcrypt-psa-benchmark

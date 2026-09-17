@@ -434,15 +434,18 @@ int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
     return wolfPSA_Store_OpenSz(type, id1, id2, read, 0, store);
 }
 
-void wolfPSA_Store_Close(void* store)
+int wolfPSA_Store_Close(void* store)
 {
     WOLFPSA_FileStoreCtx* ctx = (WOLFPSA_FileStoreCtx*)store;
+    int ret = WOLFPSA_STORE_OK;
 
     if (ctx != NULL) {
         int commitRet = 0;
 
         if (ctx->file != XBADFILE && ctx->file != NULL) {
-            XFCLOSE(ctx->file);
+            if (XFCLOSE(ctx->file) != 0) {
+                ret = WOLFPSA_STORE_IO_ERROR;
+            }
             ctx->file = XBADFILE;
         }
 
@@ -450,6 +453,7 @@ void wolfPSA_Store_Close(void* store)
             commitRet = wolfPSA_StoreCommitTemp(ctx);
             if (commitRet != 0) {
                 wolfPSA_StoreAbortTemp(ctx);
+                ret = WOLFPSA_STORE_IO_ERROR;
             }
         }
         else if (ctx->has_temp) {
@@ -459,6 +463,8 @@ void wolfPSA_Store_Close(void* store)
         XMEMSET(ctx, 0, sizeof(*ctx));
         XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
+
+    return ret;
 }
 
 int wolfPSA_Store_Read(void* store, unsigned char* buffer, int len)
