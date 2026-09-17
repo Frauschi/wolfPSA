@@ -67,3 +67,7 @@ test/psa_devid_cryptocb_test
 test/build-probe
 test/build-cryptocb
 test/build-cryptocb-asan
+test/psa_store_commit_test
+test/psa_store_dir_validation_test
+test/psa_store_read_open_test
+test/psa_kdf_expand_context_test
