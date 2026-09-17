@@ -31,9 +31,9 @@
  * Zephyr PSA Internal Trusted Storage (ITS) API (psa_its_set/get/get_info/
  * remove). ITS is a whole-object store, so:
  *   - writes accumulate into a heap buffer and are committed with psa_its_set()
- *     inside wolfPSA_Store_Write() (Close is void and cannot report failure, so
- *     the commit happens where its status can propagate through the return
- *     value that psa_key_storage.c checks); psa_its_set() is atomic, so a failed
+ *     inside wolfPSA_Store_Write(), where the ITS status propagates through the
+ *     return value that psa_key_storage.c checks (Close has no commit step to
+ *     report, so it returns WOLFPSA_STORE_OK); psa_its_set() is atomic, so a failed
  *     commit leaves any prior value intact, mirroring the POSIX backend's
  *     atomic-rename-on-close semantics;
  *   - reads take a whole-object snapshot with psa_its_get() when the handle is
@@ -89,23 +89,24 @@
 typedef struct WolfpsaZephyrStore {
     psa_storage_uid_t uid;
     unsigned char*    buf;
-    size_t            len;
-    size_t            off;
-    int               write;
+    size_t len;
+    size_t off;
+    int write;
 } WolfpsaZephyrStore;
 
 /* Map a wolfPSA store record identity to an ITS UID. Only WOLFPSA_STORE_KEY
  * records exist today and id2 is always 0; the UID is the key id itself. */
 static psa_storage_uid_t wolfpsa_store_uid(int type, unsigned long id1,
-    unsigned long id2)
+                                           unsigned long id2)
 {
     (void)type;
     (void)id2;
     return (psa_storage_uid_t)id1;
 }
 
-int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int read,
-    int variableSz, void** store)
+int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
+                         read,
+                         int variableSz, void** store)
 {
     int ret = WOLFPSA_STORE_OK;
     psa_storage_uid_t uid;
@@ -139,7 +140,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
     }
 
     ctx = (WolfpsaZephyrStore*)XMALLOC(sizeof(*ctx), NULL,
-        DYNAMIC_TYPE_TMP_BUFFER);
+                                       DYNAMIC_TYPE_TMP_BUFFER);
     if (ctx == NULL) {
         /* Runtime memory exhaustion, not a storage failure: report it as such
          * so the caller can map it to PSA_ERROR_INSUFFICIENT_MEMORY, as the
@@ -155,7 +156,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
         size_t got = 0;
 
         ctx->buf = (unsigned char*)XMALLOC((size_t)info.size, NULL,
-            DYNAMIC_TYPE_TMP_BUFFER);
+                                           DYNAMIC_TYPE_TMP_BUFFER);
         if (ctx->buf == NULL) {
             XFREE(ctx, NULL, DYNAMIC_TYPE_TMP_BUFFER);
             return MEMORY_E;
@@ -175,7 +176,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
 }
 
 int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
-    void** store)
+                       void** store)
 {
     return wolfPSA_Store_OpenSz(type, id1, id2, read, 0, store);
 }
@@ -255,7 +256,7 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
         /* Grow the accumulation buffer manually (not XREALLOC) so the old
          * buffer, which holds key material, is zeroed before being freed. */
         grown = (unsigned char*)XMALLOC(ctx->len + (size_t)len, NULL,
-            DYNAMIC_TYPE_TMP_BUFFER);
+                                        DYNAMIC_TYPE_TMP_BUFFER);
         if (grown == NULL) {
             return MEMORY_E;
         }
@@ -292,8 +293,9 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
  * keys never reach the store, so all volatile-key PSA flows still work.
  */
 
-int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int read,
-    int variableSz, void** store)
+int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
+                         read,
+                         int variableSz, void** store)
 {
     (void)type;
     (void)id1;
@@ -309,7 +311,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
 }
 
 int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
-    void** store)
+                       void** store)
 {
     return wolfPSA_Store_OpenSz(type, id1, id2, read, 0, store);
 }

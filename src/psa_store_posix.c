@@ -53,11 +53,11 @@
 
 typedef struct WOLFPSA_FileStoreCtx {
     XFILE file;
-    int   is_write;
-    int   has_temp;
-    int   write_failed;
-    char  final_name[WOLFPSA_STORE_MAX_PATH];
-    char  temp_name[WOLFPSA_STORE_MAX_PATH];
+    int is_write;
+    int has_temp;
+    int write_failed;
+    char final_name[WOLFPSA_STORE_MAX_PATH];
+    char temp_name[WOLFPSA_STORE_MAX_PATH];
 } WOLFPSA_FileStoreCtx;
 
 static void wolfPSA_StoreAbortTemp(WOLFPSA_FileStoreCtx* ctx)
@@ -157,7 +157,7 @@ static int wolfPSA_StoreEnsureDir(const char* dirPath)
 }
 
 static int wolfPSA_StoreCreateTempFile(WOLFPSA_FileStoreCtx* ctx,
-    const char* dirPath)
+                                       const char* dirPath)
 {
     if (ctx == NULL) {
         return WOLFPSA_STORE_IO_ERROR;
@@ -169,8 +169,8 @@ static int wolfPSA_StoreCreateTempFile(WOLFPSA_FileStoreCtx* ctx,
     int fd;
 
     ret = XSNPRINTF(templateBuf, sizeof(templateBuf),
-        "%s/psa_tmp_%08lx_%08lx_XXXXXX", dirPath,
-        (unsigned long)_getpid(), (unsigned long)GetTickCount());
+                    "%s/psa_tmp_%08lx_%08lx_XXXXXX", dirPath,
+                    (unsigned long)_getpid(), (unsigned long)GetTickCount());
     if (ret <= 0 || ret >= (int)sizeof(templateBuf)) {
         return WOLFPSA_STORE_IO_ERROR;
     }
@@ -209,8 +209,8 @@ static int wolfPSA_StoreCreateTempFile(WOLFPSA_FileStoreCtx* ctx,
     int ret;
 
     ret = XSNPRINTF(templateBuf, sizeof(templateBuf),
-        "%s/psa_tmp_%08lx_%08lx_XXXXXX", dirPath,
-        (unsigned long)getpid(), (unsigned long)time(NULL));
+                    "%s/psa_tmp_%08lx_%08lx_XXXXXX", dirPath,
+                    (unsigned long)getpid(), (unsigned long)time(NULL));
     if (ret <= 0 || ret >= (int)sizeof(templateBuf)) {
         return WOLFPSA_STORE_IO_ERROR;
     }
@@ -248,11 +248,11 @@ static int wolfPSA_StoreCreateTempFile(WOLFPSA_FileStoreCtx* ctx,
 }
 
 static int wolfPSA_Store_Name(int type, unsigned long id1, unsigned long id2,
-    char* name, int nameLen)
+                              char* name, int nameLen)
 {
     int ret = 0;
     const char* str = NULL;
-    enum { WOLFPSA_STORE_SUFFIX_RESERVE = 48 };
+    enum wolfpsa_store_name_suffix { WOLFPSA_STORE_SUFFIX_RESERVE = 48 };
 
     str = XGETENV("WOLFPSA_TOKEN_PATH");
 
@@ -276,13 +276,13 @@ static int wolfPSA_Store_Name(int type, unsigned long id1, unsigned long id2,
     }
 
     switch (type) {
-        case WOLFPSA_STORE_KEY:
-            ret = XSNPRINTF(name, nameLen, "%s/psa_key_%016lx_%016lx", str,
-                    id1, id2);
-            break;
-        default:
-            ret = -1;
-            break;
+    case WOLFPSA_STORE_KEY:
+        ret = XSNPRINTF(name, nameLen, "%s/psa_key_%016lx_%016lx", str,
+                        id1, id2);
+        break;
+    default:
+        ret = -1;
+        break;
     }
 
     return ret;
@@ -302,8 +302,7 @@ int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2)
     ret = wolfPSA_Store_Name(type, id1, id2, name, sizeof(name));
     if (ret > 0 && ret < (int)sizeof(name)) {
         ret = 0;
-    }
-    else if (ret != 0) {
+    } else if (ret != 0) {
         ret = -1;
     }
 
@@ -317,8 +316,39 @@ int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2)
     return ret;
 }
 
-int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int read,
-    int variableSz, void** store)
+/* Copy the directory part of a record path into dirPath. */
+static int wolfPSA_StoreDirOfName(const char* name, char* dirPath,
+                                  size_t dirPathSz)
+{
+    const char* lastSlash = NULL;
+    size_t nameLen = XSTRLEN(name);
+    size_t dirLen;
+    size_t i;
+
+    for (i = 0; i < nameLen; i++) {
+        if (name[i] == '/' || name[i] == '\\') {
+            lastSlash = &name[i];
+        }
+    }
+
+    if (lastSlash == NULL) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+
+    dirLen = (size_t)(lastSlash - name);
+    if (dirLen == 0 || dirLen >= dirPathSz) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+
+    XMEMCPY(dirPath, name, dirLen);
+    dirPath[dirLen] = '\0';
+
+    return 0;
+}
+
+int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
+                         read,
+                         int variableSz, void** store)
 {
     int ret = 0;
     const char* str = NULL;
@@ -333,14 +363,13 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
     ret = wolfPSA_Store_Name(type, id1, id2, name, sizeof(name));
     if (ret > 0 && ret < (int)sizeof(name)) {
         ret = 0;
-    }
-    else if (ret != 0) {
+    } else if (ret != 0) {
         ret = -1;
     }
 
     if (ret == 0) {
         ctx = (WOLFPSA_FileStoreCtx*)XMALLOC(sizeof(*ctx), NULL,
-            DYNAMIC_TYPE_TMP_BUFFER);
+                                             DYNAMIC_TYPE_TMP_BUFFER);
         if (ctx == NULL) {
             ret = MEMORY_E;
         }
@@ -348,9 +377,6 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
 
     if (ret == 0) {
         char dirPath[WOLFPSA_STORE_MAX_PATH];
-        const char* lastSlash = NULL;
-        size_t nameLen = XSTRLEN(name);
-        size_t i;
 
         XMEMSET(ctx, 0, sizeof(*ctx));
         ctx->file = XBADFILE;
@@ -359,9 +385,8 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
         {
             size_t finalLen = XSTRLEN(name);
             if (finalLen >= sizeof(ctx->final_name)) {
-            ret = WOLFPSA_STORE_IO_ERROR;
-            }
-            else {
+                ret = WOLFPSA_STORE_IO_ERROR;
+            } else {
                 XMEMCPY(ctx->final_name, name, finalLen + 1);
             }
         }
@@ -371,37 +396,28 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
             if (ctx->file == NULL) {
                 if (errno == ENOENT) {
                     ret = WOLFPSA_STORE_NOT_AVAILABLE;
-                }
-                else {
+                } else {
                     ret = WOLFPSA_STORE_IO_ERROR;
                 }
-            }
-        }
-        else if (ret == 0) {
-            for (i = 0; i < nameLen; i++) {
-                if (name[i] == '/' || name[i] == '\\') {
-                    lastSlash = &name[i];
+            } else {
+                /* A record is only worth reading back out of a private
+                 * directory: a peer that can write the directory can swap the
+                 * record for one of its own, which is the substitution the
+                 * write path already refuses. Checked after the open, so a
+                 * store that does not exist yet still reports "not
+                 * available" rather than an I/O error. */
+                ret = wolfPSA_StoreDirOfName(name, dirPath, sizeof(dirPath));
+                if (ret == 0) {
+                    ret = wolfPSA_StoreValidateDir(dirPath);
                 }
             }
-
-            if (lastSlash == NULL) {
-                ret = WOLFPSA_STORE_IO_ERROR;
+        } else if (ret == 0) {
+            ret = wolfPSA_StoreDirOfName(name, dirPath, sizeof(dirPath));
+            if (ret == 0) {
+                ret = wolfPSA_StoreEnsureDir(dirPath);
             }
-            else {
-                int dirLen = (int)(lastSlash - name);
-
-                if (dirLen <= 0 || dirLen >= (int)sizeof(dirPath)) {
-                    ret = WOLFPSA_STORE_IO_ERROR;
-                }
-                else {
-                    XMEMCPY(dirPath, name, dirLen);
-                    dirPath[dirLen] = '\0';
-
-                    ret = wolfPSA_StoreEnsureDir(dirPath);
-                    if (ret == 0) {
-                        ret = wolfPSA_StoreCreateTempFile(ctx, dirPath);
-                    }
-                }
+            if (ret == 0) {
+                ret = wolfPSA_StoreCreateTempFile(ctx, dirPath);
             }
         }
     }
@@ -412,8 +428,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
 
     if (ret == 0) {
         *store = ctx;
-    }
-    else if (ctx != NULL) {
+    } else if (ctx != NULL) {
         if (ctx->file != NULL && ctx->file != XBADFILE) {
             XFCLOSE(ctx->file);
         }
@@ -429,7 +444,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
 }
 
 int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
-    void** store)
+                       void** store)
 {
     return wolfPSA_Store_OpenSz(type, id1, id2, read, 0, store);
 }
@@ -444,6 +459,10 @@ int wolfPSA_Store_Close(void* store)
 
         if (ctx->file != XBADFILE && ctx->file != NULL) {
             if (XFCLOSE(ctx->file) != 0) {
+                /* Buffered data may have been lost on the way out: mark the
+                 * write failed so the commit below aborts instead of
+                 * renaming a truncated record over a good one. */
+                ctx->write_failed = 1;
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
             ctx->file = XBADFILE;
@@ -455,8 +474,7 @@ int wolfPSA_Store_Close(void* store)
                 wolfPSA_StoreAbortTemp(ctx);
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
-        }
-        else if (ctx->has_temp) {
+        } else if (ctx->has_temp) {
             wolfPSA_StoreAbortTemp(ctx);
         }
 
@@ -491,8 +509,7 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
                 ctx->write_failed = 1;
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
-        }
-        else {
+        } else {
             ctx->write_failed = 1;
         }
     }

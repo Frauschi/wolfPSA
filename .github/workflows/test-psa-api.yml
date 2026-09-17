@@ -129,6 +129,8 @@ jobs:
           psa_key_declared_bits_test
           psa_import_key_probe_test
           psa_store_commit_test
+          psa_store_read_open_test
+          psa_store_dir_validation_test
           psa_devid_cryptocb_test
           psa_kdf_zeroize_output_test
           psa_import_zero_length_test
@@ -184,6 +186,8 @@ jobs:
                    psa_key_declared_bits_test \
                    psa_import_key_probe_test \
                    psa_store_commit_test \
+                   psa_store_read_open_test \
+                   psa_store_dir_validation_test \
                    psa_devid_cryptocb_test \
                    psa_kdf_zeroize_output_test \
                    psa_import_zero_length_test \

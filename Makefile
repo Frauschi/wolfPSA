@@ -195,6 +195,8 @@ UNIT_TESTS := psa_api_test \
 	psa_key_declared_bits_test \
 	psa_import_key_probe_test \
 	psa_store_commit_test \
+	psa_store_read_open_test \
+	psa_store_dir_validation_test \
 	psa_devid_cryptocb_test \
 	psa_kdf_zeroize_output_test \
 	psa_import_zero_length_test \
@@ -216,9 +218,12 @@ unit-run: all
 
 # Build everything with gcov instrumentation, run the unit tests, and emit an
 # HTML coverage report for src/*.c (the bundled wolfCrypt sources are
-# excluded by the -f filter).
+# excluded by the -f filter). The instrumented objects are dropped once the
+# report exists: a later non-coverage build would otherwise reuse them and
+# fail to link (undefined __gcov_init). The report itself is kept.
 cov:
 	@$(MAKE) clean
+	@$(MAKE) -C test clean
 	@$(MAKE) all COV=1
 	@$(MAKE) -C test $(UNIT_TESTS) COV=1
 	@$(MAKE) run-tests
@@ -230,6 +235,9 @@ cov:
 	    --html-high-threshold 80 \
 	    --html-details -o $(COV_DIR)/index.html
 	@echo "[COV] report: $(COV_DIR)/index.html"
+	@echo "[COV] dropping instrumented objects"
+	@rm -rf $(OBJDIR) $(OBJDIR_PIC) $(LIBNAME) $(SHLIBNAME)
+	@$(MAKE) -C test clean
 	@if [ -n "$$DISPLAY" ] || [ -n "$$WAYLAND_DISPLAY" ]; then \
 	    $(OPEN_CMD) $(COV_DIR)/index.html || true; \
 	fi

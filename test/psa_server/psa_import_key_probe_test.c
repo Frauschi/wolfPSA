@@ -49,6 +49,7 @@ static int g_probe_ret = 0;
 static uint8_t g_data[1024];
 static size_t g_len = 0;
 static int g_exists = 0;
+static int g_close_ret = WOLFPSA_STORE_OK;
 
 static void mock_reset(void)
 {
@@ -56,10 +57,11 @@ static void mock_reset(void)
     memset(g_data, 0, sizeof(g_data));
     g_len = 0;
     g_exists = 0;
+    g_close_ret = WOLFPSA_STORE_OK;
 }
 
 int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
-    void** store)
+                       void** store)
 {
     (void)type;
     (void)id1;
@@ -77,7 +79,7 @@ int wolfPSA_Store_Open(int type, unsigned long id1, unsigned long id2, int read,
 }
 
 int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2,
-    int read, int variableSz, void** store)
+                         int read, int variableSz, void** store)
 {
     (void)variableSz;
     return wolfPSA_Store_Open(type, id1, id2, read, store);
@@ -109,7 +111,7 @@ int wolfPSA_Store_Close(void* store)
 {
     (void)store;
 
-    return WOLFPSA_STORE_OK;
+    return g_close_ret;
 }
 
 int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2)
@@ -129,7 +131,8 @@ static void setup_aes_attr(psa_key_attributes_t* attr, psa_key_id_t id)
     *attr = psa_key_attributes_init();
     psa_set_key_type(attr, PSA_KEY_TYPE_AES);
     psa_set_key_bits(attr, 128);
-    psa_set_key_usage_flags(attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+    psa_set_key_usage_flags(attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT)
+    ;
     psa_set_key_algorithm(attr, PSA_ALG_GCM);
     psa_set_key_lifetime(attr, PSA_KEY_LIFETIME_PERSISTENT);
     psa_set_key_id(attr, id);
@@ -160,7 +163,8 @@ static int test_probe_exists(void)
         printf("FAIL probe_exists: expected ALREADY_EXISTS, got %d\n", (int)st);
         ok = 0;
     }
-    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0) {
+    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0)
+    {
         printf("FAIL probe_exists: stored record was modified\n");
         ok = 0;
     }
@@ -222,7 +226,8 @@ static int test_probe_io_error(void)
                (int)st);
         ok = 0;
     }
-    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0) {
+    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0)
+    {
         printf("FAIL probe_io_error: existing record was overwritten\n");
         ok = 0;
     }
@@ -256,8 +261,41 @@ static int test_probe_memory_error(void)
                "got %d\n", (int)st);
         ok = 0;
     }
-    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0) {
+    if (g_len != sizeof(stored) || memcmp(g_data, stored, sizeof(stored)) != 0)
+    {
         printf("FAIL probe_memory_error: existing record was overwritten\n");
+        ok = 0;
+    }
+    return ok;
+}
+
+/* The write succeeds but the commit performed by wolfPSA_Store_Close() fails:
+ * psa_import_key() must report the storage failure rather than claim success
+ * for a record that was never committed. A successful write returns the byte
+ * count, so the close status has to be folded in on that path too. */
+static int test_close_commit_failure(void)
+{
+    psa_key_attributes_t attr;
+    uint8_t key[16];
+    psa_key_id_t key_id = 0;
+    psa_status_t st;
+    int ok = 1;
+
+    mock_reset();
+    g_exists = 0;
+    g_probe_ret = WOLFPSA_STORE_NOT_AVAILABLE;
+    g_close_ret = WOLFPSA_STORE_IO_ERROR;
+    setup_aes_attr(&attr, 0x1000);
+    memset(key, 0xEE, sizeof(key));
+
+    st = psa_import_key(&attr, key, sizeof(key), &key_id);
+    if (st != PSA_ERROR_STORAGE_FAILURE) {
+        printf("FAIL close_commit_failure: expected STORAGE_FAILURE, got %d\n",
+               (int)st);
+        ok = 0;
+    }
+    if (key_id != PSA_KEY_ID_NULL) {
+        printf("FAIL close_commit_failure: key id not cleared\n");
         ok = 0;
     }
     return ok;
@@ -284,6 +322,9 @@ int main(void)
         ok = 0;
     }
     if (!test_probe_memory_error()) {
+        ok = 0;
+    }
+    if (!test_close_commit_failure()) {
         ok = 0;
     }
 

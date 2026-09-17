@@ -113,6 +113,13 @@ int main(void)
     psa_status_t st;
     int ret = 1;
 
+    /* chmod 000 is the denial mechanism, and it denies nothing to root:
+     * skip rather than report a failure the fix cannot cause. */
+    if (geteuid() == 0) {
+        printf("PSA store read-open test: SKIP (running as root)\n");
+        return 0;
+    }
+
     if (mkdtemp(store_dir) == NULL) {
         printf("psa_store_read_open_test: mkdtemp failed\n");
         return 1;
@@ -129,7 +136,7 @@ int main(void)
     memset(key_data, 0x42, sizeof(key_data));
     psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
     psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
-    psa_set_key_lifetime(&attrs, PSA_KEY_PERSISTENCE_DEFAULT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
 
     st = psa_import_key(&attrs, key_data, sizeof(key_data), &key_id);
     if (st != PSA_SUCCESS || key_id == PSA_KEY_ID_NULL) {

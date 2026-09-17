@@ -66,8 +66,8 @@ static const repeat_case_t cases[] = {
      {PSA_KEY_DERIVATION_INPUT_SEED, 0, 0},
      PSA_KEY_DERIVATION_INPUT_SEED},
     {PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256),
-     {PSA_KEY_DERIVATION_INPUT_SALT, 0, 0},
-     PSA_KEY_DERIVATION_INPUT_SALT},
+     {PSA_KEY_DERIVATION_INPUT_PASSWORD, 0, 0},
+     PSA_KEY_DERIVATION_INPUT_PASSWORD},
     {PSA_ALG_SP800_108_COUNTER_HMAC(PSA_ALG_SHA_256),
      {PSA_KEY_DERIVATION_INPUT_LABEL, 0, 0},
      PSA_KEY_DERIVATION_INPUT_LABEL},
@@ -119,6 +119,109 @@ static int run_case(const repeat_case_t *c, size_t index)
     return ret;
 }
 
+/* The PBKDF2 salt is the documented exception to the single-use rule: the
+ * PSA API specifies it as "one or more times", with the parts concatenated.
+ * Repeating it must be accepted, and must derive the same key as a single
+ * input holding the concatenation. */
+static int test_pbkdf2_salt_is_multipart(void)
+{
+    static const uint8_t salt[8] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+    };
+    static const uint8_t password[16] = {
+        0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64,
+        0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64
+    };
+    psa_key_derivation_operation_t split = psa_key_derivation_operation_init();
+    psa_key_derivation_operation_t whole = psa_key_derivation_operation_init();
+    uint8_t split_out[32];
+    uint8_t whole_out[32];
+    psa_status_t status;
+    int ret = 0;
+
+    ret |= (psa_key_derivation_setup(&split,
+                                     PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256)) !=
+            PSA_SUCCESS);
+    ret |= (psa_key_derivation_input_integer(&split,
+                                             PSA_KEY_DERIVATION_INPUT_COST,
+                                             16) != PSA_SUCCESS);
+    if (ret != 0) {
+        printf("FAIL multipart salt: setup\n");
+        (void)psa_key_derivation_abort(&split);
+        return 1;
+    }
+
+    /* COST, unlike the salt, is single-use. */
+    status = psa_key_derivation_input_integer(&split,
+                                              PSA_KEY_DERIVATION_INPUT_COST,
+                                              16);
+    if (status != PSA_ERROR_BAD_STATE) {
+        printf("FAIL multipart salt: repeated cost status 0x%08x want 0x%08x\n",
+               (unsigned)status, (unsigned)PSA_ERROR_BAD_STATE);
+        (void)psa_key_derivation_abort(&split);
+        return 1;
+    }
+
+    status = psa_key_derivation_input_bytes(&split,
+                                            PSA_KEY_DERIVATION_INPUT_SALT,
+                                            salt, 4);
+    if (status != PSA_SUCCESS) {
+        printf("FAIL multipart salt: first salt status 0x%08x\n",
+               (unsigned)status);
+        (void)psa_key_derivation_abort(&split);
+        return 1;
+    }
+    status = psa_key_derivation_input_bytes(&split,
+                                            PSA_KEY_DERIVATION_INPUT_SALT,
+                                            salt + 4, 4);
+    if (status != PSA_SUCCESS) {
+        printf("FAIL multipart salt: second salt status 0x%08x want 0x%08x\n",
+               (unsigned)status, (unsigned)PSA_SUCCESS);
+        (void)psa_key_derivation_abort(&split);
+        return 1;
+    }
+
+    ret |= (psa_key_derivation_input_bytes(&split,
+                                           PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                           password, sizeof(password)) !=
+            PSA_SUCCESS);
+    ret |= (psa_key_derivation_output_bytes(&split, split_out,
+                                            sizeof(split_out)) != PSA_SUCCESS);
+    (void)psa_key_derivation_abort(&split);
+    if (ret != 0) {
+        printf("FAIL multipart salt: split derivation\n");
+        return 1;
+    }
+
+    ret |= (psa_key_derivation_setup(&whole,
+                                     PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256)) !=
+            PSA_SUCCESS);
+    ret |= (psa_key_derivation_input_integer(&whole,
+                                             PSA_KEY_DERIVATION_INPUT_COST,
+                                             16) != PSA_SUCCESS);
+    ret |= (psa_key_derivation_input_bytes(&whole,
+                                           PSA_KEY_DERIVATION_INPUT_SALT,
+                                           salt, sizeof(salt)) != PSA_SUCCESS);
+    ret |= (psa_key_derivation_input_bytes(&whole,
+                                           PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                           password, sizeof(password)) !=
+            PSA_SUCCESS);
+    ret |= (psa_key_derivation_output_bytes(&whole, whole_out,
+                                            sizeof(whole_out)) != PSA_SUCCESS);
+    (void)psa_key_derivation_abort(&whole);
+    if (ret != 0) {
+        printf("FAIL multipart salt: single-input derivation\n");
+        return 1;
+    }
+
+    if (memcmp(split_out, whole_out, sizeof(split_out)) != 0) {
+        printf("FAIL multipart salt: split salt did not concatenate\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     size_t i;
@@ -126,6 +229,8 @@ int main(void)
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         failures += run_case(&cases[i], i);
     }
+
+    failures += test_pbkdf2_salt_is_multipart();
 
     if (failures != 0) {
         printf("PSA KDF repeat step test: FAIL (%d)\n", failures);
