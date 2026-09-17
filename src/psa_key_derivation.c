@@ -345,12 +345,18 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
                 if (hash_len <= 0 || data_length != (size_t)hash_len) {
                     return PSA_ERROR_INVALID_ARGUMENT;
                 }
+                return PSA_SUCCESS;
             }
-            if (step == PSA_KEY_DERIVATION_INPUT_INFO &&
-                (ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
-                return PSA_ERROR_BAD_STATE;
+            if (step == PSA_KEY_DERIVATION_INPUT_INFO) {
+                if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) == 0) {
+                    return PSA_ERROR_BAD_STATE;
+                }
+                return PSA_SUCCESS;
             }
-            return PSA_SUCCESS;
+            /* CONTEXT and the remaining steps are not consumed by the
+             * HKDF-Expand backend; reject them instead of deriving as if
+             * they had not been supplied. */
+            return PSA_ERROR_INVALID_ARGUMENT;
         }
 
         if (PSA_ALG_IS_HKDF(ctx->alg)) {
