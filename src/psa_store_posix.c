@@ -363,7 +363,12 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int rea
         if (ret == 0 && read) {
             ctx->file = XFOPEN(name, "rb");
             if (ctx->file == NULL) {
-                ret = WOLFPSA_STORE_NOT_AVAILABLE;
+                if (errno == ENOENT) {
+                    ret = WOLFPSA_STORE_NOT_AVAILABLE;
+                }
+                else {
+                    ret = WOLFPSA_STORE_IO_ERROR;
+                }
             }
         }
         else if (ret == 0) {

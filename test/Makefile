@@ -107,7 +107,8 @@ PSA_REGRESSION_TESTS = psa_aead_multipart_test \
 	psa_key_infer_bits_test \
 	psa_cipher_oneshot_len_test \
 	psa_pqc_export_seed_test \
-	psa_key_declared_bits_test
+	psa_key_declared_bits_test \
+	psa_store_read_open_test
 BINARIES += $(PSA_REGRESSION_TESTS)
 
 # Regression test with a custom link: it replaces the store backend, so it
