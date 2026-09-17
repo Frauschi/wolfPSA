@@ -1283,6 +1283,36 @@ psa_status_t psa_import_key(
                 &attr, data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
         }
+    } else if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr.type) ||
+               PSA_KEY_TYPE_IS_ECC_KEY_PAIR(attr.type)) {
+        /* The declared bit count must match the curve implied by the key
+         * data length: a mismatch means the caller is describing a
+         * different curve than the one in the data. */
+        psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(attr.type);
+        size_t coord_len;
+        psa_key_bits_t expected_bits;
+
+        if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr.type)) {
+            if (family == PSA_ECC_FAMILY_MONTGOMERY ||
+                family == PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+                /* Raw point (Montgomery/Twisted-Edwards): coord_len bytes,
+                 * no prefix. */
+                coord_len = data_length;
+            } else {
+                /* Uncompressed point: 0x04 + 2 * coord_len. */
+                coord_len = (data_length >= 2) ? (data_length - 1) / 2 : 0;
+            }
+        } else {
+            /* Key pair: the private key is coord_len bytes. */
+            coord_len = data_length;
+        }
+        expected_bits = wolfpsa_ecc_bits_from_length(family, coord_len);
+        if (expected_bits == 0 ||
+            (attr.bits != 0 && attr.bits != expected_bits)) {
+            wolfpsa_debug_import_reason("ECC bits/curve mismatch", &attr,
+                                        data_length);
+            return PSA_ERROR_INVALID_ARGUMENT;
+        }
     }
 
     /* Check if the key storage is initialized */
