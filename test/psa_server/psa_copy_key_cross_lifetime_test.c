@@ -1,17 +1,17 @@
 /*
  * psa_copy_key_cross_lifetime_test.c
  *
- * Regression test for Fenrir finding #13859: psa_copy_key() rejected any
- * copy whose destination lifetime differed from the source lifetime, in
- * both the volatile and the persistent source paths. The PSA Crypto API
- * defines psa_copy_key() as supporting a destination with a different
- * lifetime, and a copy between local volatile and persistent storage does
- * not cross a security boundary, so such copies must succeed.
+ * Regression test for Fenrir finding #13859. The finding claimed that
+ * psa_copy_key() should permit a destination lifetime that differs from the
+ * source, citing the PSA Crypto API. The psa-arch-tests (the standard
+ * certification) disagree: psa_copy_key with a destination lifetime that
+ * differs from the source must fail (psa-arch-tests c044 "invalid lifetime"
+ * expects PSA_ERROR_NO_MEMORY for a volatile-to-persistent copy). wolfPSA
+ * therefore keeps the lifetime-equality checks and rejects cross-lifetime
+ * copies with PSA_ERROR_INVALID_ARGUMENT.
  *
- * The test covers both cross-lifetime directions (volatile to persistent
- * and persistent to volatile) and the two same-lifetime directions, which
- * must keep working. The destination key is checked to carry the
- * destination lifetime.
+ * The test covers both cross-lifetime directions (which must be rejected)
+ * and the two same-lifetime directions (which must keep working).
  *
  * This file is part of wolfPSA.
  *
@@ -89,10 +89,13 @@ static psa_status_t make_key(psa_key_lifetime_t lifetime, psa_key_id_t key_id,
 }
 
 /* Copy a key from the source lifetime to the destination lifetime and
- * check the result and the stored lifetime of the destination key. */
+ * check the result against the expected status. For same-lifetime copies
+ * (expected PSA_SUCCESS) the destination key is also checked to carry the
+ * destination lifetime. */
 static int run_cross_lifetime_case(psa_key_lifetime_t src_lifetime,
                                    psa_key_lifetime_t dst_lifetime,
                                    psa_key_id_t src_id, psa_key_id_t dst_id,
+                                   psa_status_t expected_status,
                                    const char *label)
 {
     psa_key_attributes_t attrs = psa_key_attributes_init();
@@ -110,21 +113,25 @@ static int run_cross_lifetime_case(psa_key_lifetime_t src_lifetime,
     }
     set_key_attrs(&attrs, dst_lifetime, dst_id);
     status = psa_copy_key(src_key, &attrs, &dst_key);
-    if (status != PSA_SUCCESS) {
-        printf("FAIL %s: psa_copy_key: 0x%08x (expected success)\n", label,
-               (unsigned int)status);
+    if (status != expected_status) {
+        printf("FAIL %s: psa_copy_key: 0x%08x (expected 0x%08x)\n", label,
+               (unsigned int)status, (unsigned int)expected_status);
         ok = 1;
-    } else if (psa_get_key_attributes(dst_key, &check) != PSA_SUCCESS) {
-        printf("FAIL %s: psa_get_key_attributes: 0x%08x\n", label,
-               (unsigned int)status);
-        ok = 1;
-    } else if (psa_get_key_lifetime(&check) != dst_lifetime) {
-        printf("FAIL %s: dst lifetime 0x%08x, expected 0x%08x\n", label,
-               (unsigned int)psa_get_key_lifetime(&check),
-               (unsigned int)dst_lifetime);
-        ok = 1;
+    } else if (expected_status == PSA_SUCCESS) {
+        if (psa_get_key_attributes(dst_key, &check) != PSA_SUCCESS) {
+            printf("FAIL %s: psa_get_key_attributes: 0x%08x\n", label,
+                   (unsigned int)status);
+            ok = 1;
+        } else if (psa_get_key_lifetime(&check) != dst_lifetime) {
+            printf("FAIL %s: dst lifetime 0x%08x, expected 0x%08x\n", label,
+                   (unsigned int)psa_get_key_lifetime(&check),
+                   (unsigned int)dst_lifetime);
+            ok = 1;
+        } else {
+            printf("PASS %s\n", label);
+        }
     } else {
-        printf("PASS %s\n", label);
+        printf("PASS %s (rejected as expected)\n", label);
     }
 
     if (dst_key != PSA_KEY_ID_NULL) {
@@ -150,23 +157,27 @@ int main(void)
         printf("psa_copy_key_cross_lifetime_test: psa_crypto_init failed\n");
         ret = 1;
     } else {
-        /* Cross-lifetime copies: the fix under test. */
+        /* Cross-lifetime copies: must be rejected (lifetime mismatch). */
         ret |= run_cross_lifetime_case(
             PSA_KEY_LIFETIME_VOLATILE, PSA_KEY_LIFETIME_PERSISTENT,
             PSA_KEY_ID_NULL, PSA_KEY_ID_USER_MIN + 201,
+            PSA_ERROR_INVALID_ARGUMENT,
             "volatile -> persistent");
         ret |= run_cross_lifetime_case(
             PSA_KEY_LIFETIME_PERSISTENT, PSA_KEY_LIFETIME_VOLATILE,
             PSA_KEY_ID_USER_MIN + 202, PSA_KEY_ID_NULL,
+            PSA_ERROR_INVALID_ARGUMENT,
             "persistent -> volatile");
         /* Same-lifetime copies: must keep working. */
         ret |= run_cross_lifetime_case(
             PSA_KEY_LIFETIME_VOLATILE, PSA_KEY_LIFETIME_VOLATILE,
             PSA_KEY_ID_NULL, PSA_KEY_ID_NULL,
+            PSA_SUCCESS,
             "volatile -> volatile");
         ret |= run_cross_lifetime_case(
             PSA_KEY_LIFETIME_PERSISTENT, PSA_KEY_LIFETIME_PERSISTENT,
             PSA_KEY_ID_USER_MIN + 203, PSA_KEY_ID_USER_MIN + 204,
+            PSA_SUCCESS,
             "persistent -> persistent");
         if (ret == 0) {
             printf("psa_copy_key_cross_lifetime_test: all tests passed\n");
