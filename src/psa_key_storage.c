@@ -2470,11 +2470,9 @@ psa_status_t psa_copy_key(
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
 
-            if (attributes->lifetime != vol_attr.lifetime) {
-                wolfpsa_forcezero_free_key_data(key_data, key_data_length);
-                return PSA_ERROR_INVALID_ARGUMENT;
-            }
-
+            /* The destination lifetime may differ from the source: local
+             * volatile and persistent storage share no security boundary, and
+             * psa_import_key validates the destination location. */
             dst_attr.type = (dst_attr.type == 0) ? vol_attr.type : dst_attr.type;
             dst_attr.bits = (dst_attr.bits == 0) ? vol_attr.bits : dst_attr.bits;
             dst_attr.policy.usage = psa_get_key_usage_flags(&vol_attr) &
@@ -2539,11 +2537,9 @@ psa_status_t psa_copy_key(
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    if (attributes->lifetime != src_attr.lifetime) {
-        wolfPSA_Store_Close(store);
-        return PSA_ERROR_INVALID_ARGUMENT;
-    }
-
+    /* The destination lifetime may differ from the source: local volatile and
+     * persistent storage share no security boundary, and psa_import_key
+     * validates the destination location. */
     dst_attr = *attributes;
     dst_attr.type = (dst_attr.type == 0) ? src_attr.type : dst_attr.type;
     dst_attr.bits = (dst_attr.bits == 0) ? src_attr.bits : dst_attr.bits;

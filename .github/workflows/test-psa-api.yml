@@ -132,6 +132,7 @@ jobs:
           psa_devid_cryptocb_test
           psa_kdf_zeroize_output_test
           psa_import_zero_length_test
+          psa_copy_key_cross_lifetime_test
 
       - name: Run PSA API tests
         env:
@@ -185,7 +186,8 @@ jobs:
                    psa_store_commit_test \
                    psa_devid_cryptocb_test \
                    psa_kdf_zeroize_output_test \
-                   psa_import_zero_length_test; do
+                   psa_import_zero_length_test \
+                   psa_copy_key_cross_lifetime_test; do
             echo "=== $t ==="
             rm -rf test/.store
             ./test/$t

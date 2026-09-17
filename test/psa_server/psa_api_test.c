@@ -2034,13 +2034,15 @@ static int test_copy_key_rejects_attribute_mismatch(void)
         goto cleanup;
     }
 
+    /* A lifetime change is permitted: local volatile and persistent storage
+     * share no security boundary, so a volatile-to-persistent copy succeeds.
+     * The cleanup below destroys the created persistent key. */
     setup_aes_key_attrs(&dst_attrs,
                         PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_ENCRYPT,
                         PSA_ALG_CBC_NO_PADDING,
                         PSA_KEY_LIFETIME_PERSISTENT);
     st = psa_copy_key(src_key, &dst_attrs, &copy_key);
-    if (check_true(st == PSA_ERROR_INVALID_ARGUMENT,
-                   "psa_copy_key rejects lifetime mismatch") != TEST_OK) {
+    if (check_status(st, "psa_copy_key permits a lifetime change") != TEST_OK) {
         goto cleanup;
     }
 
