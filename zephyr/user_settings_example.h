@@ -145,6 +145,11 @@ extern "C" {
 #define WOLFSSL_AESGCM_STREAM
 #define HAVE_AESCCM
 #define HAVE_AES_ECB
+/* Constant-time AES backend (F-13878): the default software AES uses
+ * secret-indexed T-table loads, a cache-timing channel. WC_AES_BITSLICED is
+ * the portable consttime core; psa_aead.c fails the build if neither it nor
+ * WOLFSSL_AESNI is selected. */
+#define WC_AES_BITSLICED
 #define WOLFSSL_AES_COUNTER
 #define WOLFSSL_AES_CFB
 #define WOLFSSL_AES_OFB
