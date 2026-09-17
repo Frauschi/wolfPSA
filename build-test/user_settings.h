@@ -31,5 +31,10 @@
 #define SINGLE_THREADED
 #define WOLFSSL_PSA_ENGINE
 #define NO_DSA
+/* Constant-time AES backend (F-13878): the default software AES uses
+ * secret-indexed T-table loads, a cache-timing channel. WC_AES_BITSLICED is
+ * the portable consttime core; psa_aead.c fails the build if neither it nor
+ * WOLFSSL_AESNI is selected. */
+#define WC_AES_BITSLICED
 
 #endif /* WOLFSSL_USER_SETTINGS_H */
