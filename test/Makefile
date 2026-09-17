@@ -217,6 +217,12 @@ psa_devid_cryptocb_test: psa_server/psa_devid_cryptocb_test.c $(CRYPTOCB_LIB) FO
 	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
 		$(SANITIZE_FLAGS) -lpthread -lm
 
+# Mid-stream KDF failure driven through a crypto callback, so it needs the
+# same WOLF_CRYPTO_CB library build as the devId test above.
+psa_kdf_zeroize_output_test: psa_server/psa_kdf_zeroize_output_test.c $(CRYPTOCB_LIB) FORCE
+	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
+		$(SANITIZE_FLAGS) -lpthread -lm
+
 # psa_import_key_probe_test ships its own wolfPSA_Store_* backend: the POSIX
 # store cannot fail a read probe with an I/O error, only succeed or report
 # "not available", so the probe-failure path needs a mock. It therefore links
@@ -286,4 +292,4 @@ clean:
 	rm -f psa_server/*.o
 	rm -rf $(abspath .)/build-cryptocb $(abspath .)/build-cryptocb-asan
 	rm -rf $(abspath .)/build-probe $(abspath .)/build-probe-asan
-	rm -f $(BINARIES) psa_devid_cryptocb_test *.o *.log
+	rm -f $(BINARIES) psa_devid_cryptocb_test psa_kdf_zeroize_output_test *.o *.log

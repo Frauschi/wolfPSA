@@ -1793,6 +1793,12 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *ope
     }
     else if (ctx->output_offset == 0) {
         status = wolfpsa_kdf_compute_output(ctx, output, output_length);
+        if (status != PSA_SUCCESS) {
+            /* Iterative backends (PBKDF2-AES-CMAC, SP800-108 HMAC/CMAC)
+             * stream completed blocks straight into the caller buffer, so a
+             * mid-stream failure would leave partial derived output behind. */
+            wc_ForceZero(output, output_length);
+        }
     }
     else {
         uint8_t *full_output;
