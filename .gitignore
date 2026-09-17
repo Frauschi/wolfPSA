@@ -1,4 +1,7 @@
 build
+# gcov coverage artifacts (make cov)
+*.gcda
+*.gcno
 src/.deps
 libwolfpsa.a
 test-psa-api/psa-arch-tests

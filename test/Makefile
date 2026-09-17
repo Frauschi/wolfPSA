@@ -28,6 +28,13 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
+# gcov coverage (make cov): instrument the test binaries too, so the
+# crypto-callback and probe sub-builds (which inherit CFLAGS) are covered.
+ifeq ($(COV),1)
+CFLAGS += --coverage
+LDFLAGS += --coverage
+endif
+
 # The ECC curve regression tests read the library's feature macros
 # (they include <user_settings.h> and branch on HAVE_ECC_KOBLITZ /
 # HAVE_ECC_BRAINPOOL), so only they mirror the library build:
