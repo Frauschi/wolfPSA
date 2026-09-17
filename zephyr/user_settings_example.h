@@ -119,6 +119,13 @@ extern "C" {
 #define HAVE_ECC_KEY_EXPORT
 #define HAVE_ECC_KEY_IMPORT
 #define WOLFSSL_ECDSA_DETERMINISTIC_K
+/* PSA places no constraint on the content of the hash passed to
+ * psa_sign_hash()/psa_verify_hash(): it is opaque bytes, and an all-zero
+ * digest is a legal input (the PSA API test suite signs one for
+ * SECP384R1/SHA-384). wolfCrypt rejects an all-zero digest by default as a
+ * guard against uninitialized buffers, which would surface as
+ * PSA_ERROR_INVALID_ARGUMENT for input the spec requires us to accept. */
+#define WC_ALLOW_ECC_ZERO_HASH
 #define HAVE_CURVE25519
 #define HAVE_ED25519
 #define WOLFSSL_ED25519_STREAMING_VERIFY
