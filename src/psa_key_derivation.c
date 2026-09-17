@@ -296,6 +296,12 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    /* Every KDF input step is single-use: the input buffers append
+     * data, so a repeated step would silently concatenate its values. */
+    if ((ctx->steps_set & wolfpsa_kdf_step_mask(step)) != 0) {
+        return PSA_ERROR_BAD_STATE;
+    }
+
     if (ctx->is_raw_kdf) {
         if (step != PSA_KEY_DERIVATION_INPUT_SECRET) {
             return PSA_ERROR_INVALID_ARGUMENT;
@@ -414,15 +420,11 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
     else if (PSA_ALG_IS_SP800_108_COUNTER_HMAC(ctx->alg) ||
              ctx->alg == PSA_ALG_SP800_108_COUNTER_CMAC) {
         /* Allowed steps: SECRET (mandatory), LABEL (optional), CONTEXT
-         * (optional).  SECRET must be provided before output; each step
-         * can only be set once. */
+         * (optional).  SECRET must be provided before output. */
         if (step != PSA_KEY_DERIVATION_INPUT_SECRET &&
             step != PSA_KEY_DERIVATION_INPUT_LABEL &&
             step != PSA_KEY_DERIVATION_INPUT_CONTEXT) {
             return PSA_ERROR_INVALID_ARGUMENT;
-        }
-        if ((ctx->steps_set & wolfpsa_kdf_step_mask(step)) != 0) {
-            return PSA_ERROR_BAD_STATE;
         }
         return PSA_SUCCESS;
     }

@@ -71,3 +71,4 @@ test/psa_store_commit_test
 test/psa_store_dir_validation_test
 test/psa_store_read_open_test
 test/psa_kdf_expand_context_test
+test/psa_kdf_repeat_step_test
