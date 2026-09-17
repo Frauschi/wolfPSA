@@ -93,6 +93,7 @@ PSA_REGRESSION_TESTS = psa_aead_multipart_test \
 	psa_kdf_length_check_test \
 	psa_kdf_expand_context_test \
 	psa_kdf_repeat_step_test \
+	psa_kdf_psk_to_ms_size_test \
 	psa_mldsa_det_sign_test \
 	psa_mldsa_any_hash_test \
 	psa_ecc_curve_caps_test \

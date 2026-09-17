@@ -24,6 +24,7 @@
 #endif
 
 #include <limits.h>
+#include <stdint.h>
 #include <wolfssl/wolfcrypt/settings.h>
 
 #if defined(WOLFSSL_PSA_ENGINE)
@@ -403,10 +404,17 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
             if ((ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0) {
                 return PSA_ERROR_BAD_STATE;
             }
+            if (data_length > PSA_TLS12_PSK_TO_MS_PSK_MAX_SIZE) {
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
         }
-        if (step == PSA_KEY_DERIVATION_INPUT_OTHER_SECRET &&
-            (ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0) {
-            return PSA_ERROR_BAD_STATE;
+        if (step == PSA_KEY_DERIVATION_INPUT_OTHER_SECRET) {
+            if ((ctx->steps_set & WOLFPSA_KDF_STEP_SEED) == 0) {
+                return PSA_ERROR_BAD_STATE;
+            }
+            if (data_length > (size_t)UINT16_MAX) {
+                return PSA_ERROR_INVALID_ARGUMENT;
+            }
         }
         return PSA_SUCCESS;
     }
@@ -1070,6 +1078,12 @@ static psa_status_t wolfpsa_kdf_tls12_psk_to_ms(wolfpsa_kdf_ctx_t *ctx,
     }
 
     premaster_len = 2u + ctx->secret_length + 2u + other_secret_length;
+    /* The premaster encodes each component with a 16-bit length; reject a
+     * component that would wrap before it is serialized. */
+    if (other_secret_length > (size_t)UINT16_MAX ||
+        ctx->secret_length > (size_t)UINT16_MAX) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     if ((wolfpsa_check_word32_length(output_length) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(premaster_len) != PSA_SUCCESS) ||
         (wolfpsa_check_word32_length(ctx->seed_length) != PSA_SUCCESS)) {
