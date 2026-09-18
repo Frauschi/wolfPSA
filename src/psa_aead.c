@@ -25,17 +25,19 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
-/* The AEAD/CMAC/KDF paths process secret-derived AES keys. Require a
- * constant-time AES backend: the default software fallback uses
- * secret-indexed T-table loads (a cache-timing channel). WC_AES_BITSLICED
- * (user_settings.h) is the portable constant-time backend; WOLFSSL_AESNI is
- * the hardware alternative. Fail the build if neither is selected, but only
- * when the PSA engine and an AES path are actually active: this file is
- * otherwise inert (no PSA engine) or its AES code is excluded (NO_AES), and
- * compiling this inactive source must not fail. */
-#if defined(WOLFSSL_PSA_ENGINE) && !defined(NO_AES) \
-    && !defined(WC_AES_BITSLICED) && !defined(WOLFSSL_AESNI)
-#error "wolfPSA needs consttime AES backend (WC_AES_BITSLICED or WOLFSSL_AESNI)"
+/* The AEAD/CMAC/KDF paths process secret-derived AES keys. Require the
+ * constant-time software backend (WC_AES_BITSLICED): the default software
+ * fallback uses secret-indexed T-table loads (a cache-timing channel), and
+ * WOLFSSL_AESNI alone is not sufficient because wolfCrypt falls back to
+ * AesSetKey_C() (the same non-constant-time T-table path) when runtime
+ * AES-NI is unavailable. WC_AES_BITSLICED is the consttime fallback that
+ * covers both the no-AES-NI and the AES-NI-unavailable cases. Fail the build
+ * if it is not selected, but only when the PSA engine and an AES path are
+ * actually active: this file is otherwise inert (no PSA engine) or its AES
+ * code is excluded (NO_AES), and compiling this inactive source must not
+ * fail. */
+#if defined(WOLFSSL_PSA_ENGINE) && !defined(NO_AES) && !defined(WC_AES_BITSLICED)
+#error "wolfPSA needs the consttime AES backend (WC_AES_BITSLICED); WOLFSSL_AESNI alone leaves a non-constant-time runtime fallback"
 #endif
 
 #if defined(WOLFSSL_PSA_ENGINE)

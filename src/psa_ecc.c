@@ -30,14 +30,14 @@
  * well-defined. wolfCrypt rejects an all-zero digest by default (a guard
  * against uninitialized buffers), which would surface as
  * PSA_ERROR_INVALID_ARGUMENT for input the spec requires us to accept.
- * WC_ALLOW_ECC_ZERO_HASH (user_settings.h) opts out of that rejection.
+ * WC_ALLOW_ECC_ZERO_HASH opts out of that rejection.
  *
- * The check only applies when a wolfPSA settings file is authoritative for
- * the wolfCrypt config (WOLFSSL_SETTINGS_FILE defined). With the wolfSSL
- * module's default config (no settings file) the macro is the module's to
- * provide, and a coexistence build that never signs/verifies an all-zero
- * digest is unaffected, so the build is not failed here. */
-#if defined(WOLFSSL_SETTINGS_FILE) && defined(HAVE_ECC) \
+ * The requirement is on the PSA ECDSA path itself, not on how the wolfCrypt
+ * config is supplied: any build that compiles the PSA ECC path (PSA engine +
+ * HAVE_ECC) must define WC_ALLOW_ECC_ZERO_HASH, whether the config comes from
+ * a WOLFSSL_SETTINGS_FILE, a WOLFSSL_USER_SETTINGS file, or the configure
+ * system. Builds without the PSA ECC path are unaffected. */
+#if defined(WOLFSSL_PSA_ENGINE) && defined(HAVE_ECC) \
     && !defined(WC_ALLOW_ECC_ZERO_HASH)
 #error "wolfPSA needs WC_ALLOW_ECC_ZERO_HASH (psa_sign_hash/psa_verify_hash must accept an all-zero digest)"
 #endif

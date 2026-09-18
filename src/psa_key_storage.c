@@ -279,10 +279,19 @@ static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
         }
 
     case PSA_ECC_FAMILY_MONTGOMERY:
-    case PSA_ECC_FAMILY_TWISTED_EDWARDS:
+        /* Raw x-coordinate only: Curve25519 is 32 bytes, X448 is 56 bytes
+         * (RFC 7748 s.5). */
         switch (length_bytes) {
         case 32: return 255;
         case 56: return 448;
+        default: return 0;
+        }
+
+    case PSA_ECC_FAMILY_TWISTED_EDWARDS:
+        /* Full point encoding: Ed25519 is 32 bytes, Ed448 is 57 bytes
+         * (RFC 8032 s.5.2.5/s.5.2.6). The 57th byte carries the sign of x. */
+        switch (length_bytes) {
+        case 32: return 255;
         case 57: return 448;
         default: return 0;
         }
