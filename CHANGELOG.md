@@ -96,6 +96,9 @@ wolfSSL master.
 - Fixed: the HMAC path of `psa_mac_*` never called `wc_HmacInit()`, so it
   ran with devId 0 and a callback registered on device 0 captured wolfPSA's
   HMACs while every other algorithm stayed local.
+- Fixed: the one-shot AEAD paths called `wc_AesFree()` on uninitialized heap
+  when `wc_AesInit()` failed, reading `Aes.devId` and freeing `Aes.streamData`
+  from unwritten memory. Allocation and init are now one step.
 - Optional thread-safe key store: with `WOLFPSA_THREAD_SAFE` a single mutex
   built on wolfCrypt's portable `wc_*Mutex` API (created in `psa_crypto_init()`)
   guards the volatile-key list and id counter for concurrent PSA callers; a
@@ -120,6 +123,9 @@ wolfSSL master.
   the stack to `XMALLOC`, so a frame no longer grows with the AES backend.
 - `WC_ALLOW_ECC_ZERO_HASH` is required for any build with `HAVE_ECC`, checked
   from the same shared header rather than from `psa_ecc.c` alone.
+- The multipart AEAD context holds its GCM and CCM `Aes` in a union, since an
+  operation is one or the other. Under `WC_AES_BITSLICED` that takes
+  `sizeof(wolfpsa_aead_ctx_t)` from 247,032 bytes to 123,736.
 
 ### Zephyr module
 

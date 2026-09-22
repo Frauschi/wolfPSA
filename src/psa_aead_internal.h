@@ -55,17 +55,28 @@ typedef struct wolfpsa_aead_ctx {
      * path (update() with NULL output) buffers into input and leaves these
      * unused. */
     int streaming;
+    /* One operation is GCM or CCM, never both, and sizeof(Aes) is over
+     * 120 KB under WC_AES_BITSLICED, so the two share storage. */
+#if (defined(HAVE_AESGCM) && defined(WOLFSSL_AESGCM_STREAM)) || \
+    (defined(HAVE_AESCCM) && defined(WOLFSSL_AES_DIRECT))
+    union {
 #if defined(HAVE_AESGCM) && defined(WOLFSSL_AESGCM_STREAM)
-    Aes gcm;
+        Aes gcm;
+#endif
+#if defined(HAVE_AESCCM) && defined(WOLFSSL_AES_DIRECT)
+        Aes ccm;
+#endif
+    } aes;
+#endif
+#if defined(HAVE_AESGCM) && defined(WOLFSSL_AESGCM_STREAM)
     int gcm_inited;
 #endif
 #if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     ChaChaPoly_Aead chacha;
 #endif
-#ifdef HAVE_AESCCM
+#if defined(HAVE_AESCCM) && defined(WOLFSSL_AES_DIRECT)
     /* Hand-rolled streaming CCM (wolfCrypt has no streaming CCM API): a CTR
      * for the ciphertext plus a running CBC-MAC for the tag. */
-    Aes ccm_aes;
     int ccm_aes_inited;
     uint8_t ccm_ctr[16];
     uint8_t ccm_mac[16];
