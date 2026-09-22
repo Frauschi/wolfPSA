@@ -50,6 +50,16 @@
 #define TFM_TIMING_RESISTANT
 #define ECC_TIMING_RESISTANT
 #define WC_RSA_BLINDING
+/* AES backend: PSA compliance or speed. PSA requires constant-time AES;
+ * wolfCrypt's fastest software core indexes T-tables with secret-derived
+ * bytes, which is a cache-timing channel. Default here is the compliant
+ * bitsliced core (requires HAVE_AES_ECB, defined below). Build with
+ * AES_FAST=1 (or -DWOLFPSA_AES_FAST) to take the T-table core instead.
+ * src/psa_config.h holds the policy and the full list of accepted
+ * backends. */
+#ifndef WOLFPSA_AES_FAST
+#define WC_AES_BITSLICED
+#endif
 #define WOLFSSL_HAVE_PRF
 #define HAVE_HKDF
 #define HAVE_PBKDF2
@@ -69,6 +79,13 @@
 #define HAVE_ECC_KEY_EXPORT
 #define HAVE_ECC_KEY_IMPORT
 #define WOLFSSL_ECDSA_DETERMINISTIC_K
+/* PSA places no constraint on the content of the hash passed to
+ * psa_sign_hash()/psa_verify_hash(): it is opaque bytes, and an all-zero
+ * digest is a legal input (the PSA API test suite signs one for
+ * SECP384R1/SHA-384). wolfCrypt rejects an all-zero digest by default as a
+ * guard against uninitialized buffers, which would surface as
+ * PSA_ERROR_INVALID_ARGUMENT for input the spec requires us to accept. */
+#define WC_ALLOW_ECC_ZERO_HASH
 #define WC_RSA_PSS
 #define WOLFSSL_PSS_SALT_LEN_DISCOVER
 #define WOLFSSL_RSA_OAEP

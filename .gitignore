@@ -1,4 +1,7 @@
 build
+# gcov coverage artifacts (make cov)
+*.gcda
+*.gcno
 src/.deps
 libwolfpsa.a
 test-psa-api/psa-arch-tests
@@ -67,3 +70,14 @@ test/psa_devid_cryptocb_test
 test/build-probe
 test/build-cryptocb
 test/build-cryptocb-asan
+test/psa_store_commit_test
+test/psa_store_dir_validation_test
+test/psa_store_read_open_test
+test/psa_kdf_expand_context_test
+test/psa_kdf_error_state_test
+test/psa_kdf_repeat_step_test
+test/psa_kdf_psk_to_ms_size_test
+test/psa_kdf_zeroize_output_test
+test/psa_import_zero_length_test
+test/psa_copy_key_cross_lifetime_test
+build-test/out/

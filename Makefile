@@ -99,10 +99,26 @@ SANITIZE_FLAGS :=
 ifeq ($(ASAN),1)
 SANITIZE_FLAGS = -fsanitize=address
 endif
+# AES_FAST=1 waives the PSA constant-time AES requirement and takes
+# wolfCrypt's faster T-table core instead. See src/psa_config.h.
+ifeq ($(AES_FAST),1)
+CPPFLAGS += -DWOLFPSA_AES_FAST
+endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
-.PHONY: all clean psa-objects
+# gcov coverage (make cov): instrument the library and the unit tests, run
+# the tests, and emit an HTML report of which lines of src/*.c they cover.
+# The unit tests link the instrumented shared library, so the runtime .gcda
+# files land next to the PIC objects in build/obj.pic.
+COV_DIR := build/coverage
+OPEN_CMD := $(shell command -v open >/dev/null 2>&1 && echo open || echo xdg-open)
+ifeq ($(COV),1)
+CFLAGS += --coverage
+LDFLAGS += --coverage
+endif
+
+.PHONY: all clean psa-objects unit-run run-tests cov covclean
 
 all: $(LIBNAME) $(SHLIBNAME)
 
@@ -134,6 +150,124 @@ $(OBJDIR_PIC)/%.o: src/%.c
 $(OBJDIR_PIC)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 	@mkdir -p $(OBJDIR_PIC)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+
+# The unit tests, in the order CI runs them (test-psa-api.yml). The servers
+# (psa_tls_client, psa_tls_server), the benchmark, and psa_crypto_init_test
+# are not unit tests and are not listed. psa_crypto_init_test is built by
+# 'make -C test all' but no workflow runs it.
+UNIT_TESTS := psa_api_test \
+	psa_aead_multipart_test \
+	psa_copy_key_narrowing_test \
+	psa_ecc_bit_inference_test \
+	psa_des3_stack_scrub_test \
+	psa_ecc_curve_id_test \
+	psa_random_size_test \
+	psa_rsa_pss_interop_test \
+	psa_mldsa_test \
+	psa_mlkem_test \
+	psa_xof_test \
+	psa_key_wrap_test \
+	psa_sign_context_test \
+	psa_lms_xmss_verify_test \
+	psa_ascon_xchacha_test \
+	psa_sp800_108_test \
+	psa_14_misc_test \
+	psa_xof_input_wrap_test \
+	psa_pbkdf2_cmac_test \
+	psa_kdf_input_key_test \
+	psa_ecc_verify_curve_test \
+	psa_ecc_ecdh_curve_test \
+	psa_xof_output_wrap_test \
+	psa_kdf_length_check_test \
+	psa_kdf_expand_context_test \
+	psa_kdf_error_state_test \
+	psa_kdf_repeat_step_test \
+	psa_kdf_psk_to_ms_size_test \
+	psa_mldsa_det_sign_test \
+	psa_mldsa_any_hash_test \
+	psa_ecc_curve_caps_test \
+	psa_xof_no_backend_test \
+	psa_ecc_sig_len_test \
+	psa_xof_set_context_test \
+	psa_cipher_inplace_test \
+	psa_cipher_overlap_test \
+	psa_des3_pkcs7_test \
+	psa_eddsa_mont_export_test \
+	psa_eddsa_mont_gen_test \
+	psa_pure_eddsa_context_test \
+	psa_sign_hash_eddsa_test \
+	psa_key_infer_bits_test \
+	psa_cipher_oneshot_len_test \
+	psa_pqc_export_seed_test \
+	psa_key_declared_bits_test \
+	psa_import_key_probe_test \
+	psa_store_commit_test \
+	psa_store_read_open_test \
+	psa_store_dir_validation_test \
+	psa_devid_cryptocb_test \
+	psa_kdf_zeroize_output_test \
+	psa_import_zero_length_test \
+	psa_copy_key_cross_lifetime_test
+
+# Run the unit test loop from the repo root (psa_rsa_pss_interop_test reads
+# its certificate relative to the root). Assumes the tests are already built.
+run-tests:
+	@for t in $(UNIT_TESTS); do \
+	    echo "=== $$t ==="; \
+	    rm -rf test/.store; \
+	    ./test/$$t || exit 1; \
+	done
+
+# Build the library and the unit tests, then run every unit test.
+unit-run: all
+	@$(MAKE) -C test $(UNIT_TESTS)
+	@$(MAKE) run-tests
+
+# Build everything with gcov instrumentation, run the unit tests, and emit an
+# HTML coverage report for src/*.c (the bundled wolfCrypt sources are
+# excluded by the -f filter). The instrumented objects are dropped once the
+# report exists: a later non-coverage build would otherwise reuse them and
+# fail to link (undefined __gcov_init). The report itself is kept. A test
+# failure is recorded and re-raised at the end rather than aborting the
+# recipe, so the drop always happens.
+cov:
+	@command -v gcovr >/dev/null 2>&1 || { \
+	    echo "gcovr not found: install it before running 'make cov'"; \
+	    exit 1; \
+	}
+	@$(MAKE) clean
+	@$(MAKE) -C test clean
+	@$(MAKE) all COV=1
+	@$(MAKE) -C test $(UNIT_TESTS) COV=1
+	@rm -f $(BUILD_DIR)/.cov-tests-failed
+	@$(MAKE) run-tests || touch $(BUILD_DIR)/.cov-tests-failed
+	@mkdir -p $(COV_DIR)
+	@echo "[COV] gcovr html"
+	@gcovr -r . -f '^src/.*\.c$$' \
+	    --gcov-ignore-errors=no_working_dir_found \
+	    --html-medium-threshold 60 \
+	    --html-high-threshold 80 \
+	    --html-details -o $(COV_DIR)/index.html
+	@echo "[COV] report: $(COV_DIR)/index.html"
+	@echo "[COV] dropping instrumented objects"
+	@rm -rf $(OBJDIR) $(OBJDIR_PIC) $(LIBNAME) $(SHLIBNAME)
+	@$(MAKE) -C test clean
+	@if [ -n "$$DISPLAY" ] || [ -n "$$WAYLAND_DISPLAY" ] || \
+	    [ "$$(uname -s)" = "Darwin" ]; then \
+	    $(OPEN_CMD) $(COV_DIR)/index.html || true; \
+	fi
+	@if [ -f $(BUILD_DIR)/.cov-tests-failed ]; then \
+	    rm -f $(BUILD_DIR)/.cov-tests-failed; \
+	    echo "[COV] unit tests FAILED (report above is still valid)"; \
+	    exit 1; \
+	fi
+
+# Remove gcov artifacts and the coverage report.
+covclean:
+	rm -f $(OBJDIR)/*.gcda $(OBJDIR)/*.gcno \
+	      $(OBJDIR_PIC)/*.gcda $(OBJDIR_PIC)/*.gcno
+	rm -f test/psa_server/*.gcda test/psa_server/*.gcno
+	rm -rf $(COV_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR) $(LIBNAME) $(SHLIBNAME)

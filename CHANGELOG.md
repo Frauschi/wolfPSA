@@ -15,6 +15,15 @@ wolfSSL master.
 - The nonstandard `psa_ml_dsa_generate_key/sign/verify` exports and the
   `PSA_ML_DSA_PARAMETER_*` / `psa_ml_dsa_parameter_t` macros were removed;
   use the standard PSA key management and signature APIs instead.
+- Key derivation now follows the PSA error-state rule: once a call on a
+  `psa_key_derivation_operation_t` fails, the operation is in an error state
+  and every later call reports `PSA_ERROR_BAD_STATE` until
+  `psa_key_derivation_abort()`. Code that ignored a rejected input and kept
+  deriving will now fail. Three statuses are outside the rule:
+  `psa_key_derivation_get_capacity()` stays callable (it is a read-only
+  query), `PSA_ERROR_INVALID_SIGNATURE` from a verify step is a completed
+  operation reporting a mismatch, and `PSA_ERROR_INVALID_HANDLE` is a key
+  argument rejected before the operation is touched.
 
 ### Added
 
@@ -74,6 +83,25 @@ wolfSSL master.
   built on wolfCrypt's portable `wc_*Mutex` API (created in `psa_crypto_init()`)
   guards the volatile-key list and id counter for concurrent PSA callers; a
   no-op in single-threaded builds.
+
+### Build configuration
+
+- AES backend policy (`src/psa_config.h`, included by every wolfPSA source):
+  PSA expects constant-time AES, so the build now fails unless it selects a
+  backend with no secret-indexed table load -- `WC_AES_BITSLICED`,
+  `WOLFSSL_AES_TOUCH_LINES`, or one of the hardware AES cores that compile no
+  software tables. Define `WOLFPSA_AES_FAST` (or build with `AES_FAST=1`) to
+  waive the requirement and take wolfCrypt's faster T-table core instead.
+  `WOLFSSL_AESNI` is not accepted on its own: wolfCrypt falls back to the
+  T-table `AesSetKey_C()` when AES-NI is unavailable at runtime.
+  `WC_AES_BITSLICED` requires `HAVE_AES_ECB` and grows `sizeof(Aes)` by
+  `15 * 16 * WC_AES_BS_WORD_SIZE` bytes (123,296 at the default word size of
+  64), so `zephyr/user_settings_example.h` selects `WOLFSSL_AES_TOUCH_LINES`,
+  which leaves `sizeof(Aes)` at 416.
+- The one-shot AEAD `Aes` and the PBKDF2/SP800-108 `Cmac` objects moved from
+  the stack to `XMALLOC`, so a frame no longer grows with the AES backend.
+- `WC_ALLOW_ECC_ZERO_HASH` is required for any build with `HAVE_ECC`, checked
+  from the same shared header rather than from `psa_ecc.c` alone.
 
 ### Zephyr module
 

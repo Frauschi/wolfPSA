@@ -107,6 +107,9 @@ jobs:
           psa_ecc_ecdh_curve_test
           psa_xof_output_wrap_test
           psa_kdf_length_check_test
+          psa_kdf_expand_context_test
+          psa_kdf_repeat_step_test
+          psa_kdf_psk_to_ms_size_test
           psa_mldsa_det_sign_test
           psa_mldsa_any_hash_test
           psa_ecc_curve_caps_test
@@ -125,7 +128,13 @@ jobs:
           psa_pqc_export_seed_test
           psa_key_declared_bits_test
           psa_import_key_probe_test
+          psa_store_commit_test
+          psa_store_read_open_test
+          psa_store_dir_validation_test
           psa_devid_cryptocb_test
+          psa_kdf_zeroize_output_test
+          psa_import_zero_length_test
+          psa_copy_key_cross_lifetime_test
 
       - name: Run PSA API tests
         env:
@@ -155,6 +164,9 @@ jobs:
                    psa_ecc_ecdh_curve_test \
                    psa_xof_output_wrap_test \
                    psa_kdf_length_check_test \
+                   psa_kdf_expand_context_test \
+                   psa_kdf_repeat_step_test \
+                   psa_kdf_psk_to_ms_size_test \
                    psa_mldsa_det_sign_test \
                    psa_mldsa_any_hash_test \
                    psa_ecc_curve_caps_test \
@@ -173,7 +185,13 @@ jobs:
                    psa_pqc_export_seed_test \
                    psa_key_declared_bits_test \
                    psa_import_key_probe_test \
-                   psa_devid_cryptocb_test; do
+                   psa_store_commit_test \
+                   psa_store_read_open_test \
+                   psa_store_dir_validation_test \
+                   psa_devid_cryptocb_test \
+                   psa_kdf_zeroize_output_test \
+                   psa_import_zero_length_test \
+                   psa_copy_key_cross_lifetime_test; do
             echo "=== $t ==="
             rm -rf test/.store
             ./test/$t

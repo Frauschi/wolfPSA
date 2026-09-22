@@ -28,6 +28,13 @@ endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 
+# gcov coverage (make cov): instrument the test binaries too, so the
+# crypto-callback and probe sub-builds (which inherit CFLAGS) are covered.
+ifeq ($(COV),1)
+CFLAGS += --coverage
+LDFLAGS += --coverage
+endif
+
 # The ECC curve regression tests read the library's feature macros
 # (they include <user_settings.h> and branch on HAVE_ECC_KOBLITZ /
 # HAVE_ECC_BRAINPOOL), so only they mirror the library build:
@@ -91,6 +98,10 @@ PSA_REGRESSION_TESTS = psa_aead_multipart_test \
 	psa_ecc_ecdh_curve_test \
 	psa_xof_output_wrap_test \
 	psa_kdf_length_check_test \
+	psa_kdf_expand_context_test \
+	psa_kdf_error_state_test \
+	psa_kdf_repeat_step_test \
+	psa_kdf_psk_to_ms_size_test \
 	psa_mldsa_det_sign_test \
 	psa_mldsa_any_hash_test \
 	psa_ecc_curve_caps_test \
@@ -107,7 +118,11 @@ PSA_REGRESSION_TESTS = psa_aead_multipart_test \
 	psa_key_infer_bits_test \
 	psa_cipher_oneshot_len_test \
 	psa_pqc_export_seed_test \
-	psa_key_declared_bits_test
+	psa_key_declared_bits_test \
+	psa_store_read_open_test \
+	psa_store_dir_validation_test \
+	psa_import_zero_length_test \
+	psa_copy_key_cross_lifetime_test
 BINARIES += $(PSA_REGRESSION_TESTS)
 
 # Regression test with a custom link: it replaces the store backend, so it
@@ -212,6 +227,12 @@ psa_devid_cryptocb_test: psa_server/psa_devid_cryptocb_test.c $(CRYPTOCB_LIB) FO
 	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
 		$(SANITIZE_FLAGS) -lpthread -lm
 
+# Mid-stream KDF failure driven through a crypto callback, so it needs the
+# same WOLF_CRYPTO_CB library build as the devId test above.
+psa_kdf_zeroize_output_test: psa_server/psa_kdf_zeroize_output_test.c $(CRYPTOCB_LIB) FORCE
+	$(CC) $(CRYPTOCB_CPPFLAGS) $(CFLAGS) -o $@ $< $(CRYPTOCB_LIB) \
+		$(SANITIZE_FLAGS) -lpthread -lm
+
 # psa_import_key_probe_test ships its own wolfPSA_Store_* backend: the POSIX
 # store cannot fail a read probe with an I/O error, only succeed or report
 # "not available", so the probe-failure path needs a mock. It therefore links
@@ -234,6 +255,21 @@ $(PROBE_LIB): FORCE
 psa_import_key_probe_test: require-wolfssl-lib psa_server/psa_import_key_probe_test.o $(PROBE_LIB)
 	$(CC) $(CFLAGS) -o $@ psa_server/psa_import_key_probe_test.o $(PROBE_LIB) \
 		$(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
+
+# Links the static library: it calls the internal wolfPSA_Store_* backend
+# API, which the shared library does not export.
+BINARIES += psa_store_commit_test
+
+# FORCE, like PROBE_LIB and CRYPTOCB_LIB: only the library build knows whether
+# libwolfpsa.a changed, and a stale archive would test store code the library
+# no longer contains.
+psa_store_commit_test: require-wolfssl-lib psa_server/psa_store_commit_test.o FORCE
+	@test -f $(WOLFPSA_PATH)/libwolfpsa.a || { \
+		echo "libwolfpsa.a not found: build the library first (make -C $(WOLFPSA_PATH))"; \
+		exit 1; \
+	}
+	$(CC) $(CFLAGS) -o $@ psa_server/psa_store_commit_test.o \
+		$(WOLFPSA_PATH)/libwolfpsa.a $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
 
 wolfcrypt-psa-benchmark:
 	make -C wolfcrypt-benchmark
@@ -273,4 +309,5 @@ clean:
 	rm -f psa_server/*.o
 	rm -rf $(abspath .)/build-cryptocb $(abspath .)/build-cryptocb-asan
 	rm -rf $(abspath .)/build-probe $(abspath .)/build-probe-asan
-	rm -f $(BINARIES) psa_devid_cryptocb_test *.o *.log
+	rm -f $(BINARIES) psa_devid_cryptocb_test psa_kdf_zeroize_output_test *.o *.log
+	rm -f psa_server/*.gcda psa_server/*.gcno
