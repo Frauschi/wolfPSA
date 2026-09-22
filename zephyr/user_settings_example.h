@@ -148,10 +148,11 @@ extern "C" {
 /* Constant-time AES. WOLFSSL_AES_TOUCH_LINES keeps the table access pattern
  * secret-independent and leaves sizeof(Aes) at 416 bytes, which is what a
  * Zephyr target can afford. WC_AES_BITSLICED is the stronger core but adds
- * 15 * 16 * WC_AES_BS_WORD_SIZE bytes to every Aes and Cmac (123,296 bytes at
- * the default word size of 64); pin WC_AES_BS_WORD_SIZE to 8 or 16 before
- * selecting it here. Build with -DWOLFPSA_AES_FAST to waive the requirement
- * and take wolfCrypt's faster T-table core. See src/psa_config.h. */
+ * a bs_word[15 * 16 * WC_AES_BS_WORD_SIZE] to every Aes and Cmac: 122,880
+ * bytes at the default word size of 64, taking sizeof(Aes) to 123,296. Pin
+ * WC_AES_BS_WORD_SIZE to 8 or 16 before selecting it here. Build with
+ * -DWOLFPSA_AES_FAST to waive the requirement and take wolfCrypt's faster
+ * T-table core. See src/psa_config.h. */
 #ifndef WOLFPSA_AES_FAST
 #define WOLFSSL_AES_TOUCH_LINES
 #endif

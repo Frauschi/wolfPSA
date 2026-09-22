@@ -24,6 +24,20 @@ wolfSSL master.
   query), `PSA_ERROR_INVALID_SIGNATURE` from a verify step is a completed
   operation reporting a mismatch, and `PSA_ERROR_INVALID_HANDLE` is a key
   argument rejected before the operation is touched.
+- `wolfPSA_Store_Close()` returns `int` instead of `void`, so that a write
+  handle whose write failed reports `WOLFPSA_STORE_IO_ERROR` at close rather
+  than silently succeeding. Out-of-tree `WOLFPSA_CUSTOM_STORE` backends must
+  update the signature.
+- `psa_import_key()` validates key data more strictly: a zero-length blob, an
+  ECC point whose length contradicts the declared curve, and a Weierstrass
+  public key that is not `0x04 || X || Y` of the exact expected length are now
+  rejected. A curve wolfPSA does not implement reports
+  `PSA_ERROR_NOT_SUPPORTED`; data that contradicts a curve it does implement
+  reports `PSA_ERROR_INVALID_ARGUMENT`.
+- The POSIX store requires a private store directory on the read path too, not
+  only when creating it. A directory that is group- or other-writable, or owned
+  by neither the effective uid nor root, is refused. Stores that relied on a
+  permissive directory will stop opening.
 
 ### Added
 
@@ -94,10 +108,11 @@ wolfSSL master.
   waive the requirement and take wolfCrypt's faster T-table core instead.
   `WOLFSSL_AESNI` is not accepted on its own: wolfCrypt falls back to the
   T-table `AesSetKey_C()` when AES-NI is unavailable at runtime.
-  `WC_AES_BITSLICED` requires `HAVE_AES_ECB` and grows `sizeof(Aes)` by
-  `15 * 16 * WC_AES_BS_WORD_SIZE` bytes (123,296 at the default word size of
-  64), so `zephyr/user_settings_example.h` selects `WOLFSSL_AES_TOUCH_LINES`,
-  which leaves `sizeof(Aes)` at 416.
+  `WC_AES_BITSLICED` requires `HAVE_AES_ECB` and adds
+  `bs_word bs_key[15 * 16 * WC_AES_BS_WORD_SIZE]` to `Aes`: 122,880 bytes at
+  the default word size of 64, taking `sizeof(Aes)` to 123,296. Hence
+  `zephyr/user_settings_example.h` selects `WOLFSSL_AES_TOUCH_LINES`, which
+  leaves `sizeof(Aes)` at 416.
 - The one-shot AEAD `Aes` and the PBKDF2/SP800-108 `Cmac` objects moved from
   the stack to `XMALLOC`, so a frame no longer grows with the AES backend.
 - `WC_ALLOW_ECC_ZERO_HASH` is required for any build with `HAVE_ECC`, checked
