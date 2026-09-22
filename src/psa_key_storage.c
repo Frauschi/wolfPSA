@@ -1022,7 +1022,8 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     if (status != PSA_SUCCESS) {
         return status;
     }
- status = wolfpsa_volatile_get(key_id, attributes, key_data, key_data_length);
+    status = wolfpsa_volatile_get(key_id, attributes, key_data,
+                                 key_data_length);
     if (status == PSA_SUCCESS) {
         return PSA_SUCCESS;
     }
@@ -1035,15 +1036,16 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
     attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
                   sizeof(psa_key_lifetime_t);
- ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1,
-                          &store);
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1,
+                             &store);
     if (ret == WOLFPSA_STORE_NOT_AVAILABLE) {
         return PSA_ERROR_INVALID_HANDLE;
     }
     if (ret != 0) {
         return wolfpsa_store_open_status(ret);
     }
- ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    ret = wolfPSA_Store_Read(store, header,
+                             (int)(attr_length + sizeof(size_t)));
     if (ret != (int)(attr_length + sizeof(size_t))) {
         wolfPSA_Store_Close(store);
         return PSA_ERROR_STORAGE_FAILURE;
@@ -1928,15 +1930,16 @@ psa_status_t psa_export_key(
     attr_length = sizeof(psa_key_type_t) + sizeof(psa_key_bits_t) +
                   sizeof(psa_key_usage_t) + sizeof(psa_algorithm_t) +
                   sizeof(psa_key_lifetime_t);
- ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1,
-                          &store);
+    ret = wolfPSA_Store_Open(WOLFPSA_STORE_KEY, (unsigned long)key_id, 0, 1,
+                             &store);
     if (ret == WOLFPSA_STORE_NOT_AVAILABLE) {
         return PSA_ERROR_INVALID_HANDLE;
     }
     if (ret != 0) {
         return wolfpsa_store_open_status(ret);
     }
- ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    ret = wolfPSA_Store_Read(store, header,
+                             (int)(attr_length + sizeof(size_t)));
     if (ret != (int)(attr_length + sizeof(size_t))) {
         wolfPSA_Store_Close(store);
         return PSA_ERROR_STORAGE_FAILURE;
@@ -2204,14 +2207,16 @@ psa_status_t psa_export_public_key(
                     status = psa_asymmetric_export_public_key_ed25519(
                         attributes.type, attributes.bits, key_data,
                         key_data_length, data, data_size, data_length);
-                } else
+                }
+                else
             #endif
             #ifdef HAVE_ED448
                 if (attributes.bits == 448) {
                     status = psa_asymmetric_export_public_key_ed448(
                         attributes.type, attributes.bits, key_data,
                         key_data_length, data, data_size, data_length);
-                } else
+                }
+                else
             #endif
                 {
                     status = PSA_ERROR_NOT_SUPPORTED;
@@ -2225,7 +2230,8 @@ psa_status_t psa_export_public_key(
                     status = psa_asymmetric_export_public_key_x25519(
                         attributes.type, attributes.bits, key_data,
                         key_data_length, data, data_size, data_length);
-                } else
+                }
+                else
             #endif
             #if defined(HAVE_CURVE448) && defined(HAVE_CURVE448_KEY_IMPORT) && \
                 defined(HAVE_CURVE448_KEY_EXPORT)
@@ -2233,7 +2239,8 @@ psa_status_t psa_export_public_key(
                     status = psa_asymmetric_export_public_key_x448(
                         attributes.type, attributes.bits, key_data,
                         key_data_length, data, data_size, data_length);
-                } else
+                }
+                else
             #endif
                 {
                     status = PSA_ERROR_NOT_SUPPORTED;
@@ -2281,7 +2288,8 @@ psa_status_t psa_export_public_key(
                         data_length);
                 }
             }
-        } else
+        }
+        else
 #endif /* WOLFSSL_HAVE_MLDSA */
 #if defined(WOLFSSL_HAVE_MLKEM)
         if (PSA_KEY_TYPE_IS_ML_KEM(attributes.type)) {
@@ -2310,7 +2318,8 @@ psa_status_t psa_export_public_key(
                         data_length);
                 }
             }
-        } else
+        }
+        else
 #endif /* WOLFSSL_HAVE_MLKEM */
         if (attributes.type == PSA_KEY_TYPE_LMS_PUBLIC_KEY ||
             attributes.type == PSA_KEY_TYPE_HSS_PUBLIC_KEY ||
@@ -2385,7 +2394,8 @@ psa_status_t psa_get_key_attributes(
         if (ret != (int)(attr_length + sizeof(size_t))) {
             return PSA_ERROR_STORAGE_FAILURE;
         }
- status = psa_key_attributes_deserialize(buffer, attr_length, attributes);
+        status = psa_key_attributes_deserialize(buffer, attr_length,
+                                                attributes);
         if (status != PSA_SUCCESS) {
             return status;
         }
@@ -2617,7 +2627,8 @@ psa_status_t psa_copy_key(
                 wolfpsa_forcezero_free_key_data(key_data, key_data_length);
                 return PSA_ERROR_INVALID_ARGUMENT;
             }
- dst_attr.type = (dst_attr.type == 0) ? vol_attr.type : dst_attr.type;
+            dst_attr.type = (dst_attr.type == 0) ? vol_attr.type
+                                                 : dst_attr.type;
             dst_attr.bits = (
                 dst_attr.bits == 0) ? vol_attr.bits : dst_attr.bits;
             dst_attr.policy.usage = psa_get_key_usage_flags(&vol_attr) &
@@ -2649,7 +2660,8 @@ psa_status_t psa_copy_key(
     if (ret != 0) {
         return wolfpsa_store_open_status(ret);
     }
- ret = wolfPSA_Store_Read(store, header, (int)(attr_length + sizeof(size_t)));
+    ret = wolfPSA_Store_Read(store, header,
+                             (int)(attr_length + sizeof(size_t)));
     if (ret != (int)(attr_length + sizeof(size_t))) {
         wolfPSA_Store_Close(store);
         return PSA_ERROR_STORAGE_FAILURE;

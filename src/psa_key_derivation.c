@@ -721,8 +721,10 @@ static psa_status_t wolfpsa_kdf_input_bytes(psa_key_derivation_operation_t *
         status = wolfpsa_kdf_append(&ctx->secret, &ctx->secret_length,
                                     data, data_length);
         break;
-    case PSA_KEY_DERIVATION_INPUT_OTHER_SECRET: status = wolfpsa_kdf_append(
-        &ctx->other_secret, &ctx->other_secret_length, data, data_length);
+    case PSA_KEY_DERIVATION_INPUT_OTHER_SECRET:
+        status = wolfpsa_kdf_append(&ctx->other_secret,
+                                    &ctx->other_secret_length,
+                                    data, data_length);
         break;
     case PSA_KEY_DERIVATION_INPUT_SALT:
         status = wolfpsa_kdf_append(&ctx->salt, &ctx->salt_length,
@@ -849,7 +851,8 @@ static psa_status_t wolfpsa_kdf_input_key(psa_key_derivation_operation_t *
     if (ctx == NULL) {
         return PSA_ERROR_BAD_STATE;
     }
- status = wolfpsa_get_key_data(key, &attributes, &key_data, &key_data_length);
+    status = wolfpsa_get_key_data(key, &attributes, &key_data,
+                                  &key_data_length);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -987,8 +990,9 @@ static psa_status_t wolfpsa_kdf_key_agreement(psa_key_derivation_operation_t *
     if (!PSA_KEY_TYPE_IS_KEY_PAIR(psa_get_key_type(&priv_attr))) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
- secret_len = PSA_RAW_KEY_AGREEMENT_OUTPUT_SIZE(psa_get_key_type(&priv_attr),
-                                                psa_get_key_bits(&priv_attr));
+    secret_len = PSA_RAW_KEY_AGREEMENT_OUTPUT_SIZE(
+                     psa_get_key_type(&priv_attr),
+                     psa_get_key_bits(&priv_attr));
     if (secret_len == 0) {
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -2082,7 +2086,8 @@ static psa_status_t wolfpsa_kdf_verify_bytes(psa_key_derivation_operation_t *
     if (buffer == NULL) {
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
- status = psa_key_derivation_output_bytes(operation, buffer, expected_length);
+    status = psa_key_derivation_output_bytes(operation, buffer,
+                                            expected_length);
     if (status != PSA_SUCCESS) {
         wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
@@ -2149,8 +2154,8 @@ static psa_status_t wolfpsa_kdf_verify_key(psa_key_derivation_operation_t *
     else if (psa_get_key_type(&attributes) != PSA_KEY_TYPE_RAW_DATA) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
- status = wolfpsa_get_key_data(expected, NULL, &expected_data,
-                               &expected_length);
+    status = wolfpsa_get_key_data(expected, NULL, &expected_data,
+                                  &expected_length);
     if (status != PSA_SUCCESS) {
         wolfpsa_forcezero_free_key_data(expected_data, expected_length);
         return status;

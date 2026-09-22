@@ -192,8 +192,8 @@ static int test_midstream_failure_zeroizes(void)
         return 1;
     }
     if (!buffer_is_zero(out, sizeof(out))) {
-        printf("FAIL midstream: partial derived output left in caller buffer\n")
-        ;
+        printf("FAIL midstream: partial derived output left in caller"
+               " buffer\n");
         return 1;
     }
     return 0;
