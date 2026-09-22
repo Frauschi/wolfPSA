@@ -151,11 +151,10 @@ $(OBJDIR_PIC)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 	@mkdir -p $(OBJDIR_PIC)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
 
-# The unit tests, in the order CI runs them (test-psa-api.yml). The servers
-# (psa_tls_client, psa_tls_server), the benchmark, and psa_crypto_init_test
-# are not unit tests and are not listed. psa_crypto_init_test is built by
-# 'make -C test all' but no workflow runs it.
+# The unit tests. The servers (psa_tls_client, psa_tls_server) and the
+# benchmark are not unit tests and are not listed.
 UNIT_TESTS := psa_api_test \
+	psa_crypto_init_test \
 	psa_aead_multipart_test \
 	psa_copy_key_narrowing_test \
 	psa_ecc_bit_inference_test \
