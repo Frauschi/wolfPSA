@@ -84,6 +84,9 @@ typedef struct wolfpsa_kdf_ctx {
     int is_key_agreement;
     int is_raw_kdf;
     int output_started;
+    /* PSA: once a call on the operation fails, the operation is in an error
+     * state and only psa_key_derivation_abort() may follow. */
+    int error_state;
     uint8_t *output_cache;
     size_t output_cache_length;
 } wolfpsa_kdf_ctx_t;
@@ -443,6 +446,47 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
     return PSA_ERROR_NOT_SUPPORTED;
 }
 
+/* PSA requires that a failed call on a key-derivation operation put that
+ * operation into an error state: every subsequent call except
+ * psa_key_derivation_abort() must then report PSA_ERROR_BAD_STATE. These two
+ * helpers hold that policy so the individual entry points do not have to mark
+ * every one of their error returns.
+ *
+ * psa_key_derivation_get_capacity() is deliberately not gated: it is a
+ * read-only query, and the PSA API test suite reads the capacity back after a
+ * verify that failed for insufficient data (arch test c067). */
+static psa_status_t wolfpsa_kdf_check_state(const wolfpsa_kdf_ctx_t *ctx)
+{
+    if (ctx == NULL || ctx->error_state) {
+        return PSA_ERROR_BAD_STATE;
+    }
+    return PSA_SUCCESS;
+}
+
+/* Record the outcome of a call, entering the error state when it failed.
+ * Two statuses are excluded, because in both the operation itself completed
+ * correctly and nothing it holds became inconsistent:
+ *
+ *   PSA_ERROR_INVALID_SIGNATURE  a verify step that ran to completion and
+ *                                reported a mismatch.
+ *   PSA_ERROR_INVALID_HANDLE     the key argument was rejected before the
+ *                                operation was touched. The PSA API test
+ *                                suite requires this: arch test c019 calls
+ *                                psa_key_derivation_key_agreement() twice on
+ *                                one operation, with a bad handle and then a
+ *                                zero handle, and expects INVALID_HANDLE
+ *                                both times rather than BAD_STATE. */
+static psa_status_t wolfpsa_kdf_done(wolfpsa_kdf_ctx_t *ctx,
+                                     psa_status_t status)
+{
+    if (ctx != NULL && status != PSA_SUCCESS &&
+        status != PSA_ERROR_INVALID_SIGNATURE &&
+        status != PSA_ERROR_INVALID_HANDLE) {
+        ctx->error_state = 1;
+    }
+    return status;
+}
+
 psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
                                       psa_algorithm_t alg)
 {
@@ -582,7 +626,7 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
     return PSA_SUCCESS;
 }
 
-psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *
+static psa_status_t wolfpsa_kdf_set_capacity(psa_key_derivation_operation_t *
                                              operation,
                                              size_t capacity)
 {
@@ -615,6 +659,19 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *
     return PSA_SUCCESS;
 }
 
+psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *
+                                             operation,
+                                             size_t capacity)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx, wolfpsa_kdf_set_capacity(operation, capacity));
+}
+
 psa_status_t psa_key_derivation_get_capacity(const
                                              psa_key_derivation_operation_t *
                                              operation,
@@ -635,7 +692,7 @@ psa_status_t psa_key_derivation_get_capacity(const
     return PSA_SUCCESS;
 }
 
-psa_status_t psa_key_derivation_input_bytes(psa_key_derivation_operation_t *
+static psa_status_t wolfpsa_kdf_input_bytes(psa_key_derivation_operation_t *
                                             operation,
                                             psa_key_derivation_step_t step,
                                             const uint8_t *data,
@@ -701,7 +758,24 @@ psa_status_t psa_key_derivation_input_bytes(psa_key_derivation_operation_t *
     return status;
 }
 
-psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *
+psa_status_t psa_key_derivation_input_bytes(psa_key_derivation_operation_t *
+                                            operation,
+                                            psa_key_derivation_step_t step,
+                                            const uint8_t *data,
+                                            size_t data_length)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_input_bytes(operation, step, data,
+                                                    data_length));
+}
+
+static psa_status_t wolfpsa_kdf_input_integer(psa_key_derivation_operation_t *
                                               operation,
                                               psa_key_derivation_step_t step,
                                               uint64_t value)
@@ -745,7 +819,22 @@ psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *
     return PSA_SUCCESS;
 }
 
-psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *
+psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *
+                                              operation,
+                                              psa_key_derivation_step_t step,
+                                              uint64_t value)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_input_integer(operation, step, value));
+}
+
+static psa_status_t wolfpsa_kdf_input_key(psa_key_derivation_operation_t *
                                           operation,
                                           psa_key_derivation_step_t step,
                                           psa_key_id_t key)
@@ -840,7 +929,22 @@ psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *
     return status;
 }
 
-psa_status_t psa_key_derivation_key_agreement(psa_key_derivation_operation_t *
+psa_status_t psa_key_derivation_input_key(psa_key_derivation_operation_t *
+                                          operation,
+                                          psa_key_derivation_step_t step,
+                                          psa_key_id_t key)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_input_key(operation, step, key));
+}
+
+static psa_status_t wolfpsa_kdf_key_agreement(psa_key_derivation_operation_t *
                                               operation,
                                               psa_key_derivation_step_t step,
                                               psa_key_id_t private_key,
@@ -906,6 +1010,25 @@ psa_status_t psa_key_derivation_key_agreement(psa_key_derivation_operation_t *
     wc_ForceZero(secret, secret_len);
     XFREE(secret, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     return status;
+}
+
+psa_status_t psa_key_derivation_key_agreement(psa_key_derivation_operation_t *
+                                              operation,
+                                              psa_key_derivation_step_t step,
+                                              psa_key_id_t private_key,
+                                              const uint8_t *peer_key,
+                                              size_t peer_key_length)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_key_agreement(operation, step,
+                                                      private_key, peer_key,
+                                                      peer_key_length));
 }
 
 static psa_status_t wolfpsa_kdf_hkdf(wolfpsa_kdf_ctx_t *ctx,
@@ -1703,7 +1826,7 @@ static psa_status_t wolfpsa_kdf_compute_output(wolfpsa_kdf_ctx_t *ctx,
     return PSA_ERROR_NOT_SUPPORTED;
 }
 
-psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *
+static psa_status_t wolfpsa_kdf_output_bytes(psa_key_derivation_operation_t *
                                              operation,
                                              uint8_t *output,
                                              size_t output_length)
@@ -1863,7 +1986,23 @@ psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *
     return status;
 }
 
-psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *
+psa_status_t psa_key_derivation_output_bytes(psa_key_derivation_operation_t *
+                                             operation,
+                                             uint8_t *output,
+                                             size_t output_length)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_output_bytes(operation, output,
+                                                     output_length));
+}
+
+static psa_status_t wolfpsa_kdf_output_key(const psa_key_attributes_t *
                                            attributes,
                                            psa_key_derivation_operation_t *
                                            operation,
@@ -1904,7 +2043,23 @@ psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *
     return status;
 }
 
-psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *
+psa_status_t psa_key_derivation_output_key(const psa_key_attributes_t *
+                                           attributes,
+                                           psa_key_derivation_operation_t *
+                                           operation,
+                                           psa_key_id_t *key)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_output_key(attributes, operation, key));
+}
+
+static psa_status_t wolfpsa_kdf_verify_bytes(psa_key_derivation_operation_t *
                                              operation,
                                              const uint8_t *expected,
                                              size_t expected_length)
@@ -1946,7 +2101,23 @@ psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *
     return status;
 }
 
-psa_status_t psa_key_derivation_verify_key(psa_key_derivation_operation_t *
+psa_status_t psa_key_derivation_verify_bytes(psa_key_derivation_operation_t *
+                                             operation,
+                                             const uint8_t *expected,
+                                             size_t expected_length)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_verify_bytes(operation, expected,
+                                                     expected_length));
+}
+
+static psa_status_t wolfpsa_kdf_verify_key(psa_key_derivation_operation_t *
                                            operation,
                                            psa_key_id_t expected)
 {
@@ -1989,6 +2160,20 @@ psa_status_t psa_key_derivation_verify_key(psa_key_derivation_operation_t *
                                              expected_length);
     wolfpsa_forcezero_free_key_data(expected_data, expected_length);
     return status;
+}
+
+psa_status_t psa_key_derivation_verify_key(psa_key_derivation_operation_t *
+                                           operation,
+                                           psa_key_id_t expected)
+{
+    wolfpsa_kdf_ctx_t *ctx = wolfpsa_kdf_get_ctx(operation);
+    psa_status_t status = wolfpsa_kdf_check_state(ctx);
+
+    if (status != PSA_SUCCESS) {
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx,
+                            wolfpsa_kdf_verify_key(operation, expected));
 }
 
 #endif /* WOLFSSL_PSA_ENGINE */

@@ -891,6 +891,8 @@ static int test_hmac_duplicate_step_rejected(void)
     static const uint8_t label[] = { 'l', 'a', 'b', 'e', 'l' };
     psa_status_t st;
 
+    /* A refused input puts the operation into an error state, so each
+     * duplicate is checked on an operation of its own. */
     st = psa_key_derivation_setup(&op, alg);
     if (expect_status("tc9 setup", st, PSA_SUCCESS) != 0) return 1;
 
@@ -903,8 +905,19 @@ static int test_hmac_duplicate_step_rejected(void)
 
     st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
                                         secret, sizeof(secret));
+    psa_key_derivation_abort(&op);
     if (expect_status("tc9 duplicate SECRET", st,
                       PSA_ERROR_BAD_STATE) != 0) {
+        return 1;
+    }
+
+    op = psa_key_derivation_operation_init();
+    st = psa_key_derivation_setup(&op, alg);
+    if (expect_status("tc9 setup (label)", st, PSA_SUCCESS) != 0) return 1;
+
+    st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SECRET,
+                                        secret, sizeof(secret));
+    if (expect_status("tc9 input SECRET (label)", st, PSA_SUCCESS) != 0) {
         psa_key_derivation_abort(&op);
         return 1;
     }

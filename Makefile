@@ -180,6 +180,7 @@ UNIT_TESTS := psa_api_test \
 	psa_xof_output_wrap_test \
 	psa_kdf_length_check_test \
 	psa_kdf_expand_context_test \
+	psa_kdf_error_state_test \
 	psa_kdf_repeat_step_test \
 	psa_kdf_psk_to_ms_size_test \
 	psa_mldsa_det_sign_test \

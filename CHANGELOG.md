@@ -15,6 +15,15 @@ wolfSSL master.
 - The nonstandard `psa_ml_dsa_generate_key/sign/verify` exports and the
   `PSA_ML_DSA_PARAMETER_*` / `psa_ml_dsa_parameter_t` macros were removed;
   use the standard PSA key management and signature APIs instead.
+- Key derivation now follows the PSA error-state rule: once a call on a
+  `psa_key_derivation_operation_t` fails, the operation is in an error state
+  and every later call reports `PSA_ERROR_BAD_STATE` until
+  `psa_key_derivation_abort()`. Code that ignored a rejected input and kept
+  deriving will now fail. Three statuses are outside the rule:
+  `psa_key_derivation_get_capacity()` stays callable (it is a read-only
+  query), `PSA_ERROR_INVALID_SIGNATURE` from a verify step is a completed
+  operation reporting a mismatch, and `PSA_ERROR_INVALID_HANDLE` is a key
+  argument rejected before the operation is touched.
 
 ### Added
 
