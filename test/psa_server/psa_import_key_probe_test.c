@@ -131,8 +131,8 @@ static void setup_aes_attr(psa_key_attributes_t* attr, psa_key_id_t id)
     *attr = psa_key_attributes_init();
     psa_set_key_type(attr, PSA_KEY_TYPE_AES);
     psa_set_key_bits(attr, 128);
-    psa_set_key_usage_flags(attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT)
-    ;
+    psa_set_key_usage_flags(attr,
+                            PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
     psa_set_key_algorithm(attr, PSA_ALG_GCM);
     psa_set_key_lifetime(attr, PSA_KEY_LIFETIME_PERSISTENT);
     psa_set_key_id(attr, id);
