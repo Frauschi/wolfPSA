@@ -236,6 +236,47 @@ static void test_bad_handle_does_not_poison(void)
     }
 }
 
+/* PSA leaves the operation valid when set_capacity rejects the capacity, so
+ * the operation must still derive afterwards. */
+static void test_set_capacity_reject_does_not_poison(void)
+{
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    uint8_t out[16];
+    size_t capacity = 0;
+    int ret = 0;
+
+    if (setup_expand(&op) != 0) {
+        printf("FAIL set_capacity reject: setup\n");
+        failures++;
+        return;
+    }
+
+    if (psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_INFO,
+                                       info, sizeof(info)) != PSA_SUCCESS) {
+        printf("FAIL set_capacity reject: info\n");
+        failures++;
+        (void)psa_key_derivation_abort(&op);
+        return;
+    }
+
+    /* Larger than the current capacity: rejected, operation untouched. */
+    ret |= expect_status("set_capacity reject",
+                         psa_key_derivation_set_capacity(&op, (size_t)-1),
+                         PSA_ERROR_INVALID_ARGUMENT);
+    ret |= expect_status("capacity readable after reject",
+                         psa_key_derivation_get_capacity(&op, &capacity),
+                         PSA_SUCCESS);
+    ret |= expect_status("output after rejected set_capacity",
+                         psa_key_derivation_output_bytes(&op, out, sizeof(out)),
+                         PSA_SUCCESS);
+
+    (void)psa_key_derivation_abort(&op);
+
+    if (ret == 0) {
+        printf("PASS a rejected capacity leaves the operation usable\n");
+    }
+}
+
 int main(void)
 {
     if (psa_crypto_init() != PSA_SUCCESS) {
@@ -247,6 +288,7 @@ int main(void)
     test_get_capacity_exempt();
     test_verify_mismatch_does_not_poison();
     test_bad_handle_does_not_poison();
+    test_set_capacity_reject_does_not_poison();
 
     if (failures != 0) {
         printf("PSA KDF error state test: FAIL (%d)\n", failures);

@@ -302,11 +302,8 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
-    /* Every KDF input step is single-use: the input buffers append
-     * data, so a repeated step would silently concatenate its values.
-     * The PBKDF2 salt is the one documented exception: the PSA API
-     * specifies it as "one or more times", with the parts concatenated
-     * into the final salt (a public part plus a secret pepper). */
+    /* PBKDF2 accepts SALT more than once and concatenates the parts; every
+     * other step is single-use because the input buffers append. */
     multipart_step = (PSA_ALG_IS_PBKDF2(ctx->alg) &&
                       step == PSA_KEY_DERIVATION_INPUT_SALT);
     if (!multipart_step &&
@@ -475,7 +472,11 @@ static psa_status_t wolfpsa_kdf_check_state(const wolfpsa_kdf_ctx_t *ctx)
  *                                psa_key_derivation_key_agreement() twice on
  *                                one operation, with a bad handle and then a
  *                                zero handle, and expects INVALID_HANDLE
- *                                both times rather than BAD_STATE. */
+ *                                both times rather than BAD_STATE.
+ *
+ * psa_key_derivation_set_capacity() is exempt for its own
+ * PSA_ERROR_INVALID_ARGUMENT as well: PSA specifies that a rejected capacity
+ * leaves the operation valid and its capacity unchanged. */
 static psa_status_t wolfpsa_kdf_done(wolfpsa_kdf_ctx_t *ctx,
                                      psa_status_t status)
 {
@@ -669,7 +670,13 @@ psa_status_t psa_key_derivation_set_capacity(psa_key_derivation_operation_t *
     if (status != PSA_SUCCESS) {
         return status;
     }
-    return wolfpsa_kdf_done(ctx, wolfpsa_kdf_set_capacity(operation, capacity));
+    status = wolfpsa_kdf_set_capacity(operation, capacity);
+    if (status == PSA_ERROR_INVALID_ARGUMENT) {
+        /* PSA leaves the operation valid, and its capacity unchanged, when it
+         * rejects the requested capacity. Any other failure still poisons. */
+        return status;
+    }
+    return wolfpsa_kdf_done(ctx, status);
 }
 
 psa_status_t psa_key_derivation_get_capacity(const
@@ -926,8 +933,8 @@ static psa_status_t wolfpsa_kdf_input_key(psa_key_derivation_operation_t *
         return PSA_ERROR_NOT_PERMITTED;
     }
 
-    status = psa_key_derivation_input_bytes(operation, step,
-                                            key_data, key_data_length);
+    status = wolfpsa_kdf_input_bytes(operation, step,
+                                     key_data, key_data_length);
     wolfpsa_forcezero_free_key_data(key_data, key_data_length);
     return status;
 }
@@ -1006,9 +1013,7 @@ static psa_status_t wolfpsa_kdf_key_agreement(psa_key_derivation_operation_t *
         PSA_ALG_KEY_AGREEMENT(ctx->ka_alg, ctx->alg), private_key,
         peer_key, peer_key_length, secret, secret_len, &output_len);
     if (status == PSA_SUCCESS) {
-        status = psa_key_derivation_input_bytes(operation,
-                                                step,
-                                                secret, output_len);
+        status = wolfpsa_kdf_input_bytes(operation, step, secret, output_len);
     }
 
     wc_ForceZero(secret, secret_len);

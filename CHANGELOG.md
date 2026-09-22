@@ -24,6 +24,9 @@ wolfSSL master.
   query), `PSA_ERROR_INVALID_SIGNATURE` from a verify step is a completed
   operation reporting a mismatch, and `PSA_ERROR_INVALID_HANDLE` is a key
   argument rejected before the operation is touched.
+- `psa_key_derivation_set_capacity()` is outside the error-state rule as well:
+  PSA specifies that a rejected capacity leaves the operation valid and its
+  capacity unchanged, so it no longer poisons the operation.
 - `wolfPSA_Store_Close()` returns `int` instead of `void`, so that a write
   handle whose write failed reports `WOLFPSA_STORE_IO_ERROR` at close rather
   than silently succeeding. Out-of-tree `WOLFPSA_CUSTOM_STORE` backends must
