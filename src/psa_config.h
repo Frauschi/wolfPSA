@@ -31,39 +31,25 @@
 
 #if defined(WOLFSSL_PSA_ENGINE) && !defined(NO_AES)
 
-/* AES backend policy.
+/* AES backends, none of which loads a table at a secret-dependent index:
  *
- * PSA expects AES to be constant time. wolfCrypt's default software core
- * indexes the T-tables with key- and state-derived bytes, which is a
- * cache-timing channel on a target that has a cache. That core is also the
- * fastest software AES wolfCrypt has, so the choice is the caller's:
- *
- *   default            require a backend with no secret-indexed table load
- *   WOLFPSA_AES_FAST   accept the T-table core; faster, not constant time,
- *                      and not PSA compliant
- *
- * Backends accepted by the default policy:
- *
- *   WC_AES_BITSLICED         portable bitsliced core. Constant time by
- *                            construction, but sizeof(Aes) grows by
- *                            15 * 16 * WC_AES_BS_WORD_SIZE bytes: 123,296
- *                            bytes at the default word size of 64, down to
- *                            2,336 at 8. Pin WC_AES_BS_WORD_SIZE on any
- *                            target where that matters.
- *   WOLFSSL_AES_TOUCH_LINES  every table access touches all cache lines of
- *                            the table, so the access pattern carries no
- *                            secret. sizeof(Aes) is unchanged.
- *   a hardware AES core      the list below is the subset of wolfCrypt's
- *                            backend dispatch (wolfcrypt/src/aes.c) that
- *                            compiles no software tables at all, so there is
- *                            no channel to close. WOLFSSL_AESNI and
- *                            WOLFSSL_ESP32_CRYPT are deliberately absent:
- *                            both keep the T-table core as a runtime
- *                            fallback (AES-NI via AesSetKey_C() when
- *                            Check_CPU_support_AES() says no, ESP32 via
- *                            NEED_AES_HW_FALLBACK for key lengths the
- *                            peripheral does not implement).
+ *   WC_AES_BITSLICED         adds 15 * 16 * W words of W bits to Aes, where W
+ *                            is WC_AES_BS_WORD_SIZE: 30 * W^2 bytes, 122,880
+ *                            at W = 64 down to 1,920 at W = 8
+ *   WOLFSSL_AES_TOUCH_LINES  every lookup touches each cache line of the
+ *                            table; sizeof(Aes) is unchanged
+ *   a hardware AES core      the list below, which compiles no software
+ *                            tables. WOLFSSL_AESNI and WOLFSSL_ESP32_CRYPT
+ *                            are absent: both keep the T-table core as a
+ *                            runtime fallback
+ *   WOLFPSA_AES_FAST         waives the check and accepts the T-table core:
+ *                            faster, not constant time, not PSA compliant
  */
+
+/* Internal marker, derived here and nowhere else: a definition arriving from
+ * outside would otherwise satisfy the policy check below on any build. */
+#undef WOLFPSA_AES_HW_BACKEND
+
 #if defined(WOLFSSL_ARMASM) || defined(WOLFSSL_RISCV_ASM) || \
     defined(FREESCALE_LTC) || defined(FREESCALE_MMCAU) || \
     defined(WOLFSSL_SILABS_SE_ACCEL) || defined(WOLFSSL_PSOC6_CRYPTO) || \
@@ -79,33 +65,15 @@
 #error "wolfPSA: AES backend is not constant time. Select WC_AES_BITSLICED or WOLFSSL_AES_TOUCH_LINES, or define WOLFPSA_AES_FAST to accept the T-table core."
 #endif
 
-/* Both policies cannot hold at once: WOLFPSA_AES_FAST waives the
- * requirement, so selecting a constant-time core alongside it is a
- * contradiction the caller should resolve rather than have silently
- * decided here. */
 #if defined(WOLFPSA_AES_FAST) && \
     (defined(WC_AES_BITSLICED) || defined(WOLFSSL_AES_TOUCH_LINES))
 #error "wolfPSA: WOLFPSA_AES_FAST conflicts with WC_AES_BITSLICED/WOLFSSL_AES_TOUCH_LINES"
 #endif
 
-/* NO_AES is scoped out above because this policy has nothing to say about a
- * build with no AES. wolfPSA itself does not build with NO_AES today
- * (psa_cipher.c and the AEAD/MAC/KDF paths are unguarded), so no matrix lane
- * covers it. */
-
 #endif /* WOLFSSL_PSA_ENGINE && !NO_AES */
 
-/* psa_sign_hash()/psa_verify_hash() must accept an all-zero digest: PSA
- * treats the hash argument as opaque bytes and ECDSA over e = 0 is
- * well-defined. wolfCrypt rejects an all-zero digest by default (a guard
- * against uninitialized buffers), which would surface as
- * PSA_ERROR_INVALID_ARGUMENT for input the spec requires us to accept.
- * WC_ALLOW_ECC_ZERO_HASH opts out of that rejection.
- *
- * The macro is consumed by wolfcrypt/src/ecc.c, not here, so this check only
- * proves the intent of the configuration wolfPSA is compiled with. A build
- * that links a separately configured libwolfssl must set it for that build
- * too; there is no way to observe it from this side. */
+/* PSA treats the hash as opaque bytes, but wolfcrypt/src/ecc.c rejects an
+ * all-zero digest unless this is set, in a split build in libwolfssl too. */
 #if defined(WOLFSSL_PSA_ENGINE) && defined(HAVE_ECC) \
     && !defined(WC_ALLOW_ECC_ZERO_HASH)
 #error "wolfPSA needs WC_ALLOW_ECC_ZERO_HASH (psa_sign_hash/psa_verify_hash must accept an all-zero digest)"

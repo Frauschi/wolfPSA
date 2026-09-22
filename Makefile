@@ -214,7 +214,7 @@ UNIT_TESTS := psa_api_test \
 run-tests:
 	@for t in $(UNIT_TESTS); do \
 	    echo "=== $$t ==="; \
-	    rm -rf test/.store; \
+	    rm -rf .store test/.store; \
 	    ./test/$$t || exit 1; \
 	done
 
@@ -266,7 +266,7 @@ cov:
 covclean:
 	rm -f $(OBJDIR)/*.gcda $(OBJDIR)/*.gcno \
 	      $(OBJDIR_PIC)/*.gcda $(OBJDIR_PIC)/*.gcno
-	rm -f test/psa_server/*.gcda test/psa_server/*.gcno
+	find test \( -name '*.gcda' -o -name '*.gcno' \) -delete
 	rm -rf $(COV_DIR)
 
 clean:
