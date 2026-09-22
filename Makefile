@@ -153,7 +153,8 @@ $(OBJDIR_PIC)/wolfcrypt_%.o: $(WOLFSSL_PATH)/wolfcrypt/src/%.c
 
 # The unit tests, in the order CI runs them (test-psa-api.yml). The servers
 # (psa_tls_client, psa_tls_server), the benchmark, and psa_crypto_init_test
-# (driven separately) are not unit tests and are not listed.
+# are not unit tests and are not listed. psa_crypto_init_test is built by
+# 'make -C test all' but no workflow runs it.
 UNIT_TESTS := psa_api_test \
 	psa_aead_multipart_test \
 	psa_copy_key_narrowing_test \
@@ -225,17 +226,24 @@ unit-run: all
 # HTML coverage report for src/*.c (the bundled wolfCrypt sources are
 # excluded by the -f filter). The instrumented objects are dropped once the
 # report exists: a later non-coverage build would otherwise reuse them and
-# fail to link (undefined __gcov_init). The report itself is kept.
+# fail to link (undefined __gcov_init). The report itself is kept. A test
+# failure is recorded and re-raised at the end rather than aborting the
+# recipe, so the drop always happens.
 cov:
+	@command -v gcovr >/dev/null 2>&1 || { \
+	    echo "gcovr not found: install it before running 'make cov'"; \
+	    exit 1; \
+	}
 	@$(MAKE) clean
 	@$(MAKE) -C test clean
 	@$(MAKE) all COV=1
 	@$(MAKE) -C test $(UNIT_TESTS) COV=1
-	@$(MAKE) run-tests
+	@rm -f $(BUILD_DIR)/.cov-tests-failed
+	@$(MAKE) run-tests || touch $(BUILD_DIR)/.cov-tests-failed
 	@mkdir -p $(COV_DIR)
 	@echo "[COV] gcovr html"
 	@gcovr -r . -f '^src/.*\.c$$' \
-	    --gcov-ignore-errors=all \
+	    --gcov-ignore-errors=no_working_dir_found \
 	    --html-medium-threshold 60 \
 	    --html-high-threshold 80 \
 	    --html-details -o $(COV_DIR)/index.html
@@ -243,8 +251,14 @@ cov:
 	@echo "[COV] dropping instrumented objects"
 	@rm -rf $(OBJDIR) $(OBJDIR_PIC) $(LIBNAME) $(SHLIBNAME)
 	@$(MAKE) -C test clean
-	@if [ -n "$$DISPLAY" ] || [ -n "$$WAYLAND_DISPLAY" ]; then \
+	@if [ -n "$$DISPLAY" ] || [ -n "$$WAYLAND_DISPLAY" ] || \
+	    [ "$$(uname -s)" = "Darwin" ]; then \
 	    $(OPEN_CMD) $(COV_DIR)/index.html || true; \
+	fi
+	@if [ -f $(BUILD_DIR)/.cov-tests-failed ]; then \
+	    rm -f $(BUILD_DIR)/.cov-tests-failed; \
+	    echo "[COV] unit tests FAILED (report above is still valid)"; \
+	    exit 1; \
 	fi
 
 # Remove gcov artifacts and the coverage report.

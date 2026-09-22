@@ -259,7 +259,14 @@ psa_import_key_probe_test: require-wolfssl-lib psa_server/psa_import_key_probe_t
 # API, which the shared library does not export.
 BINARIES += psa_store_commit_test
 
-psa_store_commit_test: require-wolfssl-lib psa_server/psa_store_commit_test.o
+# FORCE, like PROBE_LIB and CRYPTOCB_LIB: only the library build knows whether
+# libwolfpsa.a changed, and a stale archive would test store code the library
+# no longer contains.
+psa_store_commit_test: require-wolfssl-lib psa_server/psa_store_commit_test.o FORCE
+	@test -f $(WOLFPSA_PATH)/libwolfpsa.a || { \
+		echo "libwolfpsa.a not found: build the library first (make -C $(WOLFPSA_PATH))"; \
+		exit 1; \
+	}
 	$(CC) $(CFLAGS) -o $@ psa_server/psa_store_commit_test.o \
 		$(WOLFPSA_PATH)/libwolfpsa.a $(LDFLAGS) -lwolfssl -lpthread -lm $(RPATH_WOLFSSL)
 
@@ -302,3 +309,4 @@ clean:
 	rm -rf $(abspath .)/build-cryptocb $(abspath .)/build-cryptocb-asan
 	rm -rf $(abspath .)/build-probe $(abspath .)/build-probe-asan
 	rm -f $(BINARIES) psa_devid_cryptocb_test psa_kdf_zeroize_output_test *.o *.log
+	rm -f psa_server/*.gcda psa_server/*.gcno
