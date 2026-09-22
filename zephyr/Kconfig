@@ -32,8 +32,7 @@ config WOLFPSA
 	# structural profile its RNG needs -- a Hash-DRBG (seeded by the wolfSSL
 	# module's wc_GenerateSeed() from the HW entropy driver when present) and
 	# single-threaded wolfCrypt on a no-threads kernel -- comes from the wolfSSL
-	# module's own Kconfig/user_settings.h defaults, so wolfPSA selects nothing
-	# here.
+	# module's own Kconfig/user_settings.h defaults.
 	# It deliberately does NOT touch WOLFCRYPT_ONLY: whether the wolfSSL TLS layer
 	# is in the build is a wolfCrypt-config decision (WOLFSSL_CRYPTO_ONLY / your
 	# settings file), and wolfPSA works either way -- crypto-only, or alongside
@@ -57,6 +56,24 @@ config WOLFPSA
 	  either way, and TLS keeps using wolfCrypt directly (not the PSA interface).
 
 if WOLFPSA
+
+# src/psa_config.h refuses to build against a T-table AES core. The AVAILABLE
+# term is required: a default here is not bound by the depends on of the
+# wolfSSL module's own definition of this symbol.
+config WOLFSSL_AES_CONSTANT_TIME
+	default y if !WOLFPSA_AES_FAST && WOLFSSL_AES_CONSTANT_TIME_AVAILABLE
+
+config WOLFPSA_AES_FAST
+	bool "Accept wolfCrypt's T-table AES core (not constant time)"
+	help
+	  Define WOLFPSA_AES_FAST, which waives src/psa_config.h's requirement for
+	  an AES backend with no secret-indexed table load, and leaves
+	  WOLFSSL_AES_CONSTANT_TIME off by default.
+
+	  The T-table core is wolfCrypt's fastest software AES, and its access
+	  pattern is key- and state-dependent. Enable this only where that timing
+	  channel is out of scope - a part with no data cache, or an attacker with
+	  no way to measure it.
 
 config WOLFPSA_THREAD_SAFE
 	bool "Serialize wolfPSA shared state with a global mutex"

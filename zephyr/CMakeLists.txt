@@ -121,6 +121,9 @@ if(CONFIG_WOLFPSA)
   # builds against.
   zephyr_library_compile_definitions(WOLFSSL_PSA_ENGINE)
 
+  # Image-wide: a settings file picking wolfCrypt's AES core may read it too.
+  zephyr_compile_definitions_ifdef(CONFIG_WOLFPSA_AES_FAST WOLFPSA_AES_FAST)
+
   # Inherit WOLFSSL_USER_SETTINGS + WOLFSSL_ZEPHYR and the wolfcrypt include
   # dirs from the wolfSSL module's interface library.
   zephyr_library_link_libraries(wolfSSL)
