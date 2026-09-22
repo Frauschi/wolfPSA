@@ -26,12 +26,10 @@
  * policies are wildcards, and is rejected when the concrete algorithm is
  * shorter than the minimum the other policy requires.
  *
- * This file is part of wolfPSA.
- *
  * Copyright (C) 2026 wolfSSL Inc.
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * This file is licensed under the 3-clause BSD license. See the file
- * LICENSE or wolfSSL.md in the distribution root for details.
+ * This file is part of wolfPSA. See COPYING in the distribution root.
  */
 
 #include <stdio.h>
