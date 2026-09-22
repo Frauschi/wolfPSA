@@ -73,16 +73,27 @@ at `zephyr/user_settings_example.h` (opt in with
 it. (Realistic reductions -- dropping asymmetric families, PQC, curves, or
 RSA/ECC -- are supported; dropping the symmetric core is not yet guarded.)
 
-wolfPSA imposes **no** wolfCrypt feature knobs of its own: its Kconfig `select`s
-nothing crypto-config-wise, and the structural profile it needs (a Hash-DRBG, and
-single-threaded wolfCrypt on a no-threads kernel) already comes from the wolfSSL
-module's own Kconfig and `user_settings.h` defaults. The wolfSSL module stays
+wolfPSA imposes two wolfCrypt requirements of its own, both enforced by a
+build-time `#error` in `src/psa_config.h` rather than by a Kconfig `select`, so a
+config that misses one fails loudly instead of being silently overridden:
+
+- a constant-time AES backend (`WOLFSSL_AES_TOUCH_LINES`, `WC_AES_BITSLICED`, or
+  a hardware AES core), because PSA expects AES to be constant time. Define
+  `WOLFPSA_AES_FAST` to waive it and take wolfCrypt's faster T-table core
+  instead. `zephyr/user_settings_example.h` selects `WOLFSSL_AES_TOUCH_LINES`:
+  it leaves `sizeof(Aes)` at 416 bytes, where `WC_AES_BITSLICED` would grow it
+  to 123,296 at the default `WC_AES_BS_WORD_SIZE` of 64.
+- `WC_ALLOW_ECC_ZERO_HASH` when `HAVE_ECC` is on, because
+  `psa_sign_hash()`/`psa_verify_hash()` must accept an all-zero digest.
+
+Beyond those, wolfPSA `select`s nothing crypto-config-wise, and the structural
+profile it needs (a Hash-DRBG, and single-threaded wolfCrypt on a no-threads
+kernel) already comes from the wolfSSL module's own Kconfig and
+`user_settings.h` defaults. The wolfSSL module stays
 entirely wolfPSA-unaware, and `WOLFSSL_PSA_ENGINE` is defined only for wolfPSA's
 own sources. `WOLFCRYPT_ONLY` is likewise untouched: crypto-only versus TLS
-coexistence is a user choice (see below), not a wolfPSA requirement. The one hard
-requirement, `HAVE_HASHDRBG`, is enforced by a build-time `#error` rather than by
-a `select`, so a config missing it fails loudly instead of being silently
-overridden.
+coexistence is a user choice (see below), not a wolfPSA requirement.
+`HAVE_HASHDRBG` is enforced the same way as the two requirements above.
 
 ### Coexisting with the wolfSSL TLS stack
 

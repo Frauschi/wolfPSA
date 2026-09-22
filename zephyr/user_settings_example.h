@@ -145,11 +145,16 @@ extern "C" {
 #define WOLFSSL_AESGCM_STREAM
 #define HAVE_AESCCM
 #define HAVE_AES_ECB
-/* Constant-time AES backend (F-13878): the default software AES uses
- * secret-indexed T-table loads, a cache-timing channel. WC_AES_BITSLICED is
- * the portable consttime core; psa_aead.c fails the build if neither it nor
- * WOLFSSL_AESNI is selected. */
-#define WC_AES_BITSLICED
+/* Constant-time AES. WOLFSSL_AES_TOUCH_LINES keeps the table access pattern
+ * secret-independent and leaves sizeof(Aes) at 416 bytes, which is what a
+ * Zephyr target can afford. WC_AES_BITSLICED is the stronger core but adds
+ * 15 * 16 * WC_AES_BS_WORD_SIZE bytes to every Aes and Cmac (123,296 bytes at
+ * the default word size of 64); pin WC_AES_BS_WORD_SIZE to 8 or 16 before
+ * selecting it here. Build with -DWOLFPSA_AES_FAST to waive the requirement
+ * and take wolfCrypt's faster T-table core. See src/psa_config.h. */
+#ifndef WOLFPSA_AES_FAST
+#define WOLFSSL_AES_TOUCH_LINES
+#endif
 #define WOLFSSL_AES_COUNTER
 #define WOLFSSL_AES_CFB
 #define WOLFSSL_AES_OFB

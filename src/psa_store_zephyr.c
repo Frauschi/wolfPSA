@@ -56,7 +56,7 @@
     #include <config.h>
 #endif
 
-#include <wolfssl/wolfcrypt/settings.h>
+#include "psa_config.h"
 
 #if defined(WOLFPSA_CUSTOM_STORE)
 

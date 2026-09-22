@@ -31,14 +31,15 @@
 #define SINGLE_THREADED
 #define WOLFSSL_PSA_ENGINE
 #define NO_DSA
-/* Constant-time AES backend (F-13878): the default software AES uses
- * secret-indexed T-table loads, a cache-timing channel. WC_AES_BITSLICED is
- * the portable consttime core; psa_aead.c fails the build if neither it nor
- * WOLFSSL_AESNI is selected. */
+/* Constant-time AES, required by src/psa_config.h unless WOLFPSA_AES_FAST is
+ * set. Selected here rather than in the BASELINE list so the aes-ecb lane can
+ * strip it together with HAVE_AES_ECB, which wolfCrypt requires alongside it. */
+#if !defined(WOLFPSA_AES_FAST) && !defined(WOLFPSA_NO_AES_BITSLICED)
 #define WC_AES_BITSLICED
+#endif
 /* psa_sign_hash()/psa_verify_hash() must accept an all-zero digest (PSA
  * treats the hash as opaque bytes); wolfCrypt rejects it by default, so opt
- * out. psa_ecc.c #errors when HAVE_ECC is on and this is undefined. */
+ * out. src/psa_config.h #errors when HAVE_ECC is on and this is undefined. */
 #define WC_ALLOW_ECC_ZERO_HASH
 
 #endif /* WOLFSSL_USER_SETTINGS_H */

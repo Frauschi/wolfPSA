@@ -99,6 +99,11 @@ SANITIZE_FLAGS :=
 ifeq ($(ASAN),1)
 SANITIZE_FLAGS = -fsanitize=address
 endif
+# AES_FAST=1 waives the PSA constant-time AES requirement and takes
+# wolfCrypt's faster T-table core instead. See src/psa_config.h.
+ifeq ($(AES_FAST),1)
+CPPFLAGS += -DWOLFPSA_AES_FAST
+endif
 CFLAGS += $(DEBUG_FLAGS) $(SANITIZE_FLAGS)
 LDFLAGS += $(SANITIZE_FLAGS)
 

@@ -25,7 +25,7 @@
 
 #include <limits.h>
 #include <stdint.h>
-#include <wolfssl/wolfcrypt/settings.h>
+#include "psa_config.h"
 
 #if defined(WOLFSSL_PSA_ENGINE)
 

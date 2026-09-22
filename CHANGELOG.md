@@ -75,6 +75,25 @@ wolfSSL master.
   guards the volatile-key list and id counter for concurrent PSA callers; a
   no-op in single-threaded builds.
 
+### Build configuration
+
+- AES backend policy (`src/psa_config.h`, included by every wolfPSA source):
+  PSA expects constant-time AES, so the build now fails unless it selects a
+  backend with no secret-indexed table load -- `WC_AES_BITSLICED`,
+  `WOLFSSL_AES_TOUCH_LINES`, or one of the hardware AES cores that compile no
+  software tables. Define `WOLFPSA_AES_FAST` (or build with `AES_FAST=1`) to
+  waive the requirement and take wolfCrypt's faster T-table core instead.
+  `WOLFSSL_AESNI` is not accepted on its own: wolfCrypt falls back to the
+  T-table `AesSetKey_C()` when AES-NI is unavailable at runtime.
+  `WC_AES_BITSLICED` requires `HAVE_AES_ECB` and grows `sizeof(Aes)` by
+  `15 * 16 * WC_AES_BS_WORD_SIZE` bytes (123,296 at the default word size of
+  64), so `zephyr/user_settings_example.h` selects `WOLFSSL_AES_TOUCH_LINES`,
+  which leaves `sizeof(Aes)` at 416.
+- The one-shot AEAD `Aes` and the PBKDF2/SP800-108 `Cmac` objects moved from
+  the stack to `XMALLOC`, so a frame no longer grows with the AES backend.
+- `WC_ALLOW_ECC_ZERO_HASH` is required for any build with `HAVE_ECC`, checked
+  from the same shared header rather than from `psa_ecc.c` alone.
+
 ### Zephyr module
 
 - Added wolfPSA as a Zephyr **PSA Crypto provider**: selected via
