@@ -301,6 +301,60 @@ static psa_key_bits_t wolfpsa_ecc_bits_from_length(psa_ecc_family_t family,
     }
 }
 
+/* The coordinate (public) or scalar (private) size in bytes for a curve, or 0
+ * when wolfPSA has no entry for this family/size pair. The inverse of
+ * wolfpsa_ecc_bits_from_length(): import needs it to tell "this curve is not
+ * supported" (PSA_ERROR_NOT_SUPPORTED) from "the data does not match the
+ * curve you declared" (PSA_ERROR_INVALID_ARGUMENT). */
+static size_t wolfpsa_ecc_length_from_bits(psa_ecc_family_t family,
+                                           psa_key_bits_t bits)
+{
+    switch (family) {
+    case PSA_ECC_FAMILY_SECP_R1:
+        switch (bits) {
+        case 192: return 24;
+        case 224: return 28;
+        case 256: return 32;
+        case 384: return 48;
+        case 521: return 66;
+        default: return 0;
+        }
+
+    case PSA_ECC_FAMILY_SECP_K1:
+        switch (bits) {
+        case 192: return 24;
+        case 224: return 28;
+        case 256: return 32;
+        default: return 0;
+        }
+
+    case PSA_ECC_FAMILY_BRAINPOOL_P_R1:
+        switch (bits) {
+        case 256: return 32;
+        case 384: return 48;
+        case 512: return 64;
+        default: return 0;
+        }
+
+    case PSA_ECC_FAMILY_MONTGOMERY:
+        switch (bits) {
+        case 255: return 32;
+        case 448: return 56;
+        default: return 0;
+        }
+
+    case PSA_ECC_FAMILY_TWISTED_EDWARDS:
+        switch (bits) {
+        case 255: return 32;
+        case 448: return 57;
+        default: return 0;
+        }
+
+    default:
+        return 0;
+    }
+}
+
 static int wolfpsa_usage_flags_valid(psa_key_usage_t usage)
 {
     psa_key_usage_t mask = PSA_KEY_USAGE_EXPORT |
@@ -1299,7 +1353,7 @@ psa_status_t psa_import_key(
          * different curve than the one in the data. */
         psa_ecc_family_t family = PSA_KEY_TYPE_ECC_GET_FAMILY(attr.type);
         size_t coord_len;
-        psa_key_bits_t expected_bits;
+        size_t expected_len;
 
         if (PSA_KEY_TYPE_IS_ECC_PUBLIC_KEY(attr.type)) {
             if (family == PSA_ECC_FAMILY_MONTGOMERY ||
@@ -1331,9 +1385,18 @@ psa_status_t psa_import_key(
             /* Key pair: the private key is coord_len bytes. */
             coord_len = data_length;
         }
-        expected_bits = wolfpsa_ecc_bits_from_length(family, coord_len);
-        if (expected_bits == 0 ||
-            (attr.bits != 0 && attr.bits != expected_bits)) {
+        /* attr.bits is non-zero by here: it was either supplied or inferred
+         * above. A family/size pair with no table entry is a self-consistent
+         * request for a curve wolfPSA does not implement, which PSA reports
+         * as NOT_SUPPORTED; a length that contradicts a curve we do
+         * implement is INVALID_ARGUMENT. */
+        expected_len = wolfpsa_ecc_length_from_bits(family, attr.bits);
+        if (expected_len == 0) {
+            wolfpsa_debug_import_reason("unsupported ECC curve", &attr,
+                                        data_length);
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+        if (coord_len != expected_len) {
             wolfpsa_debug_import_reason("ECC bits/curve mismatch", &attr,
                                         data_length);
             return PSA_ERROR_INVALID_ARGUMENT;
