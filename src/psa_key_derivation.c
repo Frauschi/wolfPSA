@@ -1188,12 +1188,19 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
         uint32_t i;
         uint32_t j;
         int ret;
-        Cmac cmac;
+        Cmac *cmac;
         word32 out_sz = WC_AES_BLOCK_SIZE;
         psa_status_t status = PSA_SUCCESS;
 
         if (wolfpsa_check_word32_length(ctx->password_length) != PSA_SUCCESS) {
             return PSA_ERROR_INVALID_ARGUMENT;
+        }
+
+        /* sizeof(Cmac) embeds an Aes, which WC_AES_BITSLICED grows to over
+         * 123 KB at the default word size. Keep it off the stack. */
+        cmac = (Cmac *)XMALLOC(sizeof(Cmac), NULL, DYNAMIC_TYPE_CMAC);
+        if (cmac == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
 
         /* RFC 4615 step 1: a key that is exactly 128 bits is used
@@ -1203,22 +1210,22 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             XMEMCPY(prf_key, password, WC_AES_BLOCK_SIZE);
         } else {
             XMEMSET(zero_key, 0, sizeof(zero_key));
-            ret = wc_InitCmac_ex(&cmac, zero_key, (word32)sizeof(zero_key),
+            ret = wc_InitCmac_ex(cmac, zero_key, (word32)sizeof(zero_key),
                                  WC_CMAC_AES, NULL, NULL,
                                  wolfPSA_GetDefaultDevID());
             if (ret != 0) {
-                wc_CmacFree(&cmac);
+                wc_CmacFree(cmac);
                 status = wc_error_to_psa_status(ret);
                 goto cleanup;
             }
-            ret = wc_CmacUpdate(&cmac, password, (word32)ctx->password_length);
+            ret = wc_CmacUpdate(cmac, password, (word32)ctx->password_length);
             if (ret != 0) {
-                wc_CmacFree(&cmac);
+                wc_CmacFree(cmac);
                 status = wc_error_to_psa_status(ret);
                 goto cleanup;
             }
-            ret = wc_CmacFinal(&cmac, prf_key, &out_sz);
-            wc_CmacFree(&cmac);
+            ret = wc_CmacFinal(cmac, prf_key, &out_sz);
+            wc_CmacFree(cmac);
             if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
                 status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
                          wc_error_to_psa_status(ret);
@@ -1246,20 +1253,20 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
             block_input[ctx->salt_length + 2] = (uint8_t)((i >> 8) & 0xff);
             block_input[ctx->salt_length + 3] = (uint8_t)(i & 0xff);
 
-            ret = wc_InitCmac_ex(&cmac, prf_key, (word32)sizeof(prf_key),
+            ret = wc_InitCmac_ex(cmac, prf_key, (word32)sizeof(prf_key),
                                  WC_CMAC_AES, NULL, NULL,
                                  wolfPSA_GetDefaultDevID());
             if (ret != 0) {
-                wc_CmacFree(&cmac);
+                wc_CmacFree(cmac);
                 status = wc_error_to_psa_status(ret);
                 goto cleanup;
             }
             out_sz = WC_AES_BLOCK_SIZE;
-            ret = wc_CmacUpdate(&cmac, block_input, (word32)block_input_len);
+            ret = wc_CmacUpdate(cmac, block_input, (word32)block_input_len);
             if (ret == 0) {
-                ret = wc_CmacFinal(&cmac, u_block, &out_sz);
+                ret = wc_CmacFinal(cmac, u_block, &out_sz);
             }
-            wc_CmacFree(&cmac);
+            wc_CmacFree(cmac);
             if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
                 status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
                          wc_error_to_psa_status(ret);
@@ -1268,20 +1275,20 @@ static psa_status_t wolfpsa_kdf_pbkdf2(wolfpsa_kdf_ctx_t *ctx,
 
             XMEMCPY(t_block, u_block, WC_AES_BLOCK_SIZE);
             for (j = 1; j < ctx->cost; j++) {
-                ret = wc_InitCmac_ex(&cmac, prf_key, (word32)sizeof(prf_key),
+                ret = wc_InitCmac_ex(cmac, prf_key, (word32)sizeof(prf_key),
                                      WC_CMAC_AES, NULL, NULL,
                                      wolfPSA_GetDefaultDevID());
                 if (ret != 0) {
-                    wc_CmacFree(&cmac);
+                    wc_CmacFree(cmac);
                     status = wc_error_to_psa_status(ret);
                     goto cleanup;
                 }
                 out_sz = WC_AES_BLOCK_SIZE;
-                ret = wc_CmacUpdate(&cmac, u_block, WC_AES_BLOCK_SIZE);
+                ret = wc_CmacUpdate(cmac, u_block, WC_AES_BLOCK_SIZE);
                 if (ret == 0) {
-                    ret = wc_CmacFinal(&cmac, u_block, &out_sz);
+                    ret = wc_CmacFinal(cmac, u_block, &out_sz);
                 }
-                wc_CmacFree(&cmac);
+                wc_CmacFree(cmac);
                 if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
                     status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
                              wc_error_to_psa_status(ret);
@@ -1317,6 +1324,8 @@ cleanup:
         wc_ForceZero(t_block, sizeof(t_block));
         wc_ForceZero(u_block, sizeof(u_block));
         wc_ForceZero(prf_key, sizeof(prf_key));
+        wc_ForceZero(cmac, sizeof(*cmac));
+        XFREE(cmac, NULL, DYNAMIC_TYPE_CMAC);
         XFREE(block_input, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         return status;
 #else
@@ -1519,7 +1528,7 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
     uint8_t L_buf[4];
     word32 out_sz;
     psa_status_t status = PSA_SUCCESS;
-    Cmac cmac;
+    Cmac *cmac;
     int ret;
 
     /* CMAC key must be a valid AES key length */
@@ -1539,6 +1548,15 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    /* sizeof(Cmac) embeds an Aes, which WC_AES_BITSLICED grows to over
+     * 123 KB at the default word size. Keep it off the stack. Allocated after
+     * the argument checks above, which return without reaching the cleanup
+     * label. */
+    cmac = (Cmac *)XMALLOC(sizeof(Cmac), NULL, DYNAMIC_TYPE_CMAC);
+    if (cmac == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
     {
         uint64_t L_bits = (uint64_t)ctx->sp800_108_L_bytes * 8u;
         L_bits_lo = (uint32_t)(L_bits & 0xffffffffu);
@@ -1549,31 +1567,31 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
     L_buf[3] = (uint8_t)( L_bits_lo        & 0xff);
 
     /* --- compute K_0 = CMAC(K_IN, Label || 0x00 || Context || [L]_4) --- */
-    ret = wc_InitCmac_ex(&cmac, ctx->secret, (word32)ctx->secret_length,
+    ret = wc_InitCmac_ex(cmac, ctx->secret, (word32)ctx->secret_length,
                          WC_CMAC_AES, NULL, NULL,
                          wolfPSA_GetDefaultDevID());
     if (ret != 0) {
-        wc_CmacFree(&cmac);
+        wc_CmacFree(cmac);
         status = wc_error_to_psa_status(ret);
         goto cmac_cleanup;
     }
     if (ctx->label_length > 0) {
-        ret = wc_CmacUpdate(&cmac, ctx->label, (word32)ctx->label_length);
+        ret = wc_CmacUpdate(cmac, ctx->label, (word32)ctx->label_length);
     }
     if (ret == 0) {
-        ret = wc_CmacUpdate(&cmac, &sep, 1u);
+        ret = wc_CmacUpdate(cmac, &sep, 1u);
     }
     if (ret == 0 && ctx->context_length > 0) {
-        ret = wc_CmacUpdate(&cmac, ctx->context, (word32)ctx->context_length);
+        ret = wc_CmacUpdate(cmac, ctx->context, (word32)ctx->context_length);
     }
     if (ret == 0) {
-        ret = wc_CmacUpdate(&cmac, L_buf, sizeof(L_buf));
+        ret = wc_CmacUpdate(cmac, L_buf, sizeof(L_buf));
     }
     out_sz = WC_AES_BLOCK_SIZE;
     if (ret == 0) {
-        ret = wc_CmacFinal(&cmac, K0, &out_sz);
+        ret = wc_CmacFinal(cmac, K0, &out_sz);
     }
-    wc_CmacFree(&cmac);
+    wc_CmacFree(cmac);
     if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
         status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
                  wc_error_to_psa_status(ret);
@@ -1589,39 +1607,39 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
         counter_buf[2] = (uint8_t)((counter >>  8) & 0xff);
         counter_buf[3] = (uint8_t)( counter        & 0xff);
 
-        ret = wc_InitCmac_ex(&cmac, ctx->secret, (word32)ctx->secret_length,
+        ret = wc_InitCmac_ex(cmac, ctx->secret, (word32)ctx->secret_length,
                              WC_CMAC_AES, NULL, NULL,
                              wolfPSA_GetDefaultDevID());
         if (ret != 0) {
-            wc_CmacFree(&cmac);
+            wc_CmacFree(cmac);
             status = wc_error_to_psa_status(ret);
             goto cmac_cleanup;
         }
 
         /* [i]_4 */
-        ret = wc_CmacUpdate(&cmac, counter_buf, sizeof(counter_buf));
+        ret = wc_CmacUpdate(cmac, counter_buf, sizeof(counter_buf));
         if (ret == 0 && ctx->label_length > 0) {
-            ret = wc_CmacUpdate(&cmac, ctx->label, (word32)ctx->label_length);
+            ret = wc_CmacUpdate(cmac, ctx->label, (word32)ctx->label_length);
         }
         if (ret == 0) {
-            ret = wc_CmacUpdate(&cmac, &sep, 1u);
+            ret = wc_CmacUpdate(cmac, &sep, 1u);
         }
         if (ret == 0 && ctx->context_length > 0) {
-            ret = wc_CmacUpdate(&cmac, ctx->context,
+            ret = wc_CmacUpdate(cmac, ctx->context,
                                 (word32)ctx->context_length);
         }
         if (ret == 0) {
-            ret = wc_CmacUpdate(&cmac, L_buf, sizeof(L_buf));
+            ret = wc_CmacUpdate(cmac, L_buf, sizeof(L_buf));
         }
         /* K_0 appended (CMAC robustness mitigation) */
         if (ret == 0) {
-            ret = wc_CmacUpdate(&cmac, K0, WC_AES_BLOCK_SIZE);
+            ret = wc_CmacUpdate(cmac, K0, WC_AES_BLOCK_SIZE);
         }
         out_sz = WC_AES_BLOCK_SIZE;
         if (ret == 0) {
-            ret = wc_CmacFinal(&cmac, block, &out_sz);
+            ret = wc_CmacFinal(cmac, block, &out_sz);
         }
-        wc_CmacFree(&cmac);
+        wc_CmacFree(cmac);
         if (ret != 0 || out_sz != WC_AES_BLOCK_SIZE) {
             status = ret == 0 ? PSA_ERROR_NOT_SUPPORTED :
                      wc_error_to_psa_status(ret);
@@ -1639,6 +1657,8 @@ static psa_status_t wolfpsa_kdf_sp800_108_cmac(wolfpsa_kdf_ctx_t *ctx,
 cmac_cleanup:
     wc_ForceZero(K0, sizeof(K0));
     wc_ForceZero(block, sizeof(block));
+    wc_ForceZero(cmac, sizeof(*cmac));
+    XFREE(cmac, NULL, DYNAMIC_TYPE_CMAC);
     return status;
 #endif /* WOLFSSL_CMAC && !NO_AES */
 }

@@ -84,6 +84,24 @@ static psa_status_t wolfpsa_aead_append(uint8_t **buf, size_t *len,
     return PSA_SUCCESS;
 }
 
+#if defined(HAVE_AESGCM) || defined(HAVE_AESCCM)
+/* sizeof(Aes) tracks the AES backend: WC_AES_BITSLICED adds
+ * 15 * 16 * WC_AES_BS_WORD_SIZE bytes to it, 123,296 bytes at the default
+ * word size of 64. Keep the one-shot AEAD contexts off the stack so a frame
+ * here does not grow with a config knob. */
+static Aes* wolfpsa_aes_new(void)
+{
+    return (Aes *)XMALLOC(sizeof(Aes), NULL, DYNAMIC_TYPE_AES);
+}
+
+static void wolfpsa_aes_delete(Aes *aes)
+{
+    wc_AesFree(aes);
+    wc_ForceZero(aes, sizeof(*aes));
+    XFREE(aes, NULL, DYNAMIC_TYPE_AES);
+}
+#endif
+
 static const uint8_t* wolfpsa_aead_nonnull_data(const uint8_t *data,
                                                 size_t data_length)
 {
@@ -1104,20 +1122,22 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
-        Aes aes;
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+        Aes *aes = wolfpsa_aes_new();
+        if (aes == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
-            ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+            ret = wc_AesGcmSetKey(aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmEncrypt(&aes, out, input,
+            ret = wc_AesGcmEncrypt(aes, out, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
                                    aad, (word32)ctx->aad_length);
         }
-        wc_AesFree(&aes);
-        wc_ForceZero(&aes, sizeof(aes));
+        wolfpsa_aes_delete(aes);
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -1127,23 +1147,26 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
 #ifdef HAVE_AESCCM
-        Aes aes;
+        Aes *aes;
         if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+        aes = wolfpsa_aes_new();
+        if (aes == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
-            ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+            ret = wc_AesCcmSetKey(aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmEncrypt(&aes, out, input,
+            ret = wc_AesCcmEncrypt(aes, out, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)ctx->tag_length,
                                    aad, (word32)ctx->aad_length);
         }
-        wc_AesFree(&aes);
-        wc_ForceZero(&aes, sizeof(aes));
+        wolfpsa_aes_delete(aes);
         if (ret != 0) {
             return wc_error_to_psa_status(ret);
         }
@@ -1276,20 +1299,22 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
 
     if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_GCM)) {
 #ifdef HAVE_AESGCM
-        Aes aes;
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+        Aes *aes = wolfpsa_aes_new();
+        if (aes == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
-            ret = wc_AesGcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+            ret = wc_AesGcmSetKey(aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesGcmDecrypt(&aes, out, input,
+            ret = wc_AesGcmDecrypt(aes, out, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
                                    aad, (word32)ctx->aad_length);
         }
-        wc_AesFree(&aes);
-        wc_ForceZero(&aes, sizeof(aes));
+        wolfpsa_aes_delete(aes);
         if (ret == AES_GCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
@@ -1302,23 +1327,26 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
 #ifdef HAVE_AESCCM
-        Aes aes;
+        Aes *aes;
         if (wc_AesCcmCheckTagSize((int)tag_length) != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
-        ret = wc_AesInit(&aes, NULL, wolfPSA_GetDefaultDevID());
+        aes = wolfpsa_aes_new();
+        if (aes == NULL) {
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+        }
+        ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
         if (ret == 0) {
-            ret = wc_AesCcmSetKey(&aes, ctx->key, (word32)ctx->key_length);
+            ret = wc_AesCcmSetKey(aes, ctx->key, (word32)ctx->key_length);
         }
         if (ret == 0) {
-            ret = wc_AesCcmDecrypt(&aes, out, input,
+            ret = wc_AesCcmDecrypt(aes, out, input,
                                    (word32)ctx->input_length,
                                    ctx->nonce, (word32)ctx->nonce_length,
                                    tag, (word32)tag_length,
                                    aad, (word32)ctx->aad_length);
         }
-        wc_AesFree(&aes);
-        wc_ForceZero(&aes, sizeof(aes));
+        wolfpsa_aes_delete(aes);
         if (ret == AES_CCM_AUTH_E || ret == MAC_CMP_FAILED_E) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }
