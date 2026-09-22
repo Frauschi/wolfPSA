@@ -92,6 +92,8 @@ static int wolfpsa_aes_new(Aes **out)
     Aes *aes;
     int ret;
 
+    *out = NULL;
+
     aes = (Aes *)XMALLOC(sizeof(Aes), NULL, DYNAMIC_TYPE_AES);
     if (aes == NULL) {
         return MEMORY_E;
@@ -101,6 +103,7 @@ static int wolfpsa_aes_new(Aes **out)
      * reach it. */
     ret = wc_AesInit(aes, NULL, wolfPSA_GetDefaultDevID());
     if (ret != 0) {
+        wc_ForceZero(aes, sizeof(*aes));
         XFREE(aes, NULL, DYNAMIC_TYPE_AES);
         return ret;
     }
@@ -1160,7 +1163,7 @@ static psa_status_t wolfpsa_aead_encrypt_final(wolfpsa_aead_ctx_t *ctx,
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
 #ifdef HAVE_AESCCM
-        Aes *aes;
+        Aes *aes = NULL;
         if (wc_AesCcmCheckTagSize((int)ctx->tag_length) != 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
@@ -1335,7 +1338,7 @@ static psa_status_t wolfpsa_aead_decrypt_final(wolfpsa_aead_ctx_t *ctx,
     }
     else if (PSA_ALG_AEAD_EQUAL(ctx->alg, PSA_ALG_CCM)) {
 #ifdef HAVE_AESCCM
-        Aes *aes;
+        Aes *aes = NULL;
         if (wc_AesCcmCheckTagSize((int)tag_length) != 0) {
             return PSA_ERROR_INVALID_SIGNATURE;
         }

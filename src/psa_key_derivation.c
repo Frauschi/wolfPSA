@@ -2092,7 +2092,7 @@ static psa_status_t wolfpsa_kdf_verify_bytes(psa_key_derivation_operation_t *
         return PSA_ERROR_INSUFFICIENT_MEMORY;
     }
     status = psa_key_derivation_output_bytes(operation, buffer,
-                                            expected_length);
+                                             expected_length);
     if (status != PSA_SUCCESS) {
         wc_ForceZero(buffer, expected_length);
         XFREE(buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);

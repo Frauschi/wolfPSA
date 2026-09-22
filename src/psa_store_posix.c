@@ -19,6 +19,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
+/* glibc exposes O_PATH, which the ancestor walk needs to traverse a directory
+ * it may not read, only under _GNU_SOURCE. Must precede every include. */
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
+
 #ifdef HAVE_CONFIG_H
     #include <config.h>
 #endif
@@ -47,8 +53,10 @@
 
 #if defined(_WIN32) || defined(_MSC_VER)
     #define WOLFPSA_MKDIR(path) _mkdir(path)
+    #define WOLFPSA_RMDIR(path) _rmdir(path)
 #else
     #define WOLFPSA_MKDIR(path) mkdir((path), 0700)
+    #define WOLFPSA_RMDIR(path) rmdir(path)
 #endif
 
 typedef struct WOLFPSA_FileStoreCtx {
@@ -94,32 +102,62 @@ static int wolfPSA_StoreCommitTemp(WOLFPSA_FileStoreCtx* ctx)
     return ret;
 }
 
-static int wolfPSA_StoreValidateDir(const char* dirPath)
+#if !defined(_WIN32) && !defined(_MSC_VER)
+/* Traversing a directory needs search permission, not read: a 0111 ancestor
+ * is a legitimate hardening choice that O_RDONLY would refuse. */
+#if defined(O_PATH)
+    #define WOLFPSA_O_DIRWALK (O_PATH | O_DIRECTORY | O_CLOEXEC)
+#elif defined(O_SEARCH)
+    #define WOLFPSA_O_DIRWALK (O_SEARCH | O_DIRECTORY | O_CLOEXEC)
+#else
+    /* Last resort: this one does need read permission, so a search-only
+     * directory in the path is refused. */
+    #define WOLFPSA_O_DIRWALK (O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+#endif
+
+/* A single path component, so the walk never needs the whole path in memory. */
+#define WOLFPSA_STORE_MAX_COMPONENT 256
+
+/* Deeper than any real store path; stops a pathological filesystem from
+ * spinning the parent walk. */
+#define WOLFPSA_STORE_MAX_DEPTH 256
+#endif
+
+/* A path is either fine, refused by the privacy policy, or could not be
+ * checked because a syscall failed. The caller fails closed on both of the
+ * latter, but only a refusal justifies destroying anything. */
+enum {
+    WOLFPSA_STORE_PATH_OK = 0,
+    WOLFPSA_STORE_PATH_REJECTED,
+    WOLFPSA_STORE_PATH_UNKNOWN
+};
+
+static int wolfPSA_StoreCheckLeaf(const char* dirPath)
 {
 #if defined(_WIN32) || defined(_MSC_VER)
     DWORD attrs;
 
     attrs = GetFileAttributesA(dirPath);
     if (attrs == INVALID_FILE_ATTRIBUTES) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_UNKNOWN;
     }
     if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
         (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
-    return 0;
+    return WOLFPSA_STORE_PATH_OK;
 #else
     struct stat st;
 
     if (lstat(dirPath, &st) != 0) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_UNKNOWN;
     }
     if (!S_ISDIR(st.st_mode)) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
 #ifdef S_ISLNK
     if (S_ISLNK(st.st_mode)) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
 #endif
     /* A directory writable by group or other, or owned by neither this euid
@@ -127,27 +165,26 @@ static int wolfPSA_StoreValidateDir(const char* dirPath)
      * Root ownership is accepted, as OpenSSH's safe_path() does. */
     if ((st.st_uid != geteuid() && st.st_uid != 0) ||
         (st.st_mode & 0022) != 0) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
-    return 0;
+    return WOLFPSA_STORE_PATH_OK;
 #endif
 }
 
 #if !defined(_WIN32) && !defined(_MSC_VER)
-/* A writable ancestor lets a peer rename the whole store aside, so every
- * component is checked, not just the leaf. */
-static int wolfPSA_StoreValidateAncestor(const char* dirPath)
+static int wolfPSA_StoreCheckDirFd(int fd)
 {
     struct stat st;
     int sticky;
 
-    /* stat(), not lstat(): a symlinked ancestor such as /tmp is fine as long
-     * as what it resolves to passes these same checks. */
-    if (stat(dirPath, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        return WOLFPSA_STORE_IO_ERROR;
+    if (fstat(fd, &st) != 0) {
+        return WOLFPSA_STORE_PATH_UNKNOWN;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
     if (st.st_uid != geteuid() && st.st_uid != 0) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
 #ifdef S_ISVTX
     sticky = (st.st_mode & S_ISVTX) != 0;
@@ -157,57 +194,142 @@ static int wolfPSA_StoreValidateAncestor(const char* dirPath)
     /* Unlike the store directory itself, a shared parent such as /tmp is
      * acceptable when sticky: only the owner can rename an entry out of it. */
     if ((st.st_mode & 0022) != 0 && !sticky) {
-        return WOLFPSA_STORE_IO_ERROR;
+        return WOLFPSA_STORE_PATH_REJECTED;
     }
-    return 0;
+    return WOLFPSA_STORE_PATH_OK;
 }
 
-static int wolfPSA_StoreValidateAncestors(const char* dirPath)
+/* Walk the path as written, so that every directory holding a component is
+ * trusted: whoever can write one can swap that component for a symlink of
+ * their own. On success *leafFd is the store directory, left open for the
+ * parent walk so the path is not resolved a second time. */
+static int wolfPSA_StoreCheckLexical(const char* dirPath, int* leafFd)
 {
-    char buf[WOLFPSA_STORE_MAX_PATH];
+    char comp[WOLFPSA_STORE_MAX_COMPONENT];
+    const char* p = dirPath;
+    const char* slash;
     size_t len;
-    char* slash;
+    int fd;
+    int next;
+    int ret;
+    int depth;
 
-    len = XSTRLEN(dirPath);
-    if (len >= sizeof(buf)) {
-        return WOLFPSA_STORE_IO_ERROR;
+    fd = open((dirPath[0] == '/') ? "/" : ".", WOLFPSA_O_DIRWALK);
+    if (fd < 0) {
+        return WOLFPSA_STORE_PATH_UNKNOWN;
     }
-    XMEMCPY(buf, dirPath, len + 1);
 
-    for (;;) {
-        slash = strrchr(buf, '/');
-        if (slash == NULL) {
-            /* A relative path bottoms out at the working directory, which the
-             * caller already trusts. */
-            return 0;
+    for (depth = 0; depth < WOLFPSA_STORE_MAX_DEPTH; depth++) {
+        while (*p == '/') {
+            p++;
         }
-        if (slash == buf) {
-            buf[1] = '\0';
-        }
-        else {
-            *slash = '\0';
+        if (*p == '\0') {
+            *leafFd = fd;
+            return WOLFPSA_STORE_PATH_OK;
         }
 
-        if (wolfPSA_StoreValidateAncestor(buf) != 0) {
-            return WOLFPSA_STORE_IO_ERROR;
+        slash = strchr(p, '/');
+        len = (slash != NULL) ? (size_t)(slash - p) : XSTRLEN(p);
+        if (len >= sizeof(comp)) {
+            close(fd);
+            return WOLFPSA_STORE_PATH_UNKNOWN;
         }
-        if (buf[0] == '/' && buf[1] == '\0') {
-            return 0;
+        XMEMCPY(comp, p, len);
+        comp[len] = '\0';
+
+        /* "." and ".." are resolved by the kernel and cannot be swapped, so
+         * the directory holding them need not be trusted. */
+        if (XSTRNCMP(comp, ".", sizeof(comp)) != 0 &&
+            XSTRNCMP(comp, "..", sizeof(comp)) != 0) {
+            ret = wolfPSA_StoreCheckDirFd(fd);
+            if (ret != WOLFPSA_STORE_PATH_OK) {
+                close(fd);
+                return ret;
+            }
         }
+
+        next = openat(fd, comp, WOLFPSA_O_DIRWALK);
+        close(fd);
+        if (next < 0) {
+            return WOLFPSA_STORE_PATH_UNKNOWN;
+        }
+        fd = next;
+        p += len;
     }
+
+    close(fd);
+    return WOLFPSA_STORE_PATH_UNKNOWN;
+}
+
+/* Whoever can write a real ancestor can rename the store aside, and those
+ * ancestors need not appear in the path when a component is a symlink. Takes
+ * ownership of fd. */
+static int wolfPSA_StoreCheckAncestors(int fd)
+{
+    struct stat st;
+    struct stat parent_st;
+    int parent;
+    int ret;
+    int depth;
+
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return WOLFPSA_STORE_PATH_UNKNOWN;
+    }
+
+    for (depth = 0; depth < WOLFPSA_STORE_MAX_DEPTH; depth++) {
+        parent = openat(fd, "..", WOLFPSA_O_DIRWALK);
+        close(fd);
+        if (parent < 0) {
+            return WOLFPSA_STORE_PATH_UNKNOWN;
+        }
+        if (fstat(parent, &parent_st) != 0) {
+            close(parent);
+            return WOLFPSA_STORE_PATH_UNKNOWN;
+        }
+        /* The root is its own parent, which is where the walk stops. */
+        if (parent_st.st_ino == st.st_ino && parent_st.st_dev == st.st_dev) {
+            close(parent);
+            return WOLFPSA_STORE_PATH_OK;
+        }
+
+        ret = wolfPSA_StoreCheckDirFd(parent);
+        if (ret != WOLFPSA_STORE_PATH_OK) {
+            close(parent);
+            return ret;
+        }
+
+        st = parent_st;
+        fd = parent;
+    }
+
+    close(fd);
+    return WOLFPSA_STORE_PATH_UNKNOWN;
 }
 #endif
+
+static int wolfPSA_StoreCheckPath(const char* dirPath)
+{
+    int ret = wolfPSA_StoreCheckLeaf(dirPath);
+#if !defined(_WIN32) && !defined(_MSC_VER)
+    int leafFd = -1;
+
+    if (ret != WOLFPSA_STORE_PATH_OK) {
+        return ret;
+    }
+    ret = wolfPSA_StoreCheckLexical(dirPath, &leafFd);
+    if (ret != WOLFPSA_STORE_PATH_OK) {
+        return ret;
+    }
+    ret = wolfPSA_StoreCheckAncestors(leafFd);
+#endif
+    return ret;
+}
 
 static int wolfPSA_StoreValidatePath(const char* dirPath)
 {
-    int ret = wolfPSA_StoreValidateDir(dirPath);
-
-#if !defined(_WIN32) && !defined(_MSC_VER)
-    if (ret == 0) {
-        ret = wolfPSA_StoreValidateAncestors(dirPath);
-    }
-#endif
-    return ret;
+    return (wolfPSA_StoreCheckPath(dirPath) == WOLFPSA_STORE_PATH_OK)
+           ? 0 : WOLFPSA_STORE_IO_ERROR;
 }
 
 static int wolfPSA_StoreEnsureDir(const char* dirPath)
@@ -224,7 +346,13 @@ static int wolfPSA_StoreEnsureDir(const char* dirPath)
     }
 
     if (WOLFPSA_MKDIR(dirPath) == 0) {
-        return wolfPSA_StoreValidatePath(dirPath);
+        ret = wolfPSA_StoreCheckPath(dirPath);
+        if (ret == WOLFPSA_STORE_PATH_REJECTED) {
+            /* Created here, refused here: do not leave it behind. A check
+             * that could not run is not a refusal, so the directory stays. */
+            (void)WOLFPSA_RMDIR(dirPath);
+        }
+        return (ret == WOLFPSA_STORE_PATH_OK) ? 0 : WOLFPSA_STORE_IO_ERROR;
     }
 
     if (errno == EEXIST) {
