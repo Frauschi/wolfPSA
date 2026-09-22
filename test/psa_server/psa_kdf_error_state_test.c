@@ -243,6 +243,7 @@ static void test_set_capacity_reject_does_not_poison(void)
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
     uint8_t out[16];
     size_t capacity = 0;
+    size_t before = 0;
     int ret = 0;
 
     if (setup_expand(&op) != 0) {
@@ -260,12 +261,21 @@ static void test_set_capacity_reject_does_not_poison(void)
     }
 
     /* Larger than the current capacity: rejected, operation untouched. */
+    ret |= expect_status("capacity before reject",
+                         psa_key_derivation_get_capacity(&op, &before),
+                         PSA_SUCCESS);
     ret |= expect_status("set_capacity reject",
                          psa_key_derivation_set_capacity(&op, (size_t)-1),
                          PSA_ERROR_INVALID_ARGUMENT);
     ret |= expect_status("capacity readable after reject",
                          psa_key_derivation_get_capacity(&op, &capacity),
                          PSA_SUCCESS);
+    if (capacity != before) {
+        printf("FAIL set_capacity reject changed capacity: %u -> %u\n",
+               (unsigned)before, (unsigned)capacity);
+        failures++;
+        ret = 1;
+    }
     ret |= expect_status("output after rejected set_capacity",
                          psa_key_derivation_output_bytes(&op, out, sizeof(out)),
                          PSA_SUCCESS);

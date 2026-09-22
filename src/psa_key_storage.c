@@ -1023,7 +1023,7 @@ psa_status_t wolfpsa_get_key_data(psa_key_id_t key_id,
         return status;
     }
     status = wolfpsa_volatile_get(key_id, attributes, key_data,
-                                 key_data_length);
+                                  key_data_length);
     if (status == PSA_SUCCESS) {
         return PSA_SUCCESS;
     }
