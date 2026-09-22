@@ -307,7 +307,8 @@ int wolfPSA_Store_Remove(int type, unsigned long id1, unsigned long id2)
     ret = wolfPSA_Store_Name(type, id1, id2, name, sizeof(name));
     if (ret > 0 && ret < (int)sizeof(name)) {
         ret = 0;
-    } else if (ret != 0) {
+    }
+    else if (ret != 0) {
         ret = -1;
     }
 
@@ -368,7 +369,8 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
     ret = wolfPSA_Store_Name(type, id1, id2, name, sizeof(name));
     if (ret > 0 && ret < (int)sizeof(name)) {
         ret = 0;
-    } else if (ret != 0) {
+    }
+    else if (ret != 0) {
         ret = -1;
     }
 
@@ -391,7 +393,8 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
             size_t finalLen = XSTRLEN(name);
             if (finalLen >= sizeof(ctx->final_name)) {
                 ret = WOLFPSA_STORE_IO_ERROR;
-            } else {
+            }
+            else {
                 XMEMCPY(ctx->final_name, name, finalLen + 1);
             }
         }
@@ -401,10 +404,12 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
             if (ctx->file == NULL) {
                 if (errno == ENOENT) {
                     ret = WOLFPSA_STORE_NOT_AVAILABLE;
-                } else {
+                }
+                else {
                     ret = WOLFPSA_STORE_IO_ERROR;
                 }
-            } else {
+            }
+            else {
                 /* A record is only worth reading back out of a private
                  * directory: a peer that can write the directory can swap the
                  * record for one of its own, which is the substitution the
@@ -416,7 +421,8 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
                     ret = wolfPSA_StoreValidateDir(dirPath);
                 }
             }
-        } else if (ret == 0) {
+        }
+        else if (ret == 0) {
             ret = wolfPSA_StoreDirOfName(name, dirPath, sizeof(dirPath));
             if (ret == 0) {
                 ret = wolfPSA_StoreEnsureDir(dirPath);
@@ -433,7 +439,8 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
 
     if (ret == 0) {
         *store = ctx;
-    } else if (ctx != NULL) {
+    }
+    else if (ctx != NULL) {
         if (ctx->file != NULL && ctx->file != XBADFILE) {
             XFCLOSE(ctx->file);
         }
@@ -479,7 +486,8 @@ int wolfPSA_Store_Close(void* store)
                 wolfPSA_StoreAbortTemp(ctx);
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
-        } else if (ctx->has_temp) {
+        }
+        else if (ctx->has_temp) {
             /* A write handle whose write already failed has nothing
              * committed, and psa_store.h makes this return value the place
              * that is reported. */
@@ -520,7 +528,8 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
                 ctx->write_failed = 1;
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
-        } else {
+        }
+        else {
             ctx->write_failed = 1;
         }
     }
