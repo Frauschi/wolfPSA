@@ -119,10 +119,6 @@ static int run_case(const repeat_case_t *c, size_t index)
     return ret;
 }
 
-/* The PBKDF2 salt is the documented exception to the single-use rule: the
- * PSA API specifies it as "one or more times", with the parts concatenated.
- * Repeating it must be accepted, and must derive the same key as a single
- * input holding the concatenation. */
 static int test_pbkdf2_cost_is_single_use(void)
 {
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
@@ -150,6 +146,8 @@ static int test_pbkdf2_cost_is_single_use(void)
     return 0;
 }
 
+/* PBKDF2 accepts SALT more than once; the parts concatenate, and the result
+ * must match a single input holding that concatenation. */
 static int test_pbkdf2_salt_is_multipart(void)
 {
     static const uint8_t salt[8] = {
