@@ -39,8 +39,9 @@ wolfSSL master.
   reports `PSA_ERROR_INVALID_ARGUMENT`.
 - The POSIX store requires a private store directory on the read path too, not
   only when creating it. A directory that is group- or other-writable, or owned
-  by neither the effective uid nor root, is refused. Stores that relied on a
-  permissive directory will stop opening.
+  by neither the effective uid nor root, is refused, and every ancestor is
+  checked as well (a shared parent such as `/tmp` is accepted when sticky).
+  Stores that relied on a permissive directory will stop opening.
 
 ### Added
 

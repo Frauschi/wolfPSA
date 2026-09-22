@@ -122,19 +122,92 @@ static int wolfPSA_StoreValidateDir(const char* dirPath)
         return WOLFPSA_STORE_IO_ERROR;
     }
 #endif
-    /* The directory must be private: a directory that is writable by group or
-     * other, or that is owned by neither this euid nor root, lets a local peer
-     * rename records out from under the store (key replacement), so fail
-     * closed. Root ownership is accepted (as OpenSSH's safe_path() does)
-     * because a store provisioned by root or by packaging under /var/lib is
-     * still unwritable by any unprivileged peer, and refusing it would break
-     * every daemon that opens keys after dropping privileges. */
+    /* A directory writable by group or other, or owned by neither this euid
+     * nor root, lets a local peer rename records out from under the store.
+     * Root ownership is accepted, as OpenSSH's safe_path() does. */
     if ((st.st_uid != geteuid() && st.st_uid != 0) ||
         (st.st_mode & 0022) != 0) {
         return WOLFPSA_STORE_IO_ERROR;
     }
     return 0;
 #endif
+}
+
+#if !defined(_WIN32) && !defined(_MSC_VER)
+/* A writable ancestor lets a peer rename the whole store aside, so every
+ * component is checked, not just the leaf. */
+static int wolfPSA_StoreValidateAncestor(const char* dirPath)
+{
+    struct stat st;
+    int sticky;
+
+    /* stat(), not lstat(): a symlinked ancestor such as /tmp is fine as long
+     * as what it resolves to passes these same checks. */
+    if (stat(dirPath, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+    if (st.st_uid != geteuid() && st.st_uid != 0) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+#ifdef S_ISVTX
+    sticky = (st.st_mode & S_ISVTX) != 0;
+#else
+    sticky = 0;
+#endif
+    /* Unlike the store directory itself, a shared parent such as /tmp is
+     * acceptable when sticky: only the owner can rename an entry out of it. */
+    if ((st.st_mode & 0022) != 0 && !sticky) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+    return 0;
+}
+
+static int wolfPSA_StoreValidateAncestors(const char* dirPath)
+{
+    char buf[WOLFPSA_STORE_MAX_PATH];
+    size_t len;
+    char* slash;
+
+    len = XSTRLEN(dirPath);
+    if (len >= sizeof(buf)) {
+        return WOLFPSA_STORE_IO_ERROR;
+    }
+    XMEMCPY(buf, dirPath, len + 1);
+
+    for (;;) {
+        slash = strrchr(buf, '/');
+        if (slash == NULL) {
+            /* A relative path bottoms out at the working directory, which the
+             * caller already trusts. */
+            return 0;
+        }
+        if (slash == buf) {
+            buf[1] = '\0';
+        }
+        else {
+            *slash = '\0';
+        }
+
+        if (wolfPSA_StoreValidateAncestor(buf) != 0) {
+            return WOLFPSA_STORE_IO_ERROR;
+        }
+        if (buf[0] == '/' && buf[1] == '\0') {
+            return 0;
+        }
+    }
+}
+#endif
+
+static int wolfPSA_StoreValidatePath(const char* dirPath)
+{
+    int ret = wolfPSA_StoreValidateDir(dirPath);
+
+#if !defined(_WIN32) && !defined(_MSC_VER)
+    if (ret == 0) {
+        ret = wolfPSA_StoreValidateAncestors(dirPath);
+    }
+#endif
+    return ret;
 }
 
 static int wolfPSA_StoreEnsureDir(const char* dirPath)
@@ -145,17 +218,17 @@ static int wolfPSA_StoreEnsureDir(const char* dirPath)
         return WOLFPSA_STORE_IO_ERROR;
     }
 
-    ret = wolfPSA_StoreValidateDir(dirPath);
+    ret = wolfPSA_StoreValidatePath(dirPath);
     if (ret == 0) {
         return 0;
     }
 
     if (WOLFPSA_MKDIR(dirPath) == 0) {
-        return wolfPSA_StoreValidateDir(dirPath);
+        return wolfPSA_StoreValidatePath(dirPath);
     }
 
     if (errno == EEXIST) {
-        return wolfPSA_StoreValidateDir(dirPath);
+        return wolfPSA_StoreValidatePath(dirPath);
     }
 
     return WOLFPSA_STORE_IO_ERROR;
@@ -418,7 +491,7 @@ int wolfPSA_Store_OpenSz(int type, unsigned long id1, unsigned long id2, int
                  * available" rather than an I/O error. */
                 ret = wolfPSA_StoreDirOfName(name, dirPath, sizeof(dirPath));
                 if (ret == 0) {
-                    ret = wolfPSA_StoreValidateDir(dirPath);
+                    ret = wolfPSA_StoreValidatePath(dirPath);
                 }
             }
         }
