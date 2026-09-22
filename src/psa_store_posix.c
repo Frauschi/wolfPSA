@@ -122,10 +122,15 @@ static int wolfPSA_StoreValidateDir(const char* dirPath)
         return WOLFPSA_STORE_IO_ERROR;
     }
 #endif
-    /* The directory must be private: a directory we do not own, or that is
-     * writable by group or other, lets a local peer rename records out from
-     * under the store (key replacement), so fail closed. */
-    if (st.st_uid != geteuid() || (st.st_mode & 0022) != 0) {
+    /* The directory must be private: a directory that is writable by group or
+     * other, or that is owned by neither this euid nor root, lets a local peer
+     * rename records out from under the store (key replacement), so fail
+     * closed. Root ownership is accepted (as OpenSSH's safe_path() does)
+     * because a store provisioned by root or by packaging under /var/lib is
+     * still unwritable by any unprivileged peer, and refusing it would break
+     * every daemon that opens keys after dropping privileges. */
+    if ((st.st_uid != geteuid() && st.st_uid != 0) ||
+        (st.st_mode & 0022) != 0) {
         return WOLFPSA_STORE_IO_ERROR;
     }
     return 0;
@@ -475,7 +480,13 @@ int wolfPSA_Store_Close(void* store)
                 ret = WOLFPSA_STORE_IO_ERROR;
             }
         } else if (ctx->has_temp) {
+            /* A write handle whose write already failed has nothing
+             * committed, and psa_store.h makes this return value the place
+             * that is reported. */
             wolfPSA_StoreAbortTemp(ctx);
+            if (ctx->is_write && ctx->write_failed) {
+                ret = WOLFPSA_STORE_IO_ERROR;
+            }
         }
 
         XMEMSET(ctx, 0, sizeof(*ctx));

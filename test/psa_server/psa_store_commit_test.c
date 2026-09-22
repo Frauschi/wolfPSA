@@ -39,6 +39,9 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#include <signal.h>
+#include <sys/resource.h>
+
 #include <psa_store.h>
 
 #define WOLFPSA_TEST_RECORD "psa_key_%016lx_0000000000000000"
@@ -120,6 +123,72 @@ out:
     return 1;
 }
 
+/* A write that never reached the file must be reported by Close, not just by
+ * Write: psa_store.h makes Close's return value the commit status, and a
+ * WOLFPSA_CUSTOM_STORE consumer may only look at that. RLIMIT_FSIZE forces
+ * the failure; SIGXFSZ is ignored so the write returns EFBIG instead of
+ * killing the test. */
+static int test_write_failure_reported(const char *dir, unsigned long id)
+{
+    static unsigned char data[65536];
+    struct rlimit saved;
+    struct rlimit small;
+    void *store = NULL;
+    void (*old_handler)(int);
+    int entries;
+    int ret;
+    int rc = 1;
+
+    if (getrlimit(RLIMIT_FSIZE, &saved) != 0) {
+        printf("FAIL write-fail: getrlimit failed\n");
+        return 1;
+    }
+    small = saved;
+    small.rlim_cur = 1;
+    if (setrlimit(RLIMIT_FSIZE, &small) != 0) {
+        printf("FAIL write-fail: setrlimit failed\n");
+        return 1;
+    }
+    old_handler = signal(SIGXFSZ, SIG_IGN);
+
+    memset(data, 0x5a, sizeof(data));
+    ret = wolfPSA_Store_OpenSz(WOLFPSA_STORE_KEY, id, 0, 0, (int)sizeof(data),
+                               &store);
+    if (ret != WOLFPSA_STORE_OK) {
+        printf("FAIL write-fail: open status=%d\n", ret);
+        goto restore;
+    }
+
+    ret = wolfPSA_Store_Write(store, data, (int)sizeof(data));
+    if (ret == (int)sizeof(data)) {
+        printf("FAIL write-fail: write unexpectedly succeeded\n");
+        (void)wolfPSA_Store_Close(store);
+        goto restore;
+    }
+
+    ret = wolfPSA_Store_Close(store);
+    if (ret != WOLFPSA_STORE_IO_ERROR) {
+        printf("FAIL write-fail: close status=%d expected=%d\n", ret,
+               WOLFPSA_STORE_IO_ERROR);
+        goto restore;
+    }
+
+    /* Nothing committed, and no temporary left behind. */
+    entries = count_entries(dir);
+    if (entries != 0) {
+        printf("FAIL write-fail: %d entries left in store dir, expected 0\n",
+               entries);
+        goto restore;
+    }
+
+    rc = 0;
+
+restore:
+    (void)signal(SIGXFSZ, old_handler);
+    (void)setrlimit(RLIMIT_FSIZE, &saved);
+    return rc;
+}
+
 static int test_commit_success(const char *dir, unsigned long id)
 {
     char record[512];
@@ -193,11 +262,13 @@ int main(void)
     }
     if (setenv("WOLFPSA_TOKEN_PATH", dir, 1) != 0) {
         printf("psa_store_commit_test: setenv failed\n");
+        (void)rmdir(dir);
         return 1;
     }
 
     ret |= test_commit_failure(dir, 1);
     ret |= test_commit_success(dir, 2);
+    ret |= test_write_failure_reported(dir, 3);
 
     (void)rmdir(dir);
 

@@ -164,6 +164,9 @@ int main(void)
     ret |= test_dir("dir-0707", 0707, PSA_ERROR_STORAGE_FAILURE);
     /* Readable by others but not writable: still private enough. */
     ret |= test_dir("dir-0755", 0755, PSA_SUCCESS);
+    /* The ownership half of the predicate (euid-owned or root-owned accepted,
+     * anything else rejected) is not covered here: creating a directory owned
+     * by a third uid needs privileges CI does not have. */
     ret |= test_read_back_from_unsafe_dir();
 
     if (ret != 0) {

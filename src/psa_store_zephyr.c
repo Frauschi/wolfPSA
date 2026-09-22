@@ -275,9 +275,10 @@ int wolfPSA_Store_Write(void* store, unsigned char* buffer, int len)
     }
 
     /* Commit the whole accumulated object now (atomic) so a storage failure is
-     * reported through this return value rather than swallowed by the void
-     * Close. Re-committing on each Write is harmless for the single-Write usage
-     * in psa_key_storage.c and leaves the final object correct if streamed. */
+     * reported through this return value: psa_its_set is the only commit step
+     * this backend has, and Close has nothing of its own to report.
+     * Re-committing on each Write is harmless for the single-Write usage in
+     * psa_key_storage.c and leaves the final object correct if streamed. */
     st = psa_its_set(ctx->uid, ctx->len, ctx->buf, 0);
     if (st != PSA_SUCCESS) {
         return WOLFPSA_STORE_IO_ERROR;
