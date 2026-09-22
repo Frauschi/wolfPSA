@@ -334,10 +334,9 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
                 return PSA_SUCCESS;
             }
             if (step == PSA_KEY_DERIVATION_INPUT_SECRET) {
+                /* A repeated SECRET is already rejected by the single-use
+                 * check above. */
                 if ((ctx->steps_set & WOLFPSA_KDF_STEP_SALT) == 0) {
-                    return PSA_ERROR_BAD_STATE;
-                }
-                if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) != 0) {
                     return PSA_ERROR_BAD_STATE;
                 }
                 return PSA_SUCCESS;
@@ -379,13 +378,8 @@ static psa_status_t wolfpsa_kdf_validate_step(wolfpsa_kdf_ctx_t *ctx,
                 }
                 return PSA_SUCCESS;
             }
-            if (step == PSA_KEY_DERIVATION_INPUT_SECRET) {
-                if ((ctx->steps_set & WOLFPSA_KDF_STEP_SECRET) != 0) {
-                    return PSA_ERROR_BAD_STATE;
-                }
-                return PSA_SUCCESS;
-            }
-            if (step == PSA_KEY_DERIVATION_INPUT_INFO) {
+            if (step == PSA_KEY_DERIVATION_INPUT_SECRET ||
+                step == PSA_KEY_DERIVATION_INPUT_INFO) {
                 return PSA_SUCCESS;
             }
         }
@@ -723,18 +717,20 @@ psa_status_t psa_key_derivation_input_integer(psa_key_derivation_operation_t *
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
+    /* COST is single-use like the byte-input steps, which are rejected in
+     * wolfpsa_kdf_validate_step(); this path does not go through it. Checked
+     * before the range tests so both entry points agree on the precedence of
+     * a repeated step over a bad value. */
+    if ((ctx->steps_set & WOLFPSA_KDF_STEP_COST) != 0) {
+        return PSA_ERROR_BAD_STATE;
+    }
+
     if (value == 0) {
         return PSA_ERROR_INVALID_ARGUMENT;
     }
 
     if (value > 0xFFFFFFFFu) {
         return PSA_ERROR_NOT_SUPPORTED;
-    }
-
-    /* COST is single-use like the byte-input steps, which are rejected in
-     * wolfpsa_kdf_validate_step(); this path does not go through it. */
-    if ((ctx->steps_set & WOLFPSA_KDF_STEP_COST) != 0) {
-        return PSA_ERROR_BAD_STATE;
     }
 
     ctx->cost = (uint32_t)value;
