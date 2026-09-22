@@ -118,6 +118,7 @@ int main(void)
     }
     if (setenv("WOLFPSA_TOKEN_PATH", dir, 1) != 0) {
         printf("psa_import_zero_length_test: setenv failed\n");
+        (void)rmdir(dir);
         return 1;
     }
 

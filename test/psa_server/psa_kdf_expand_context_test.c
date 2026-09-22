@@ -66,14 +66,17 @@ static const uint8_t rfc5869_okm[42] = {
     0x90, 0x43, 0x4f, 0x64, 0xd0, 0x36, 0x2f, 0x2a,
     0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a, 0x5a, 0x4c,
     0x5d, 0xb0, 0x2d, 0x56, 0xec, 0xc4, 0xc5, 0xbf,
-    0xf7, 0x7b, 0x49, 0xa2, 0x76, 0xad, 0x0a, 0x1c,
-    0x6a, 0x4d
+    0x34, 0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18,
+    0x58, 0x65
 };
 
-static int test_expand_rejects_unconsumed_steps(void)
+/* Each rejected step gets its own operation: PSA puts an operation into an
+ * error state when an input is refused, so nothing may be asserted about
+ * reusing it afterwards. */
+static int test_expand_rejects_step(const char *label,
+                                    psa_key_derivation_step_t step)
 {
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
-    uint8_t out[16];
     psa_status_t status;
     int ret = 0;
 
@@ -86,24 +89,40 @@ static int test_expand_rejects_unconsumed_steps(void)
         sizeof(rfc5869_prk));
     ret |= expect_status("set secret", status, PSA_SUCCESS);
 
-    /* The reported bug: CONTEXT was accepted and ignored. */
-    status = psa_key_derivation_input_bytes(
-        &op, PSA_KEY_DERIVATION_INPUT_CONTEXT, rfc5869_info,
-        sizeof(rfc5869_info));
-    ret |= expect_status("set context", status,
-                         PSA_ERROR_INVALID_ARGUMENT);
+    status = psa_key_derivation_input_bytes(&op, step, rfc5869_info,
+                                            sizeof(rfc5869_info));
+    ret |= expect_status(label, status, PSA_ERROR_INVALID_ARGUMENT);
 
-    /* The whitelist rejects every remaining unrecognized step. */
+    (void)psa_key_derivation_abort(&op);
+
+    return ret;
+}
+
+static int test_expand_rejects_unconsumed_steps(void)
+{
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    uint8_t out[16];
+    psa_status_t status;
+    int ret = 0;
+
+    /* The reported bug: CONTEXT was accepted and ignored. The whitelist
+     * rejects every remaining unconsumed step too. */
+    ret |= test_expand_rejects_step("set context",
+                                    PSA_KEY_DERIVATION_INPUT_CONTEXT);
+    ret |= test_expand_rejects_step("set seed",
+                                    PSA_KEY_DERIVATION_INPUT_SEED);
+    ret |= test_expand_rejects_step("set label",
+                                    PSA_KEY_DERIVATION_INPUT_LABEL);
+
+    /* INFO is the one optional step HKDF-Expand does consume. */
+    status = psa_key_derivation_setup(&op,
+                                      PSA_ALG_HKDF_EXPAND(PSA_ALG_SHA_256));
+    ret |= expect_status("setup", status, PSA_SUCCESS);
+
     status = psa_key_derivation_input_bytes(
-        &op, PSA_KEY_DERIVATION_INPUT_SEED, rfc5869_info,
-        sizeof(rfc5869_info));
-    ret |= expect_status("set seed", status,
-                         PSA_ERROR_INVALID_ARGUMENT);
-    status = psa_key_derivation_input_bytes(
-        &op, PSA_KEY_DERIVATION_INPUT_LABEL, rfc5869_info,
-        sizeof(rfc5869_info));
-    ret |= expect_status("set label", status,
-                         PSA_ERROR_INVALID_ARGUMENT);
+        &op, PSA_KEY_DERIVATION_INPUT_SECRET, rfc5869_prk,
+        sizeof(rfc5869_prk));
+    ret |= expect_status("set secret", status, PSA_SUCCESS);
 
     status = psa_key_derivation_input_bytes(
         &op, PSA_KEY_DERIVATION_INPUT_INFO, rfc5869_info,
@@ -140,7 +159,7 @@ static int test_expand_info_before_secret(void)
 static int test_expand_rfc5869_vector(void)
 {
     psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
-    uint8_t okm[32];
+    uint8_t okm[42];
     psa_status_t status;
     int ret = 0;
 
@@ -158,10 +177,7 @@ static int test_expand_rfc5869_vector(void)
         sizeof(rfc5869_info));
     ret |= expect_status("set info", status, PSA_SUCCESS);
 
-    /* 32 bytes = one HKDF block (T(1)). The second block (T(2)) is
-     * broken in the wolfSSL wc_HKDF_Expand_ex backend (produces
-     * 34007208... instead of f77b49a2...); that is a separate upstream
-     * bug, so this test stays within one block. */
+    /* The full 42 bytes of RFC 5869 A.1, so T(2) is covered too. */
     status = psa_key_derivation_output_bytes(&op, okm, sizeof(okm));
     ret |= expect_status("output", status, PSA_SUCCESS);
     if (ret == 0 && memcmp(okm, rfc5869_okm, sizeof(okm)) != 0) {
@@ -175,6 +191,11 @@ static int test_expand_rfc5869_vector(void)
 
 int main(void)
 {
+    if (psa_crypto_init() != PSA_SUCCESS) {
+        printf("PSA KDF expand context test: psa_crypto_init failed\n");
+        return 1;
+    }
+
     test_expand_rejects_unconsumed_steps();
     test_expand_info_before_secret();
     test_expand_rfc5869_vector();

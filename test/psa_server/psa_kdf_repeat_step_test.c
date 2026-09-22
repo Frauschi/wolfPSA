@@ -123,6 +123,33 @@ static int run_case(const repeat_case_t *c, size_t index)
  * PSA API specifies it as "one or more times", with the parts concatenated.
  * Repeating it must be accepted, and must derive the same key as a single
  * input holding the concatenation. */
+static int test_pbkdf2_cost_is_single_use(void)
+{
+    psa_key_derivation_operation_t op = psa_key_derivation_operation_init();
+    psa_status_t status;
+
+    if (psa_key_derivation_setup(&op,
+                                 PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256)) !=
+        PSA_SUCCESS ||
+        psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST,
+                                         16) != PSA_SUCCESS) {
+        printf("FAIL single-use cost: setup\n");
+        (void)psa_key_derivation_abort(&op);
+        return 1;
+    }
+
+    status = psa_key_derivation_input_integer(&op,
+                                              PSA_KEY_DERIVATION_INPUT_COST,
+                                              16);
+    (void)psa_key_derivation_abort(&op);
+    if (status != PSA_ERROR_BAD_STATE) {
+        printf("FAIL single-use cost: status 0x%08x want 0x%08x\n",
+               (unsigned)status, (unsigned)PSA_ERROR_BAD_STATE);
+        return 1;
+    }
+    return 0;
+}
+
 static int test_pbkdf2_salt_is_multipart(void)
 {
     static const uint8_t salt[8] = {
@@ -147,17 +174,6 @@ static int test_pbkdf2_salt_is_multipart(void)
                                              16) != PSA_SUCCESS);
     if (ret != 0) {
         printf("FAIL multipart salt: setup\n");
-        (void)psa_key_derivation_abort(&split);
-        return 1;
-    }
-
-    /* COST, unlike the salt, is single-use. */
-    status = psa_key_derivation_input_integer(&split,
-                                              PSA_KEY_DERIVATION_INPUT_COST,
-                                              16);
-    if (status != PSA_ERROR_BAD_STATE) {
-        printf("FAIL multipart salt: repeated cost status 0x%08x want 0x%08x\n",
-               (unsigned)status, (unsigned)PSA_ERROR_BAD_STATE);
         (void)psa_key_derivation_abort(&split);
         return 1;
     }
@@ -226,10 +242,16 @@ int main(void)
 {
     size_t i;
 
+    if (psa_crypto_init() != PSA_SUCCESS) {
+        printf("PSA KDF repeat step test: psa_crypto_init failed\n");
+        return 1;
+    }
+
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         failures += run_case(&cases[i], i);
     }
 
+    failures += test_pbkdf2_cost_is_single_use();
     failures += test_pbkdf2_salt_is_multipart();
 
     if (failures != 0) {

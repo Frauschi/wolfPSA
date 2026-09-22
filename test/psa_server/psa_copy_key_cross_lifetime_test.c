@@ -13,12 +13,10 @@
  * The test covers both cross-lifetime directions (which must be rejected)
  * and the two same-lifetime directions (which must keep working).
  *
- * This file is part of wolfPSA.
- *
  * Copyright (C) 2026 wolfSSL Inc.
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * This file is licensed under the 3-clause BSD license. See the file
- * LICENSE or wolfSSL.md in the distribution root for details.
+ * This file is part of wolfPSA. See COPYING in the distribution root.
  */
 
 #include <stdio.h>
@@ -118,7 +116,8 @@ static int run_cross_lifetime_case(psa_key_lifetime_t src_lifetime,
                (unsigned int)status, (unsigned int)expected_status);
         ok = 1;
     } else if (expected_status == PSA_SUCCESS) {
-        if (psa_get_key_attributes(dst_key, &check) != PSA_SUCCESS) {
+        status = psa_get_key_attributes(dst_key, &check);
+        if (status != PSA_SUCCESS) {
             printf("FAIL %s: psa_get_key_attributes: 0x%08x\n", label,
                    (unsigned int)status);
             ok = 1;

@@ -157,6 +157,11 @@ static int test_rejects_oversized_other_secret(void)
 
 int main(void)
 {
+    if (psa_crypto_init() != PSA_SUCCESS) {
+        printf("PSA KDF PSK-TO-MS size test: psa_crypto_init failed\n");
+        return 1;
+    }
+
     test_rejects_oversized_psk();
     test_accepts_max_psk();
     test_rejects_oversized_other_secret();
