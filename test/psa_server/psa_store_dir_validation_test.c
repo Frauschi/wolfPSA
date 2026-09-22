@@ -146,6 +146,59 @@ out:
     return ok ? 0 : 1;
 }
 
+/* A private store directory under a parent a local peer can write is not
+ * safe: the peer renames the parent and substitutes the whole store. */
+static int test_writable_parent_rejected(void)
+{
+    char parent[] = "/tmp/wolfpsa_store_parent_XXXXXX";
+    char dir[sizeof(parent) + 8];
+    psa_key_attributes_t attrs = psa_key_attributes_init();
+    static uint8_t key_data[16];
+    psa_key_id_t key_id = PSA_KEY_ID_NULL;
+    psa_status_t st;
+    int ok = 0;
+
+    if (mkdtemp(parent) == NULL) {
+        printf("FAIL parent-writable: mkdtemp failed\n");
+        return 1;
+    }
+    (void)snprintf(dir, sizeof(dir), "%s/store", parent);
+    if (mkdir(dir, 0700) != 0) {
+        printf("FAIL parent-writable: mkdir failed\n");
+        (void)rmdir(parent);
+        return 1;
+    }
+    /* Writable by other, and not sticky, so a peer can rename "store". */
+    if (chmod(parent, 0707) != 0) {
+        printf("FAIL parent-writable: chmod failed\n");
+        goto out;
+    }
+    if (setenv("WOLFPSA_TOKEN_PATH", dir, 1) != 0) {
+        printf("FAIL parent-writable: setenv failed\n");
+        goto out;
+    }
+
+    memset(key_data, 0x42, sizeof(key_data));
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RAW_DATA);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_EXPORT);
+    psa_set_key_lifetime(&attrs, PSA_KEY_LIFETIME_PERSISTENT);
+
+    st = psa_import_key(&attrs, key_data, sizeof(key_data), &key_id);
+    if (st != PSA_ERROR_STORAGE_FAILURE) {
+        printf("FAIL parent-writable: import status=%d expected=%d\n",
+               (int)st, (int)PSA_ERROR_STORAGE_FAILURE);
+        (void)psa_destroy_key(key_id);
+        goto out;
+    }
+    ok = 1;
+
+out:
+    (void)chmod(parent, 0700);
+    (void)rmdir(dir);
+    (void)rmdir(parent);
+    return ok ? 0 : 1;
+}
+
 int main(void)
 {
     int ret = 0;
@@ -168,6 +221,7 @@ int main(void)
      * anything else rejected) is not covered here: creating a directory owned
      * by a third uid needs privileges CI does not have. */
     ret |= test_read_back_from_unsafe_dir();
+    ret |= test_writable_parent_rejected();
 
     if (ret != 0) {
         printf("PSA store dir validation test: FAIL\n");
