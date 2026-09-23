@@ -74,8 +74,8 @@ it. (Realistic reductions -- dropping asymmetric families, PQC, curves, or
 RSA/ECC -- are supported; dropping the symmetric core is not yet guarded.)
 
 wolfPSA imposes two wolfCrypt requirements of its own, both enforced by a
-build-time `#error` in `src/psa_config.h` rather than by a Kconfig `select`, so a
-config that misses one fails loudly instead of being silently overridden:
+build-time `#error` in `src/psa_config.h`. On the wolfSSL module's default
+config, wolfPSA's Kconfig turns both on; a settings file must set them itself:
 
 - a constant-time AES backend (`WOLFSSL_AES_TOUCH_LINES`, `WC_AES_BITSLICED`, or
   a hardware AES core), because PSA expects AES to be constant time. Define
@@ -86,10 +86,9 @@ config that misses one fails loudly instead of being silently overridden:
 - `WC_ALLOW_ECC_ZERO_HASH` when `HAVE_ECC` is on, because
   `psa_sign_hash()`/`psa_verify_hash()` must accept an all-zero digest.
 
-Beyond those, wolfPSA `select`s nothing crypto-config-wise, and the structural
-profile it needs (a Hash-DRBG, and single-threaded wolfCrypt on a no-threads
-kernel) already comes from the wolfSSL module's own Kconfig and
-`user_settings.h` defaults. The wolfSSL module stays
+Beyond those, the structural profile it needs (a Hash-DRBG, and single-threaded
+wolfCrypt on a no-threads kernel) already comes from the wolfSSL module's own
+Kconfig and `user_settings.h` defaults. The wolfSSL module stays
 entirely wolfPSA-unaware, and `WOLFSSL_PSA_ENGINE` is defined only for wolfPSA's
 own sources. `WOLFCRYPT_ONLY` is likewise untouched: crypto-only versus TLS
 coexistence is a user choice (see below), not a wolfPSA requirement.
