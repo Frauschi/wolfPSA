@@ -27,6 +27,7 @@ config WOLFPSA
 	depends on WOLFSSL
 	default y if PSA_CRYPTO_PROVIDER_CUSTOM
 	select PSA_CRYPTO_CLIENT
+	select WOLFSSL_ECC_ALLOW_ZERO_HASH
 	# wolfPSA does not provide its own wolfCrypt configuration; it derives the
 	# PSA surface from whatever config the wolfSSL module was built with. The
 	# structural profile its RNG needs -- a Hash-DRBG (seeded by the wolfSSL
