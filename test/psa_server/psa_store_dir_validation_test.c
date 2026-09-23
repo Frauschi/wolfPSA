@@ -295,7 +295,10 @@ static int test_relative_path_checks_cwd(void)
 out:
     (void)chmod(dir, 0700);
     (void)rmdir(".store");
-    (void)chdir(cwd);
+    if (chdir(cwd) != 0) {
+        printf("FAIL relative-cwd: restoring the cwd failed\n");
+        ok = 0;
+    }
     (void)rmdir(dir);
     token_restore();
     return ok ? 0 : 1;
