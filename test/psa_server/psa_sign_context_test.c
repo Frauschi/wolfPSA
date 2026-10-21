@@ -391,8 +391,8 @@ done:
 
 /*
  * Test 6: HashML-DSA — psa_sign_hash_with_context / psa_verify_hash_with_context.
- *   - Key policy: PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256).
- *   - Compute SHA-256 digest, sign_hash_with_context("abc").
+ *   - Key policy: PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384).
+ *   - Compute SHA-384 digest, sign_hash_with_context("abc").
  *   - verify_hash_with_context same context → PSA_SUCCESS.
  *   - verify_hash_with_context different context → PSA_ERROR_INVALID_SIGNATURE.
  */
@@ -403,7 +403,7 @@ static int test_hash_mldsa65_context(void)
     psa_status_t st;
     uint8_t sig[MLDSA_65_SIG_SIZE];
     size_t sig_len = 0;
-    uint8_t hash[PSA_HASH_LENGTH(PSA_ALG_SHA_256)];
+    uint8_t hash[PSA_HASH_LENGTH(PSA_ALG_SHA_384)];
     size_t hash_len = 0;
     static const uint8_t ctx[]       = "abc";
     static const uint8_t ctx_other[] = "xyz";
@@ -414,7 +414,7 @@ static int test_hash_mldsa65_context(void)
     psa_set_key_usage_flags(&attrs,
         PSA_KEY_USAGE_SIGN_HASH   | PSA_KEY_USAGE_VERIFY_HASH |
         PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE);
-    psa_set_key_algorithm(&attrs, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256));
+    psa_set_key_algorithm(&attrs, PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384));
 
     st = psa_generate_key(&attrs, &key_id);
     if (st == PSA_ERROR_NOT_SUPPORTED) {
@@ -424,8 +424,8 @@ static int test_hash_mldsa65_context(void)
     if (expect_status("hash_mldsa65: generate_key", st, PSA_SUCCESS) != 0)
         return 1;
 
-    /* Compute SHA-256 digest of the message */
-    st = psa_hash_compute(PSA_ALG_SHA_256,
+    /* Compute SHA-384 digest of the message */
+    st = psa_hash_compute(PSA_ALG_SHA_384,
                           g_msg, sizeof(g_msg) - 1,
                           hash, sizeof(hash), &hash_len);
     if (expect_status("hash_mldsa65: psa_hash_compute", st,
@@ -436,7 +436,7 @@ static int test_hash_mldsa65_context(void)
 
     /* Sign hash with context "abc" */
     st = psa_sign_hash_with_context(key_id,
-                                    PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
+                                    PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384),
                                     hash, hash_len,
                                     ctx, sizeof(ctx) - 1,
                                     sig, sizeof(sig), &sig_len);
@@ -448,7 +448,7 @@ static int test_hash_mldsa65_context(void)
 
     /* Verify same context → OK */
     st = psa_verify_hash_with_context(key_id,
-                                      PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
+                                      PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384),
                                       hash, hash_len,
                                       ctx, sizeof(ctx) - 1,
                                       sig, sig_len);
@@ -460,7 +460,7 @@ static int test_hash_mldsa65_context(void)
 
     /* Verify different context → INVALID_SIGNATURE */
     st = psa_verify_hash_with_context(key_id,
-                                      PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256),
+                                      PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384),
                                       hash, hash_len,
                                       ctx_other, sizeof(ctx_other) - 1,
                                       sig, sig_len);
