@@ -27,7 +27,7 @@
  *  3. Import public key with bits=0 (inference from length); verify with it
  *  4. Deterministic vs hedged: same message, deterministic produces identical
  *     signatures, hedged produces different ones
- *  5. HashML-DSA(SHA-256): sign_message + verify_message; cross-path
+ *  5. HashML-DSA(SHA-384): sign_message + verify_message; cross-path
  *     verify_hash (caller-hashes) and sign_hash + verify_message
  *  6. psa_sign_hash with PSA_ALG_ML_DSA -> PSA_ERROR_INVALID_ARGUMENT
  *  7. Import seed with bits=0 -> PSA_ERROR_INVALID_ARGUMENT; with bits=192 ->
@@ -435,9 +435,9 @@ static int test_deterministic_vs_hedged(void)
 }
 
 /* -------------------------------------------------------------------------
- * Case 5: HashML-DSA(SHA-256): cross-path interop
+ * Case 5: HashML-DSA(SHA-384): cross-path interop
  *   a) sign_message -> verify_message
- *   b) psa_hash_compute(SHA-256) -> verify_hash with the same sig
+ *   b) psa_hash_compute(SHA-384) -> verify_hash with the same sig
  *   c) sign_hash -> verify_message
  * ---------------------------------------------------------------------- */
 
@@ -448,7 +448,7 @@ static int test_hash_mldsa_interop(void)
     return 0;
 #else
     static const psa_algorithm_t alg =
-        PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_256);
+        PSA_ALG_HASH_ML_DSA(PSA_ALG_SHA_384);
     static const psa_key_usage_t usage =
         PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE |
         PSA_KEY_USAGE_SIGN_HASH   | PSA_KEY_USAGE_VERIFY_HASH;
@@ -459,7 +459,7 @@ static int test_hash_mldsa_interop(void)
     uint8_t sig_msg[3309];  /* ML-DSA-65 max sig */
     uint8_t sig_hash[3309];
     size_t sig_msg_len = 0, sig_hash_len = 0;
-    uint8_t digest[32]; /* SHA-256 */
+    uint8_t digest[PSA_HASH_LENGTH(PSA_ALG_SHA_384)];
     size_t digest_len = 0;
     psa_status_t st;
 
@@ -483,9 +483,9 @@ static int test_hash_mldsa_interop(void)
     }
 
     /* 5b: compute digest, then verify_hash (caller-hashes path) */
-    st = psa_hash_compute(PSA_ALG_SHA_256, msg, sizeof(msg) - 1,
+    st = psa_hash_compute(PSA_ALG_SHA_384, msg, sizeof(msg) - 1,
                           digest, sizeof(digest), &digest_len);
-    if (check_status(st, "SHA-256 hash_compute for HashML-DSA") != 0) {
+    if (check_status(st, "SHA-384 hash_compute for HashML-DSA") != 0) {
         (void)psa_destroy_key(key);
         return 1;
     }
